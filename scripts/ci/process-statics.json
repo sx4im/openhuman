@@ -128,5 +128,15 @@
     "category": "A",
     "reason": "The process's registry of weak handles to the rebindable session-store providers a host installed, so a workspace switch (storage::rebind) can point each at the new backend. It holds no records and no tenant state, only Weak references; the stores' data lives in the storage backend. A test builds its own StoreRegistry, so rebinding one never moves another's stores.",
     "verification": "agent/session_store/rebound_tests.rs: a_registry_rebind_leaves_other_registries_alone"
+  },
+  {
+    "file": "crates/openhuman-core/src/agent/harness/host_definition.rs",
+    "scope": "",
+    "name": "GLOBAL",
+    "type": "RwLock<Option<Arc<AgentDefinitionRegistry>>>",
+    "count": 1,
+    "category": "A",
+    "reason": "Process-wide agent definition registry: built-in harness definitions plus config allowlist overlays applied at boot and on update_agent. The same definitions serve every tenant in the process; it carries no per-tenant data.",
+    "verification": "agent/harness/host_definition_tests.rs: apply_registry_entries_refreshes_the_process_registry"
   }
 ]
