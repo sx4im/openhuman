@@ -38,7 +38,9 @@ use serde_json::{json, Value};
 use tinyflows::caps::MemoryProvider;
 use tinyflows::error::{EngineError, Result};
 
-use crate::agent::turn_origin::{self, AgentTurnOrigin, TrustedAutomationSource};
+#[cfg(test)]
+use crate::agent::turn_origin;
+use crate::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::config::Config;
 use crate::flows::{
     cross_flow_filter, flow_filter, flow_key_of, flow_key_tag, forget_matching, remember_keyed,
@@ -65,6 +67,8 @@ const LOG_PREFIX: &str = "[memory-node-host]";
 /// security contract; see [`super::caps::OpenHumanAgentRunner`] for the
 /// sibling adapter this one's tier-gate wiring mirrors.
 pub struct OpenHumanMemory {
+    /// The context the run acts under; carries the run's trusted turn origin.
+    pub(crate) ctx: crate::core::runtime::DispatchCtx,
     pub(crate) config: Arc<Config>,
     pub(crate) security: Arc<SecurityPolicy>,
     /// The run's approval context (flow run correlation).
@@ -82,7 +86,7 @@ impl OpenHumanMemory {
     /// so a `scope: "flow"` node can never be pointed at another flow's
     /// namespace by a crafted `=`-binding.
     fn trusted_flow_id(&self) -> Result<String> {
-        match crate::core::runtime::DispatchCtx::ambient_turn().turn_origin() {
+        match self.ctx.turn_origin() {
             Some(AgentTurnOrigin::TrustedAutomation {
                 job_id,
                 source: TrustedAutomationSource::Workflow { .. },
@@ -145,6 +149,7 @@ impl OpenHumanMemory {
         let summary = summarize_action(&tool_name, action);
         let redacted = redact_args(action);
         let (outcome, audit_id) = gate_call_for_tier(
+            &self.ctx,
             &self.approval,
             tier_decision,
             &tool_name,

@@ -213,6 +213,8 @@ async fn rig_with_peers(module_id: &'static str, others: &[&'static str]) -> Rig
         trail.clone(),
     ));
     attach(&modules, &host_connection, host).await.unwrap();
+    // TinyBus rejects module roots beneath symlinked ancestors. macOS exposes
+    // `/tmp` through `/var`, so stage under its canonical path.
     let temp_root = std::env::temp_dir()
         .canonicalize()
         .expect("canonical temporary directory");

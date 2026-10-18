@@ -4,7 +4,6 @@
 //! to a failed turn. Called from `start_chat` and `spawn_parallel_turn`
 //! (`ops/start_chat.rs`/`ops/parallel_turn.rs`) once the message has been validated.
 
-use crate::core::runtime::DispatchCtx;
 use std::sync::Arc;
 use tinyagents_harness::run_queue::RunQueue;
 
@@ -123,7 +122,7 @@ pub(crate) async fn run_chat_task(
     // policy (which grants `action_dir` as a trusted root) and its tools are
     // all built on the thread's folder.
     let thread_dir =
-        crate::threads::ops::thread_working_dir(&ctx, config.workspace_dir.clone(), thread_id)
+        crate::threads::ops::thread_working_dir(ctx, config.workspace_dir.clone(), thread_id)
             .await?;
     if let Some(dir) = &thread_dir {
         log::debug!("[web-channel] thread working folder applied thread_id={thread_id}");
@@ -164,7 +163,7 @@ pub(crate) async fn run_chat_task(
     let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(256);
     // Under the web-turn guard, fold every event into the turn's activity
     // record (the idle guard's input) on its way to the bridge.
-    let progress_rx = super::turn_activity::tap(activity, progress_rx, 256);
+    let progress_rx = super::turn_activity::tap(ctx, activity, progress_rx, 256);
     // The channel is fresh here. Record the user input even if the turn fails
     // before a committed reply can emit its final TurnContent event.
     let _ = progress_tx.try_send(AgentProgress::TurnContent {

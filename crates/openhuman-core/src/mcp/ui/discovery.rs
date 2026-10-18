@@ -7,7 +7,7 @@
 use serde_json::Value;
 
 fn template_uri(meta: &Value) -> Option<String> {
-    tinymcp::ui::template_from_meta(meta).map(|(uri, _)| uri)
+    tinymcp_bus::ui::template_from_meta(meta).map(|(uri, _)| uri)
 }
 
 fn meta_keys(meta: &Value) -> Vec<String> {

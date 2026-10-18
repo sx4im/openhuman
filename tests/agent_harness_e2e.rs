@@ -659,6 +659,7 @@ async fn wait_for_terminal_request(
 struct Stack {
     rpc_base: String,
     _home_guard: EnvVarGuard,
+    _action_dir_guard: EnvVarGuard,
     _workspace_guard: EnvVarGuard,
     _backend_guard: EnvVarGuard,
     _vite_guard: EnvVarGuard,
@@ -704,8 +705,11 @@ async fn boot_stack_with_config(extra_config: &str) -> Stack {
     let tmp = tempdir().expect("tempdir");
     let home = tmp.path().to_path_buf();
     let openhuman_home = home.join(".openhuman");
+    let action_dir = home.join("OpenHuman/projects");
+    std::fs::create_dir_all(&action_dir).expect("create action directory");
 
     let home_guard = EnvVarGuard::set_to_path("HOME", &home);
+    let action_dir_guard = EnvVarGuard::set_to_path("OPENHUMAN_ACTION_DIR", &action_dir);
     let workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
     let backend_guard = EnvVarGuard::unset("BACKEND_URL");
     let vite_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
@@ -742,6 +746,7 @@ async fn boot_stack_with_config(extra_config: &str) -> Stack {
     Stack {
         rpc_base,
         _home_guard: home_guard,
+        _action_dir_guard: action_dir_guard,
         _workspace_guard: workspace_guard,
         _backend_guard: backend_guard,
         _vite_guard: vite_guard,
@@ -782,6 +787,32 @@ async fn send_web_chat(
         .and_then(Value::as_str)
         .unwrap_or_else(|| panic!("accepted web chat has no request_id: {result}"))
         .to_owned()
+}
+
+async fn bind_thread_action_dir(stack: &Stack, thread_id: &str, action_dir: &Path) {
+    let created = post_json_rpc(
+        &stack.rpc_base,
+        7_900,
+        "openhuman.threads_upsert",
+        json!({
+            "id": thread_id,
+            "title": thread_id,
+            "created_at": "2026-01-01T00:00:00Z"
+        }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&created, "upsert attachment test thread");
+    let bound = post_json_rpc(
+        &stack.rpc_base,
+        7_901,
+        "openhuman.threads_update_working_dir",
+        json!({
+            "thread_id": thread_id,
+            "action_dir": action_dir.to_string_lossy()
+        }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&bound, "bind attachment test thread action directory");
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -974,6 +1005,12 @@ async fn subagent_delegation_happy_path_inner() {
     let fixture_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/images/handoff-hero.png");
     let stack = boot_stack().await;
+    bind_thread_action_dir(
+        &stack,
+        "thread-sub",
+        &stack._tmp.path().join("OpenHuman/projects"),
+    )
+    .await;
     let image_path = Path::new(&std::env::var("HOME").expect("test HOME"))
         .join("OpenHuman/projects/delegation-vision.png");
     std::fs::create_dir_all(image_path.parent().expect("action directory"))
@@ -1418,6 +1455,12 @@ async fn approval_gate_approve_flow_inner() {
         text_completion("Done. File written: APPROVED_WRITE_CANARY"),
     ]);
     let stack = boot_stack_with_config(SUPERVISED_AUTONOMY_CONFIG).await;
+    bind_thread_action_dir(
+        &stack,
+        "thread-approve",
+        &stack._tmp.path().join("OpenHuman/projects"),
+    )
+    .await;
 
     // Pre-create the file so file_write sees it as an existing file and
     // external_effect_with_args returns true → approval gate intercepts.
@@ -2188,6 +2231,12 @@ async fn multi_hop_delegation_chain_inner() {
     let fixture_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/images/handoff-hero.png");
     let stack = boot_stack().await;
+    bind_thread_action_dir(
+        &stack,
+        "thread-multihop",
+        &stack._tmp.path().join("OpenHuman/projects"),
+    )
+    .await;
     let image_path = Path::new(&std::env::var("HOME").expect("test HOME"))
         .join("OpenHuman/projects/delegation-vision.png");
     std::fs::create_dir_all(image_path.parent().expect("action directory"))

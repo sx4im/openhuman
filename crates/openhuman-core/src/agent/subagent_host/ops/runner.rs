@@ -281,7 +281,7 @@ pub(crate) async fn run_subagent_direct(
 
         // Loaded once per spawn (see `LoadedConfig`), after the tier gate so a
         // rejected spawn never initialises config on first run.
-        let loaded_config: LoadedConfig = Box::pin(crate::config::ops::load_current_or_init_ambient())
+        let loaded_config: LoadedConfig = Box::pin(crate::config::ops::load_current_or_init(&options.run_context.dispatch_ctx()))
             .await
             .map(std::sync::Arc::new)
             .map_err(|e| e.to_string());

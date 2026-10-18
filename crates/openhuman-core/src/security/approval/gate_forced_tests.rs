@@ -130,7 +130,12 @@ async fn forced_approval_still_denies_automation_and_channel_origins() {
 
 #[test]
 fn saas_outcome_is_absent_outside_saas() {
-    assert!(saas_outcome_with(&crate::core::runtime::DispatchCtx::ambient(), false, "shell").is_none());
+    assert!(saas_outcome_with(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        false,
+        "shell"
+    )
+    .is_none());
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Tool-provided UI in the chat: MCP Apps widgets, OpenAI Apps SDK widgets,
 //! skill views, and the links a tool result offers.
 //!
-//! - [`resolve`] applies `tinymcp::ui`'s rules to one call's descriptor
+//! - [`resolve`] applies `tinymcp_bus::ui`'s rules to one call's descriptor
 //!   `_meta` and result, giving a [`types::McpUiPresentation`], the metadata
 //!   the chat surface renders, and caches any document the result carried.
 //! - [`decorate`] applies that to every MCP tool path.

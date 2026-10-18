@@ -165,7 +165,7 @@ async fn test_dispatch_write_tool_rpc_error_records_audit_and_returns_tool_error
     let params = serde_json::Map::new();
 
     let result = dispatch_write_tool(
-&crate::core::runtime::DispatchCtx::ambient(),
+        &crate::core::runtime::DispatchCtx::ambient(),
         "memory.learn",
         "openhuman.memory_learn",
         &params,
@@ -251,7 +251,7 @@ async fn test_dispatch_write_tool_unregistered_rpc_is_a_tool_error() {
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
 
     let val = dispatch_write_tool(
-&crate::core::runtime::DispatchCtx::ambient(),
+        &crate::core::runtime::DispatchCtx::ambient(),
         "memory.forget",
         "openhuman.memory_no_such_method",
         &Map::new(),

@@ -6,7 +6,7 @@ use super::failure_classification::classify_agent_anyhow_for_user;
 use super::origin_context::build_run_prompt;
 use crate::agent::OpenHumanSessionHost;
 use crate::config::Config;
-use {tinyflows_schedule::types::CronJob, tinyflows_schedule::types::SessionTarget};
+use {tinyflows_bus::schedule::types::CronJob, tinyflows_bus::schedule::types::SessionTarget};
 
 /// Recency window the morning briefing installs around its turn so Composio
 /// task-fetch tools only surface tasks created/changed in the last day. Read
@@ -20,7 +20,13 @@ pub(super) async fn run_agent_job(
     job: &CronJob,
 ) -> (bool, String, Option<String>) {
     let run_id = uuid::Uuid::new_v4().to_string();
-    run_agent_job_for_run(&crate::core::runtime::DispatchCtx::host_default(), config, job, &run_id).await
+    run_agent_job_for_run(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        config,
+        job,
+        &run_id,
+    )
+    .await
 }
 
 pub(super) async fn run_agent_job_for_run(

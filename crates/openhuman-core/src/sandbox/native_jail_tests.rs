@@ -71,7 +71,14 @@ fn native_jail_request_preserves_grants_and_requires_enforcement() -> anyhow::Re
         env_passthrough: Vec::new(),
         docker_overrides: None,
     };
-    let request = jail_request(&policy, SandboxIsolation::Isolated)?;
+    let account = tempfile::tempdir()?;
+    let mut config = Config::default();
+    config.config_path = account.path().join("config.toml");
+    std::fs::write(&config.config_path, "")?;
+    let _keyring = crate::security::secret_storage::store::test_scope::ScopedWorkspace::new(
+        account.path().join("workspace"),
+    );
+    let request = jail_request(&config, &policy, SandboxIsolation::Isolated)?;
 
     assert_eq!(request.read_only, [readonly.path().to_str().unwrap()]);
     // TinyBox appends its own per-call scratch directory to the writable grants.
@@ -84,13 +91,226 @@ fn native_jail_request_preserves_grants_and_requires_enforcement() -> anyhow::Re
     // Folder confinement keeps the grants and the network decision, and asks
     // TinyBox for what Seatbelt can give: declared constraints, no process
     // isolation.
-    let confined = jail_request(&policy, SandboxIsolation::FolderConfined)?;
+    let confined = jail_request(&config, &policy, SandboxIsolation::FolderConfined)?;
     assert_eq!(confined.read_only, request.read_only);
     assert_eq!(confined.read_write, request.read_write);
     assert!(!confined.allow_net);
     assert_eq!(confined.enforcement, contract::JailEnforcement::Declared);
     assert!(!confined.require_process_isolation);
+
+    // Landlock is deny-default, so the isolated jail needs no read denials;
+    // Seatbelt reads allow-default, so folder confinement names the
+    // credential stores this host has and OpenHuman's own credential files.
+    assert!(request.deny_read.is_empty());
+    let account_config = config.config_path.canonicalize()?;
+    assert!(confined
+        .deny_read
+        .contains(&account_config.to_str().unwrap().to_owned()));
+    for denied in &confined.deny_read {
+        let denied = std::path::Path::new(denied);
+        assert!(
+            crate::security::SecurityPolicy::is_always_forbidden(denied)
+                || denied == account_config,
+            "{} is not a protected credential store",
+            denied.display()
+        );
+    }
     Ok(())
+}
+
+/// A home folder holding the given credential stores: a trailing `/` makes a
+/// directory, anything else a file.
+fn home_with(stores: &[&str]) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    for store in stores {
+        let path = home.path().join(store.trim_end_matches('/'));
+        if store.ends_with('/') {
+            std::fs::create_dir_all(&path).unwrap();
+        } else {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "secret").unwrap();
+        }
+    }
+    home
+}
+
+fn real(home: &tempfile::TempDir, store: &str) -> String {
+    home.path()
+        .join(store)
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn folder_confinement_denies_the_credential_stores_that_exist() {
+    let home = home_with(&[
+        ".ssh/",
+        ".aws/",
+        "Library/Keychains/",
+        ".netrc",
+        ".cargo/credentials.toml",
+    ]);
+    let root = tempfile::tempdir().unwrap();
+
+    let denied = credential_denials(
+        crate::security::policy::home_credential_stores(home.path()),
+        root.path(),
+        &[],
+    )
+    .unwrap();
+
+    // Absent stores (`.gnupg`, `.kube`, `.npmrc`, ...) are not sent.
+    assert_eq!(
+        denied,
+        [
+            real(&home, ".ssh"),
+            real(&home, ".aws"),
+            real(&home, "Library/Keychains"),
+            real(&home, ".netrc"),
+            real(&home, ".cargo/credentials.toml"),
+        ]
+    );
+}
+
+#[test]
+fn a_workspace_inside_a_credential_store_is_refused() {
+    let home = home_with(&[".ssh/", ".aws/project/"]);
+
+    // Denying `~/.aws` would take the workspace away, and skipping it would
+    // leave `~/.aws/credentials` readable, so the jail is refused.
+    let err = credential_denials(
+        crate::security::policy::home_credential_stores(home.path()),
+        &home.path().join(".aws/project"),
+        &[],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("`.aws`"), "{err}");
+    // The error names the store, never the user's path to it.
+    assert!(!err.contains(home.path().to_str().unwrap()), "{err}");
+}
+
+#[test]
+fn a_writable_grant_inside_a_credential_store_is_refused() {
+    let home = home_with(&[".kube/"]);
+    let root = tempfile::tempdir().unwrap();
+
+    let err = credential_denials(
+        crate::security::policy::home_credential_stores(home.path()),
+        root.path(),
+        &[home.path().join(".kube")],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("`.kube`"), "{err}");
+}
+
+#[test]
+fn a_store_inside_a_writable_grant_is_still_denied() {
+    let home = home_with(&[".ssh/", ".cargo/credentials.toml"]);
+    let root = tempfile::tempdir().unwrap();
+
+    // Seatbelt carves the store out of the grant; a store that holds nothing
+    // of the jail's is denied as usual.
+    let denied = credential_denials(
+        crate::security::policy::home_credential_stores(home.path()),
+        root.path(),
+        &[home.path().join(".cargo")],
+    )
+    .unwrap();
+
+    assert_eq!(
+        denied,
+        [real(&home, ".ssh"), real(&home, ".cargo/credentials.toml")]
+    );
+}
+
+#[test]
+fn nothing_to_deny_means_no_credential_denials() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(credential_denials(Vec::new(), root.path(), &[])
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn openhumans_own_credential_files_are_denied_when_present() {
+    // The account folder: config.toml and the credential stores beside it, the
+    // core workspace below it with the keyring file and TinyBox's scratch.
+    let account = tempfile::tempdir().unwrap();
+    let workspace = account.path().join("workspace");
+    let scratch = workspace.join("artifacts/sandbox-scratch/shell-1");
+    std::fs::create_dir_all(&scratch).unwrap();
+    let mut config = Config::default();
+    config.config_path = account.path().join("config.toml");
+    let _keyring =
+        crate::security::secret_storage::store::test_scope::ScopedWorkspace::new(&workspace);
+    let files = [
+        config.config_path.clone(),
+        account.path().join("auth-profiles.json"),
+        account.path().join("http-credentials.json"),
+        workspace.join("secrets.enc"),
+    ];
+    for file in &files {
+        std::fs::write(file, "secret").unwrap();
+    }
+    let root = tempfile::tempdir().unwrap();
+
+    let denied = credential_denials(
+        crate::security::credentials::credential_files(&config),
+        root.path(),
+        &[scratch.clone()],
+    )
+    .unwrap();
+
+    let mut expected: Vec<String> = files
+        .iter()
+        .map(|file| file.canonicalize().unwrap().to_str().unwrap().to_owned())
+        .collect();
+    let mut sorted = denied.clone();
+    sorted.sort();
+    expected.sort();
+    assert_eq!(sorted, expected);
+    // Files only: none of them is, or contains, the jail's scratch directory.
+    let scratch = scratch.canonicalize().unwrap();
+    for file in &denied {
+        assert!(!scratch.starts_with(file), "{file} covers the scratch dir");
+    }
+
+    // A credential file that does not exist is not sent.
+    std::fs::remove_file(account.path().join("http-credentials.json")).unwrap();
+    let denied = credential_denials(
+        crate::security::credentials::credential_files(&config),
+        root.path(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(denied.len(), 3);
+    assert!(!denied
+        .iter()
+        .any(|file| file.ends_with("http-credentials.json")));
+}
+
+#[test]
+fn every_denied_store_is_one_the_path_floor_forbids() {
+    let home = std::path::Path::new("/home/someone");
+    let stores = crate::security::policy::home_credential_stores(home);
+
+    assert!(stores.contains(&home.join(".ssh")));
+    assert!(stores.contains(&home.join("Library/Keychains")));
+    assert!(stores.contains(&home.join(".git-credentials")));
+    for store in &stores {
+        assert!(
+            crate::security::SecurityPolicy::is_always_forbidden(store),
+            "{} is not on the is_always_forbidden floor",
+            store.display()
+        );
+    }
 }
 
 #[cfg(feature = "modules")]
@@ -139,6 +359,7 @@ async fn disabled_tinybox_module_never_falls_back_to_host_execution() -> anyhow:
     config.modules.enabled = false;
 
     let result = execute(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &config,
         &policy,
         &format!("touch '{}'", marker.display()),
@@ -251,6 +472,7 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
         docker_overrides: None,
     };
     let output = execute(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &config,
         &policy,
         "printf tinybox-jailed-ok; printf safe-error >&2",
@@ -266,6 +488,7 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
     assert_eq!(output.stderr, "safe-error");
 
     let output = execute(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &config,
         &policy,
         "i=0; while [ $i -lt 1500 ]; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; i=$((i + 1)); done",
@@ -284,6 +507,7 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
     );
 
     let output = super::super::shell_exec::run_host(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &config,
         "printf cron-module-ok; printf cron-stderr >&2",
         workspace.path(),
@@ -299,6 +523,7 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
     assert_eq!(output.stderr, "cron-stderr");
 
     let output = super::super::shell_exec::run_host(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &config,
         "false | true",
         workspace.path(),
@@ -312,6 +537,7 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
     assert!(output.success(), "cron preserves default pipeline status");
 
     let output = super::super::shell_exec::run_host(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &config,
         "sleep 10",
         workspace.path(),

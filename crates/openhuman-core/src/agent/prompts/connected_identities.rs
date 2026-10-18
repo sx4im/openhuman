@@ -35,19 +35,20 @@ async fn render_section(ctx: &crate::core::runtime::DispatchCtx) -> String {
             return String::new();
         }
     };
-    let identities =
-        match crate::integrations::composio::identity_store::load_connected_identities(&config)
-            .await
-        {
-            Ok(identities) => identities,
-            Err(error) => {
-                tracing::debug!(
-                    %error,
-                    "[prompts] render_connected_identities: load_connected_identities failed"
-                );
-                return String::new();
-            }
-        };
+    let identities = match crate::integrations::composio::identity_store::load_connected_identities(
+        ctx, &config,
+    )
+    .await
+    {
+        Ok(identities) => identities,
+        Err(error) => {
+            tracing::debug!(
+                %error,
+                "[prompts] render_connected_identities: load_connected_identities failed"
+            );
+            return String::new();
+        }
+    };
     // The section is rendered by the connector module (`NormalizeIdentities`).
     crate::integrations::composio::contract::render_connected_identities_section(
         &config,

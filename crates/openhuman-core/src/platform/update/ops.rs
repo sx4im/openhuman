@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::config::{self, UpdateConfig, UpdateRestartStrategy};
+use crate::config::{UpdateConfig, UpdateRestartStrategy};
 use crate::core::Outcome;
 use crate::platform::update;
 use crate::platform::update::types::{UpdateApplyResult, UpdateInfo, UpdateRunResult, VersionInfo};
@@ -21,7 +21,7 @@ async fn enforce_update_mutation_policy(
     ctx: &DispatchCtx,
     method: &str,
 ) -> Result<UpdateConfig, String> {
-    let policy = load_update_policy(&ctx).await.map_err(|err| {
+    let policy = load_update_policy(ctx).await.map_err(|err| {
         let message = format!(
             "{method} blocked: {err}; failing closed because update policy could not be loaded"
         );
@@ -183,7 +183,7 @@ pub async fn update_version() -> Outcome<Value> {
 /// core process will exit shortly afterwards.
 pub async fn update_run(ctx: &DispatchCtx) -> Outcome<Value> {
     log::info!("[update:rpc] update_run invoked");
-    let policy = match enforce_update_mutation_policy(&ctx, "openhuman.update_run").await {
+    let policy = match enforce_update_mutation_policy(ctx, "openhuman.update_run").await {
         Ok(policy) => policy,
         Err(error) => {
             return Outcome::single_log(
@@ -356,7 +356,7 @@ pub async fn update_apply(
         download_url,
         asset_name,
     );
-    let policy = match enforce_update_mutation_policy(&ctx, "openhuman.update_apply").await {
+    let policy = match enforce_update_mutation_policy(ctx, "openhuman.update_apply").await {
         Ok(policy) => policy,
         Err(error) => {
             return Outcome::single_log(

@@ -123,7 +123,7 @@ pub async fn tool_call(
         .tool_descriptor(&server_id, &tool_name)
         .await
         .ok_or_else(|| format!("`{tool_name}` is not offered by this server"))?;
-    if !tinymcp::ui::visible_to_app(descriptor.meta.as_ref()) {
+    if !tinymcp_bus::ui::visible_to_app(descriptor.meta.as_ref()) {
         tracing::debug!(
             server_id,
             tool_name,
@@ -131,7 +131,7 @@ pub async fn tool_call(
         );
         return Err(format!("`{tool_name}` cannot be called from a widget"));
     }
-    let read_only = tinymcp::ui::is_read_only(descriptor.annotations.as_ref());
+    let read_only = tinymcp_bus::ui::is_read_only(descriptor.annotations.as_ref());
     if !read_only && !confirmed {
         tracing::debug!(
             server_id,

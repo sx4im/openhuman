@@ -113,18 +113,9 @@ const STORAGE_LIB_FILTERS = [
  * @param {Record<string, boolean>} opts.areas  from areasFromEnv()
  * @param {object} opts.env  process environment (profile paths only)
  * @param {boolean} [opts.isPullRequest]
- * @param {boolean} [opts.tinymoldOnPath]  whether a `tinymold` binary runs
- *   here (lanes.mjs probes it; the plan itself stays pure)
- * @returns {{profile: string, lanes: Lane[], rustWrapper: string|null,
- *   tinymoldLog: string|null}}
+ * @returns {{profile: string, lanes: Lane[]}}
  */
-export function buildPlan({
-  profile,
-  areas,
-  env = {},
-  isPullRequest = true,
-  tinymoldOnPath = false,
-}) {
+export function buildPlan({ profile, areas, env = {}, isPullRequest = true }) {
   if (profile !== "ex63" && profile !== "hosted") {
     throw new Error(`unknown profile "${profile}" (expected ex63 or hosted)`);
   }
@@ -144,46 +135,32 @@ export function buildPlan({
   const core = areas.rustCore;
 
   // ex63: one throwaway target dir per lane so lanes never queue on cargo's
-  // build-dir lock, warmed by a compile cache (rustWrapperFor): tinymold over
-  // the slot's /cache disk and the host's shared remote when the guest has
-  // both, sccache otherwise. sccache keys include the target dir, so under
-  // sccache a lane shares with the same lane of every earlier job on any VM,
-  // not with the other lanes.
+  // build-dir lock; sccache warms the build from the host's shared, capped
+  // store (or the slot's /cache disk when the store is down). sccache keys
+  // include the target dir, so a lane shares with the same lane of every
+  // earlier job on any VM, not with the other lanes.
   // hosted: cargo's default target dirs, which Swatinem/rust-cache restores.
   const targetDir = (lane) => (ex63 ? `${scratch}/target/${lane}` : null);
-  const rustWrapper = rustWrapperFor({ profile, env, tinymoldOnPath });
-  // tinymold appends one line per compile to TINYMOLD_LOG (a single write per
-  // line, so the parallel lanes can share one file); lanes.mjs reads it back
-  // with `tinymold stats` for the job summary.
-  const tinymoldLog =
-    rustWrapper === "tinymold" ? `${scratch}/tinymold.log` : null;
-  const wrapperEnv =
-    rustWrapper === "tinymold"
-      ? { RUSTC_WRAPPER: "tinymold", TINYMOLD_LOG: tinymoldLog }
-      : rustWrapper
-        ? { RUSTC_WRAPPER: rustWrapper }
-        : {};
+  const sccache = ex63 ? { RUSTC_WRAPPER: "sccache" } : {};
   const rustEnv = {
     CARGO_INCREMENTAL: "0",
     RUSTFLAGS: "-C link-arg=-fuse-ld=mold",
   };
   // Instrumented builds: no DWARF, a large test stack, and on hosted the
   // serialized build ci-lite needs to fit the runner's disk. On ex63 they go
-  // through the compile cache too: cargo-llvm-cov chains an existing
-  // RUSTC_WRAPPER in both its wrapper and RUSTFLAGS modes, and cache hits
-  // give byte-identical lcov (checked with cargo-llvm-cov 0.8 and sccache
-  // 0.10; tinymold keys instrumented compiles on the real checkout path, so
-  // their coverage mappings always point at this checkout). Hosted keeps
+  // through sccache too: cargo-llvm-cov chains an existing RUSTC_WRAPPER in
+  // both its wrapper and RUSTFLAGS modes, and cache hits give byte-identical
+  // lcov (checked with cargo-llvm-cov 0.8 and sccache 0.10). Hosted keeps
   // ci-lite's wrapper-free setup.
   const covEnv = {
     ...rustEnv,
     CARGO_PROFILE_DEV_DEBUG: "0",
     RUST_MIN_STACK: "67108864",
-    ...(ex63 ? wrapperEnv : { CARGO_BUILD_JOBS: "1" }),
+    ...(ex63 ? sccache : { CARGO_BUILD_JOBS: "1" }),
   };
   const modulesDir = ex63
     ? `${scratch}/test-modules`
-    : "/opt/openhuman-test-modules/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}";
+    : "/tmp/openhuman-test-modules-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}";
   const modulesEnvFile = "ci-out/test-modules.env";
   const withModules = (cmd) =>
     `set -a && . ${modulesEnvFile} && set +a && ${cmd}`;
@@ -217,6 +194,13 @@ export function buildPlan({
           name: "rust-layout",
           when: core,
           run: "node scripts/ci/check-openhuman-rust-layout.mjs",
+        },
+        {
+          // tinystoragedrivers owns every storage backend; reads cargo
+          // metadata for the root workspace and the app crate.
+          name: "storage-owner",
+          when: rust,
+          run: "node scripts/ci/check-storage-owner.mjs",
         },
         {
           name: "agent-runtime-boundary",
@@ -431,7 +415,7 @@ export function buildPlan({
       // (lanes.mjs). Lower number = served first.
       heavy: 1,
       targetDir: targetDir("lint"),
-      env: { ...rustEnv, ...wrapperEnv },
+      env: { ...rustEnv, ...sccache },
       checks: [
         // `--features` is load-bearing: `default` is the contributor set.
         {
@@ -482,7 +466,7 @@ export function buildPlan({
       // (lanes.mjs). Lower number = served first.
       heavy: 1,
       targetDir: targetDir("gatesoff"),
-      env: { ...rustEnv, ...wrapperEnv, RUST_MIN_STACK: "67108864" },
+      env: { ...rustEnv, ...sccache, RUST_MIN_STACK: "67108864" },
       checks: [
         {
           name: "gate-contract-tests",
@@ -509,7 +493,8 @@ export function buildPlan({
             " --features modules,mcp,e2e-test-support --lib --" +
             " modules::runtime:: modules::registry:: modules::storage_grant_tinywallet::" +
             " modules::storage_grant_tinyconnectors::" +
-            " mcp::server::resources:: test_support::introspect::",
+            " cron::bus_host::tests:: cron::documents_port::tests::" +
+            " mcp::server::resources:: test_support::introspect:: --test-threads=1",
         },
         {
           name: "kernel-floor",
@@ -534,13 +519,13 @@ export function buildPlan({
         {
           name: "clippy-tauri",
           when: areas.rustTauri,
-          env: wrapperEnv,
+          env: sccache,
           run: "cargo clippy --manifest-path crates/openhuman-app/Cargo.toml -- -D warnings",
         },
         {
           // llvm-cov's RUSTFLAGS mode with the linker flag cleared, as in
           // ci-lite. ci-lite also clears RUSTC_WRAPPER because its container
-          // config installs sccache; on ex63 covEnv sets the wrapper on purpose.
+          // config installs sccache; on ex63 covEnv sets sccache on purpose.
           name: "tauri-coverage",
           when: areas.rustTauri,
           env: { ...covEnv },
@@ -564,7 +549,7 @@ export function buildPlan({
       // VM's heavy-compile slots (lanes.mjs). Lower number = served first.
       heavy: 2,
       targetDir: targetDir("storage"),
-      env: { ...rustEnv, ...wrapperEnv, RUST_MIN_STACK: "16777216" },
+      env: { ...rustEnv, ...sccache, RUST_MIN_STACK: "16777216" },
       checks: [
         {
           name: "storage-e2e",
@@ -578,7 +563,18 @@ export function buildPlan({
           when: areas.storage,
           run:
             `cargo test -p openhuman --features ${STORAGE_DRIVERS} --lib --` +
-            STORAGE_LIB_FILTERS.map((f) => ` ${f}`).join(""),
+            STORAGE_LIB_FILTERS.map((f) => ` ${f}`).join("") +
+            " --skip cron::bus_host::tests:: --skip cron::documents_port::tests::",
+        },
+        {
+          // TinyFlows owns a process-global module host during these tests.
+          // Keep them out of the broad storage test process, where unrelated
+          // cron tests can replace handlers while a callback is executing.
+          name: "cron-module-tests",
+          when: areas.storage,
+          run:
+            `cargo test -p openhuman --features ${STORAGE_DRIVERS} --lib --` +
+            " cron::bus_host::tests:: cron::documents_port::tests:: --test-threads=1",
         },
         {
           name: "storage-session-store-tests",
@@ -607,28 +603,7 @@ export function buildPlan({
     }));
     lane.active = lane.checks.some((c) => c.when);
   }
-  return { profile, lanes, rustWrapper, tinymoldLog };
-}
-
-/**
- * The RUSTC_WRAPPER the Rust lanes compile through.
- *
- * - hosted: none (ci-lite's wrapper-free setup; rust-cache restores target/).
- * - ex63 with a `tinymold` binary and TINYMOLD_REMOTE_URL: tinymold. The
- *   microVM guest (tinyhumansai/gh-hosted-runner) exports the TINYMOLD_REMOTE_*
- *   variables only while the host's shared cache answers, and TINYMOLD_STORE
- *   points at the slot's persistent /cache disk.
- * - ex63 otherwise: sccache, exactly as before tinymold.
- *
- * @param {object} opts
- * @param {"ex63"|"hosted"} opts.profile
- * @param {object} [opts.env]
- * @param {boolean} [opts.tinymoldOnPath]
- * @returns {"tinymold"|"sccache"|null}
- */
-export function rustWrapperFor({ profile, env = {}, tinymoldOnPath = false }) {
-  if (profile !== "ex63") return null;
-  return tinymoldOnPath && env.TINYMOLD_REMOTE_URL ? "tinymold" : "sccache";
+  return { profile, lanes };
 }
 
 /** Restrict a plan to the named lanes (hosted groups run a subset each). */

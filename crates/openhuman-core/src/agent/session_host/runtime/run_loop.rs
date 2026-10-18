@@ -44,8 +44,10 @@ impl OpenHumanSessionHost {
         origin: Option<crate::agent::turn_origin::AgentTurnOrigin>,
         approval: crate::security::approval::ApprovalTurnContext,
     ) -> Result<String> {
-        let origin =
-            origin.or_else(|| crate::core::runtime::DispatchCtx::ambient_turn().turn_origin());
+        let origin = origin.or_else(|| {
+            crate::core::runtime::DispatchCtx::from_weak(self.host_env.core.as_ref())
+                .turn_origin_or_scoped()
+        });
         let guard = enforce_prompt_input(
             message,
             PromptEnforcementContext {

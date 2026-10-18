@@ -54,7 +54,7 @@ pub async fn reload(
 ) -> Arc<HookConfig> {
     // Hook commands run under the shell TinyBox selects; ask it here, where the
     // caller is async, so the engine's synchronous shell factory can use it.
-    super::shell::resolve(&ctx).await;
+    super::shell::resolve(ctx).await;
     let current = environment();
     let loaded = tokio::task::spawn_blocking(move || {
         config::load(&current, project_dir.as_deref(), workspace_dir.as_deref())

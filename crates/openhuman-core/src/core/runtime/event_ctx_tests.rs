@@ -40,7 +40,10 @@ async fn an_event_is_handled_under_its_tenant_while_another_is_active() {
         assert_eq!(config_a.workspace_dir, spawned.workspace_dir);
 
         let for_b = DispatchCtx::for_event(Some(&tenant_of("evt-ctx-b"))).expect("b is live");
-        (config_a.workspace_dir, for_b.load_config().await.unwrap().workspace_dir)
+        (
+            config_a.workspace_dir,
+            for_b.load_config().await.unwrap().workspace_dir,
+        )
     })
     .await;
 

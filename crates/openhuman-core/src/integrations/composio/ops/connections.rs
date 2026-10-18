@@ -24,6 +24,7 @@ use super::error_utils::{
 use crate::integrations::composio::contract::normalize_connection_identifiers;
 
 pub async fn composio_list_connections(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
 ) -> OpResult<Outcome<ComposioConnectionsResponse>> {
     tracing::debug!("[composio] rpc list_connections");
@@ -97,11 +98,11 @@ pub async fn composio_list_connections(
         // connection-created subscriber's readiness window. Re-warm here so
         // the next chat turn does not perform the three discovery requests.
         let config = config.clone();
-        crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+        ctx.spawn(async move {
             let _ = fetch_connected_integrations_status(&config).await;
         });
     }
-    let resp = enrich_connections_with_identity(config, resp).await;
+    let resp = enrich_connections_with_identity(ctx, config, resp).await;
     Ok(Outcome::new(
         resp,
         vec![format!(
@@ -158,6 +159,7 @@ pub struct ComposioDeleteResult {
 }
 
 pub async fn composio_delete_connection(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     connection_id: &str,
 ) -> OpResult<Outcome<ComposioDeleteResult>> {
@@ -182,7 +184,7 @@ pub async fn composio_delete_connection(
         format!("[composio] delete_connection failed: {error}")
     })?;
     if let Some(toolkit) = toolkit.as_deref() {
-        let deleted = delete_connected_identity_facets(config, toolkit, connection_id)
+        let deleted = delete_connected_identity_facets(ctx, config, toolkit, connection_id)
             .await
             .unwrap_or_else(|error| {
                 tracing::warn!(
@@ -290,10 +292,11 @@ pub(super) async fn resolve_toolkit_for_connection(
 ///
 /// This is best-effort — no live API calls are made (one SQLite read per poll).
 pub(crate) async fn enrich_connections_with_identity(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     mut resp: ComposioConnectionsResponse,
 ) -> ComposioConnectionsResponse {
-    let identities = load_connected_identities(config)
+    let identities = load_connected_identities(ctx, config)
         .await
         .unwrap_or_else(|error| {
             tracing::debug!(

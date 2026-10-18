@@ -197,7 +197,7 @@ pub(crate) fn backend_unauthorized_message(api_key: bool) -> String {
 /// token. A rejected API key has no session to expire, so it never signs the
 /// user out (`API_KEY_REJECTED` semantics).
 fn on_backend_unauthorized(tool: &str, api_key: bool) {
-    if api_key || crate::cron::scheduler_gate::is_signed_out() {
+    if api_key || crate::platform::llm_gate::is_signed_out() {
         return;
     }
     crate::core::bus::BUS.publish(crate::core::events::DomainEvent::SessionExpired {

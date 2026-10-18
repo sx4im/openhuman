@@ -11,7 +11,7 @@
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::agent::turn_origin::{self, AgentTurnOrigin};
+use crate::agent::turn_origin::AgentTurnOrigin;
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult, ToolRunContext, ToolTimeout};
 
 use super::gate;

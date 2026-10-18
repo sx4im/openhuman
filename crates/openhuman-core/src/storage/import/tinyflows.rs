@@ -203,7 +203,9 @@ pub fn import_cron(
     scope_dir: &Path,
     label: &str,
 ) -> Result<Outcome> {
-    use tinyflows_drivers::schedule::CronDocuments;
+    use crate::cron::client::store_in;
+    use crate::cron::documents_port::DocScope;
+    use tinyflows_bus::schedule::{ImportedJob, StoreOperation};
 
     let domain = if label.is_empty() {
         CRON_DOMAIN.to_string()
@@ -215,16 +217,45 @@ pub fn import_cron(
         if !jobs_db.is_file() {
             return Ok(None);
         }
-        let scoped = backend
-            .for_scope(scope)
-            .map_err(|error| anyhow!("open the storage scope: {error}"))?;
-        let cron = CronDocuments::new(Arc::clone(scoped.documents()));
+        // The legacy file is decoded here (`tinyflows-import`'s reader, bus
+        // records only) and replayed through the module's `import_job` /
+        // `import_run` store operations, which write only what is absent and
+        // file a flow-schedule job under the id its flow derives.
+        let doc_scope = DocScope::on_backend(config, Arc::clone(backend), scope.clone());
+        let config = config.clone();
         let report = crate::storage::block_on_anyhow({
             let jobs_db = jobs_db.clone();
             async move {
-                tinyflows_import::import_cron(&jobs_db, &cron)
+                let legacy = tinyflows_import::read_legacy_cron(&jobs_db)
                     .await
-                    .context("import the cron jobs")
+                    .context("read the legacy cron database")?;
+                let mut report = legacy.report;
+                let mut filed_as = std::collections::HashMap::new();
+                for job in legacy.jobs {
+                    let source_id = job.id.clone();
+                    let imported: ImportedJob =
+                        store_in(&config, &doc_scope, StoreOperation::ImportJob { job })
+                            .await
+                            .context("import a cron job")?;
+                    report.wrote("jobs", imported.written);
+                    filed_as.insert(source_id, imported.id);
+                }
+                for mut run in legacy.runs {
+                    let Some(id) = filed_as.get(&run.job_id) else {
+                        report.invalid(
+                            "runs",
+                            format!("run {}: job '{}' was not imported", run.id, run.job_id),
+                        );
+                        continue;
+                    };
+                    run.job_id = id.clone();
+                    let written: bool =
+                        store_in(&config, &doc_scope, StoreOperation::ImportRun { run })
+                            .await
+                            .context("import a cron run")?;
+                    report.wrote("runs", written);
+                }
+                Ok(report)
             }
         })?;
         Ok(Some(counts(&domain, &report)))

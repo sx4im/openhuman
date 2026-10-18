@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Reconcile visible delegate names without reopening a caller's explicit
+/// restriction. Revoked names disappear; a newly connected name is admitted
+/// only for the wildcard belt.
+pub(in crate::agent::session_host) fn reconcile_synthesized_visibility(
+    visible: &mut std::collections::HashSet<String>,
+    previous: &std::collections::HashSet<String>,
+    next: &std::collections::HashSet<String>,
+    auto_include_new: bool,
+) {
+    for name in previous.difference(next) {
+        visible.remove(name);
+    }
+    if auto_include_new {
+        visible.extend(next.iter().cloned());
+    }
+}
+
 impl OpenHumanTurnPrelude {
     /// Rebuild every delegation-dependent tool view from the current cached
     /// integration set, replacing rather than appending. A revoked delegate is

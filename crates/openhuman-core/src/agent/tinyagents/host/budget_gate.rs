@@ -3,11 +3,11 @@
 //!
 //! This is `docs/specs/plan-agents.md` Phase 4. The agent runtime is being made
 //! generic over its host, so it can no longer reach into
-//! [`crate::cron::scheduler_gate`] or [`crate::cost`] directly.
+//! [`crate::platform::llm_gate`] or [`crate::cost`] directly.
 //! It declares [`BudgetGate`] instead, and this module is the single place
 //! OpenHuman's three metering concerns meet it:
 //!
-//! * **admission / back-pressure** — [`scheduler_gate::wait_for_capacity`],
+//! * **admission / back-pressure** — [`llm_gate::wait_for_capacity`],
 //!   which owns the single-slot global LLM semaphore and the
 //!   AC-power / CPU / signed-out policy backoff;
 //! * **pricing hints and budgets** — [`tinyagents_registry::pricing::estimate_cost_usd`] on
@@ -67,8 +67,8 @@ use tinyagents_harness::host::budget_gate::{
 use tinyinference_llm::usage::Usage;
 
 use crate::config::{Config, DEFAULT_MODEL};
-use crate::cron::scheduler_gate;
 use crate::platform::cost;
+use crate::platform::llm_gate;
 use tinyjuice_bus::types::AgentTokenjuiceCompression;
 
 /// OpenHuman's [`BudgetGate`]: scheduler-gate back-pressure, cost-tracker
@@ -90,7 +90,7 @@ pub struct OpenHumanBudgetGate {
     /// mismatch (1) in the module docs.
     last_model: RwLock<String>,
     /// Whether this session's model calls are **background** work that must
-    /// queue behind [`scheduler_gate`].
+    /// queue behind [`llm_gate`].
     ///
     /// Defaults to `false`, because that gate is for background AI only: its
     /// `Paused` arm polls indefinitely while background work is disabled or the
@@ -138,7 +138,7 @@ impl OpenHumanBudgetGate {
     /// Marks this session's model calls as background work.
     ///
     /// Only then does [`acquire`](Self::acquire) queue behind
-    /// [`scheduler_gate`], which is the concurrency limiter for background AI —
+    /// [`llm_gate`], which is the concurrency limiter for background AI —
     /// cron jobs, memory workers. Interactive turns must
     /// **not** opt in: the gate's `Paused` arm waits for background work to be
     /// re-enabled, which for a user-initiated chat means waiting until the turn
@@ -287,7 +287,7 @@ impl BudgetGate for OpenHumanBudgetGate {
     /// Ordered budget-check-first on purpose: a refusal must not first occupy
     /// the single global LLM slot that another, affordable, call could use.
     ///
-    /// The returned [`Permit`] owns the [`scheduler_gate::LlmPermit`] inside its
+    /// The returned [`Permit`] owns the [`llm_gate::LlmPermit`] inside its
     /// release hook, so dropping the crate permit — on return, on `?`, on
     /// cancellation, on unwind — is what returns the semaphore slot. There is
     /// exactly one owner and it is never cloned; the crate's `Permit` is
@@ -355,7 +355,7 @@ impl BudgetGate for OpenHumanBudgetGate {
         // caller treats that as "skip the gate" rather than an error, and so
         // does this one — failing here would deadlock the pipeline on a
         // condition that is not the user's fault.
-        let Some(llm_permit) = scheduler_gate::wait_for_capacity().await else {
+        let Some(llm_permit) = llm_gate::wait_for_capacity().await else {
             log::warn!(
                 "[tinyagents][budget] scheduler gate returned no permit (semaphore closed); \
                  proceeding ungated"

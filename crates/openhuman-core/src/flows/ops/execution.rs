@@ -98,6 +98,7 @@ pub(super) async fn export_run_to_langfuse(
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 pub(super) fn run_flow_body(
+    ctx: crate::core::runtime::DispatchCtx,
     config_arc: Arc<Config>,
     flow: Flow,
     flow_id: String,
@@ -110,6 +111,7 @@ pub(super) fn run_flow_body(
     _run_guard: run_registry::RunGuard,
 ) -> futures::future::BoxFuture<'static, Result<Outcome<Value>, String>> {
     Box::pin(run_flow_body_inner(
+        ctx,
         config_arc,
         flow,
         flow_id,
@@ -125,6 +127,7 @@ pub(super) fn run_flow_body(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_flow_body_inner(
+    ctx: crate::core::runtime::DispatchCtx,
     config_arc: Arc<Config>,
     flow: Flow,
     flow_id: String,
@@ -170,7 +173,7 @@ async fn run_flow_body_inner(
     // Returns an empty `Vec` (no-op here) for a tool_call-only graph, and is
     // never consulted by `dry_run_workflow` (sandbox runs are exempt by
     // design — that tool doesn't route through `run_flow_body` at all).
-    let inference_errors = validate_inference_readiness(config, &flow.graph).await;
+    let inference_errors = validate_inference_readiness(&ctx, config, &flow.graph).await;
     if !inference_errors.is_empty() {
         let detail = inference_errors.join(" ");
         let msg = format!("This flow's AI step needs a working AI provider to run. {detail}");
@@ -232,7 +235,12 @@ async fn run_flow_body_inner(
         flow_id: flow_id.to_string(),
         run_id: thread_id.clone(),
     };
+    // The run acts under its own trusted `Workflow` origin: its capabilities
+    // read the origin from this context, not from the calling task's scope.
+    let origin = workflow_origin(flow_id, flow.require_approval);
+    let run_ctx = ctx.with_turn_origin(origin.clone());
     let caps = crate::flows::tinyflows::build_capabilities(
+        &run_ctx,
         config_arc.clone(),
         format!("flow:{flow_id}"),
         Some(flow_run),
@@ -284,7 +292,6 @@ async fn run_flow_body_inner(
         );
     };
 
-    let origin = workflow_origin(flow_id, flow.require_approval);
     // Per-run in-memory journal: tinyflows records every graph event as a
     // durable GraphObservation under the run's tinyagents run id, which the
     // post-run Langfuse export reads back. Process-local and dropped with the

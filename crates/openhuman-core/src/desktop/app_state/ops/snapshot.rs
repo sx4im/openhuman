@@ -17,7 +17,6 @@ use super::state_file::{
 };
 use super::types::{AppStateSnapshot, StoredAppState, StoredAppStatePatch};
 use super::LOG_PREFIX;
-use crate::config::rpc as config_rpc;
 use crate::core::runtime::DispatchCtx;
 use crate::core::Outcome;
 use crate::security::credentials::session_support::{

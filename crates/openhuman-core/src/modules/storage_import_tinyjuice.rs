@@ -29,6 +29,7 @@ use tinystoragedrivers::{Capability, ScopedStorage};
 
 use super::storage_grant_tinyjuice::{CCR_BLOB_PREFIX, MODULE_ID};
 use super::storage_import_support as support;
+use crate::core::runtime::DispatchCtx;
 
 const LOG_PREFIX: &str = "[tinyjuice-import]";
 /// `tinyjuice::cache::store::short_hash`: 16 bytes, hex encoded.
@@ -58,11 +59,15 @@ pub(crate) enum Outcome {
 
 /// Imports the CCR files under `root` into the module's scope of the installed
 /// backend. `ttl` is the configured original lifetime; `None` keeps them.
-pub(crate) async fn import_legacy(root: &Path, ttl: Option<Duration>) -> Result<Outcome> {
-    let Some(scoped) = support::module_scope(MODULE_ID)? else {
+pub(crate) async fn import_legacy(
+    ctx: &DispatchCtx,
+    root: &Path,
+    ttl: Option<Duration>,
+) -> Result<Outcome> {
+    let Some(scoped) = support::module_scope(ctx, MODULE_ID)? else {
         return Ok(Outcome::NoBackend);
     };
-    import_into(&scoped, root, ttl, SystemTime::now()).await
+    import_into(ctx, &scoped, root, ttl, SystemTime::now()).await
 }
 
 /// One readable original: its token, text and age.
@@ -73,6 +78,7 @@ struct LegacyOriginal {
 }
 
 async fn import_into(
+    ctx: &DispatchCtx,
     scoped: &ScopedStorage,
     root: &Path,
     ttl: Option<Duration>,
@@ -92,10 +98,10 @@ async fn import_into(
     }
 
     let dir = root.to_owned();
-    let (originals, mut skipped) =
-        tokio::task::spawn_blocking(move || read_originals(&dir, now))
-            .await
-            .context("the legacy reader panicked")??;
+    let (originals, mut skipped) = ctx
+        .spawn_blocking(move || read_originals(&dir, now))
+        .await
+        .context("the legacy reader panicked")??;
 
     let (mut imported, mut expired) = (0usize, 0usize);
     for original in originals {

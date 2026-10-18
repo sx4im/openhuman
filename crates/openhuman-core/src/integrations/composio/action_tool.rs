@@ -37,7 +37,6 @@ use serde_json::Value;
 use super::contract::ToolScope;
 use super::tools::resolve_action_scope;
 use crate::agent::tinyagents::host::run_context::{dispatch_ctx_for_tool, sandbox_mode_for_tool};
-use crate::config::rpc as config_rpc;
 use crate::config::Config;
 use tinyagents_definition::SandboxMode;
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolRunContext};
@@ -61,7 +60,7 @@ pub struct ComposioActionTool {
     ///
     /// `None` for a deferred instance synthesised for a parent session,
     /// which has no spawn-time config: it resolves the live config through
-    /// [`config_rpc::load_config_with_timeout`] on every call — the
+    /// [`DispatchCtx::load_config`] on every call — the
     /// embedder's config when one is bound, else the process-global one.
     config: Option<Arc<Config>>,
     /// Action slug as-shipped to Composio, e.g. `"GMAIL_SEND_EMAIL"`.
@@ -315,7 +314,7 @@ impl ComposioActionTool {
         // fresh routing. Anchored to this tool's original config path rather than
         // re-resolving process-global `OPENHUMAN_WORKSPACE` (the tool is scoped to
         // the user/workspace it was created for).
-        let live_config = match self.live_config(&ctx).await {
+        let live_config = match self.live_config(ctx).await {
             Ok(c) => Box::new(c),
             Err(e) => {
                 tracing::warn!(

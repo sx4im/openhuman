@@ -1,29 +1,27 @@
-//! The host's `JobExecutor`: one attempt of a shell or agent job under the
-//! security policy and operator limits, classified for the runtime.
+//! The host's answer to the module's `Execute` and `Failed` callbacks: one
+//! attempt of a shell or agent job under the security policy and operator
+//! limits, classified for the runtime.
 //!
-//! The runtime (`tinyflows_schedule::runtime`) owns the retry loop and its
-//! backoff. This executor decides, per attempt, whether a failure is worth
-//! another one: a policy block or a permanent user-config / billing state
-//! (expired session, no credits, exhausted budget, unset key, unreachable
-//! local provider) is returned `retryable: false`, and the final failure is
-//! reported once through [`JobExecutor::failed`].
+//! The module (`tinyflows_bus::schedule`) owns the retry loop and its backoff.
+//! This executor runs the attempt through the job-kind registry
+//! ([`crate::cron::handlers`]) and decides whether a failure is worth another
+//! one: a policy block or a permanent user-config / billing state (expired
+//! session, no credits, exhausted budget, unset key, unreachable local
+//! provider) is returned `retryable: false`, and the final failure is reported
+//! once through [`HostExecutor::failed`].
 
-use super::agent_run::run_agent_job_for_run;
 use super::failure_classification::{
     is_api_key_unset_failure, is_budget_exhausted_failure, is_insufficient_credits_failure,
     is_local_provider_unreachable_failure, is_session_expired_failure, permanent_halt_message,
 };
-use super::host::Binding;
-use super::run_record::warn_if_high_frequency_agent_job;
-use super::shell_job::run_job_command;
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
-use anyhow::Result;
-use async_trait::async_trait;
+use crate::cron::bus_host::{kind_refusal, Binding};
+use crate::cron::handlers::{kind_handler, JobRunContext};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tinyflows_schedule::runtime::{Attempt, JobExecutor};
-use tinyflows_schedule::types::{CronJob, JobType, SessionTarget};
+use tinyflows_bus::schedule::types::{CronJob, JobType, SessionTarget};
+use tinyflows_bus::schedule::Attempt;
 
 /// Run states kept before the map is cleared outright (a run whose task was
 /// aborted never reaches `failed`).
@@ -50,13 +48,13 @@ struct RunState {
     halt: Halt,
 }
 
-pub(super) struct HostExecutor {
+pub(crate) struct HostExecutor {
     binding: Binding,
     runs: Mutex<HashMap<String, RunState>>,
 }
 
 impl HostExecutor {
-    pub(super) fn new(binding: Binding) -> Self {
+    pub(crate) fn new(binding: Binding) -> Self {
         Self {
             binding,
             runs: Mutex::new(HashMap::new()),
@@ -101,12 +99,21 @@ impl HostExecutor {
     async fn attempt(&self, job: &CronJob, run_id: &str) -> Attempt {
         let config = self.binding.config();
         if self.begin(run_id) {
-            warn_if_high_frequency_agent_job(job);
+            warn_if_high_frequency_agent_job(&config, job).await;
             BUS.publish(DomainEvent::CronJobTriggered {
                 job_id: job.id.clone(),
                 job_name: job.name.clone().unwrap_or_default(),
                 job_type: format!("{:?}", job.job_type),
             });
+        }
+        // A hosted-profile sweep runs agent jobs only.
+        if let Some(refusal) = kind_refusal(&self.binding, &job.job_type) {
+            self.halt(run_id, Halt::Refused);
+            return Attempt {
+                success: false,
+                output: refusal,
+                retryable: false,
+            };
         }
         // Operator limits (`cron::limits`) also bind rows stored before they
         // were switched on.
@@ -118,21 +125,31 @@ impl HostExecutor {
                 retryable: false,
             };
         }
-        let (success, output, agent_error) = match job.job_type {
-            JobType::Shell => {
-                let (success, output) =
-                    run_job_command(&config, self.binding.security.as_ref(), job).await;
-                (success, output, None)
-            }
-            JobType::Agent => {
-                run_agent_job_for_run(&self.binding.dispatch_ctx(), &config, job, run_id).await
-            }
-            JobType::Flow => (
-                false,
-                "flow jobs run through the trigger sink, not the executor".to_string(),
-                None,
-            ),
+        let Some(handler) = kind_handler(&job.job_type) else {
+            self.halt(run_id, Halt::Refused);
+            return Attempt {
+                success: false,
+                output: format!(
+                    "no handler is registered for {} jobs",
+                    job.job_type.as_str()
+                ),
+                retryable: false,
+            };
         };
+        tracing::debug!(
+            job_id = %job.id,
+            kind = job.job_type.as_str(),
+            "[cron:executor] running attempt"
+        );
+        let outcome = handler
+            .run(&JobRunContext::new(self.binding.clone()), job, run_id)
+            .await;
+        let (success, output, agent_error, permanent) = (
+            outcome.success,
+            outcome.output,
+            outcome.agent_error,
+            outcome.permanent,
+        );
         if success {
             self.forget(run_id);
             return Attempt {
@@ -142,6 +159,14 @@ impl HostExecutor {
             };
         }
         let last_agent_error = self.note_error(run_id, agent_error);
+        if permanent {
+            self.halt(run_id, Halt::Refused);
+            return Attempt {
+                success: false,
+                output,
+                retryable: false,
+            };
+        }
         self.classify_failure(job, run_id, output, last_agent_error.as_deref())
     }
 
@@ -210,14 +235,14 @@ impl HostExecutor {
     }
 }
 
-#[async_trait]
-impl JobExecutor for HostExecutor {
-    async fn execute(&self, job: &CronJob, run_id: &str) -> Result<Attempt> {
-        Ok(self.binding.within(self.attempt(job, run_id)).await)
+impl HostExecutor {
+    /// One attempt of `job`, run under the scheduler's context.
+    pub(crate) async fn execute(&self, job: &CronJob, run_id: &str) -> Attempt {
+        self.binding.within(self.attempt(job, run_id)).await
     }
 
     /// The retries-exhausted (or permanent) report, once per failed run.
-    async fn failed(&self, job: &CronJob, run_id: &str, attempt: &Attempt) {
+    pub(crate) async fn failed(&self, job: &CronJob, run_id: &str, attempt: &Attempt) {
         let state = self.forget(run_id).unwrap_or_default();
         if !matches!(job.job_type, JobType::Agent) {
             return;
@@ -278,4 +303,54 @@ pub(super) fn publish_cron_user_error(kind: &str) {
         error_source: Some("cron".to_string()),
         ..Default::default()
     });
+}
+
+/// Why an agent job counts as scheduled more often than every five minutes,
+/// if it does. `None` for shell and flow jobs, for one-shot `At` schedules,
+/// for anything at or above [`MIN_AGENT_JOB_INTERVAL`], and for an expression
+/// that cannot be read (that is not evidence of anything).
+///
+/// Returns the verdict rather than only logging it, because the verdict is the
+/// part worth testing. The gap is the shortest one between consecutive runs
+/// (`RunsCloserThan`), so an irregular expression is judged by its tightest
+/// pair and not by whichever pair happens to follow the instant of the check.
+pub(crate) async fn agent_job_too_frequent(
+    config: &crate::config::Config,
+    job: &CronJob,
+) -> Option<tinyflows_bus::schedule::TooFrequent> {
+    if !matches!(job.job_type, JobType::Agent) {
+        return None;
+    }
+    match crate::cron::client::runs_closer_than(
+        config,
+        &job.schedule,
+        chrono::Utc::now(),
+        tinyflows_bus::schedule::MIN_AGENT_JOB_INTERVAL,
+    )
+    .await
+    {
+        Ok(verdict) => verdict,
+        Err(error) => {
+            tracing::debug!(job_id = %job.id, %error, "[cron:executor] cadence check unavailable");
+            None
+        }
+    }
+}
+
+/// New agent jobs cannot be created below the floor (`ValidateSchedule` with
+/// `agent` rejects them), so a job that trips this predates the rule. It keeps
+/// running (silently skipping runs would turn its schedule into a lie) and
+/// this line is the operator's signal to edit it.
+pub(crate) async fn warn_if_high_frequency_agent_job(
+    config: &crate::config::Config,
+    job: &CronJob,
+) {
+    if let Some(too_frequent) = agent_job_too_frequent(config, job).await {
+        tracing::warn!(
+            "Cron agent job '{}' is scheduled more frequently than every 5 minutes: it \
+             {too_frequent}. It was created before that floor was enforced; edit its \
+             schedule to silence this.",
+            job.id
+        );
+    }
 }

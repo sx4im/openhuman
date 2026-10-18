@@ -55,7 +55,11 @@ async fn sweep_all_visits_the_local_scope() {
 
 #[tokio::test(start_paused = true)]
 async fn spawned_sweeper_waits_for_its_first_delay_then_keeps_ticking() {
-    let handle = spawn(Duration::from_secs(10), Duration::from_secs(20));
+    let handle = spawn(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        Duration::from_secs(10),
+        Duration::from_secs(20),
+    );
     tokio::time::sleep(Duration::from_secs(65)).await;
     assert!(!handle.is_finished(), "the sweeper keeps running");
     handle.abort();
@@ -79,7 +83,9 @@ async fn sweeping_through_the_fenced_backend_reaches_the_driver() {
 #[tokio::test]
 async fn module_blob_scopes_are_swept_alongside_the_acting_scope() {
     let (now, backend) = backend_with_clock();
-    let module_scopes = crate::modules::expiring_blob_module_scopes();
+    let module_scopes = crate::modules::expiring_blob_module_scopes(
+        &crate::core::runtime::DispatchCtx::host_default(),
+    );
     assert!(!module_scopes.is_empty(), "TinyJuice owns expiring blobs");
     put_expiring(&backend, &module_scopes[0], "tinyjuice_ccr/t", 10).await;
     now.store(2_000, Ordering::SeqCst);
@@ -89,7 +95,10 @@ async fn module_blob_scopes_are_swept_alongside_the_acting_scope() {
 #[cfg(not(feature = "modules"))]
 #[test]
 fn no_module_blob_scopes_without_the_modules_feature() {
-    assert!(crate::modules::expiring_blob_module_scopes().is_empty());
+    assert!(crate::modules::expiring_blob_module_scopes(
+        &crate::core::runtime::DispatchCtx::host_default()
+    )
+    .is_empty());
 }
 
 #[tokio::test]
@@ -182,4 +191,27 @@ async fn a_hung_profile_listing_times_out_instead_of_stalling() {
     assert!(hung.is_none());
     let ok = bounded_listing(Duration::from_secs(5), async { 7u8 }).await;
     assert_eq!(ok, Some(7));
+}
+
+#[cfg(feature = "modules")]
+#[test]
+fn module_blob_scopes_follow_the_handed_context_and_never_cross_tenants() {
+    use crate::core::runtime::{ContextOverlay, CoreContext, DispatchCtx, DomainSet};
+    let profile = |name: &str| {
+        DispatchCtx::new(
+            CoreContext::for_test(DomainSet::full(), None).derive_with(
+                ContextOverlay::new(
+                    crate::config::Config::default(),
+                    DomainSet::kernel(),
+                    Default::default(),
+                )
+                .profile(name),
+            ),
+        )
+    };
+    let alice = crate::modules::expiring_blob_module_scopes(&profile("blob-alice"));
+    let bob = crate::modules::expiring_blob_module_scopes(&profile("blob-bob"));
+    assert!(!alice.is_empty() && !bob.is_empty());
+    assert!(alice.iter().all(|s| s.as_str().contains("blob-alice")));
+    assert!(bob.iter().all(|s| s.as_str().contains("blob-bob")));
 }

@@ -519,7 +519,7 @@ pub fn has_backend_credential(config: &Config) -> bool {
 pub fn publish_local_session_expiry(operation: &'static str) {
     // Dedupe the publish via the scheduler gate so N parallel authed
     // callers in one tick don't emit N SessionExpired events.
-    if crate::cron::scheduler_gate::is_signed_out() {
+    if crate::platform::llm_gate::is_signed_out() {
         return;
     }
     // An API-key runtime has no session to expire. Its backend calls never

@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::core::runtime::DispatchCtx;
 use crate::core::Outcome;
 
-use super::loader::{load_config_with_timeout, snapshot_config_json};
+use super::loader::snapshot_config_json;
 
 /// Partial update for the `[security.sandbox]` + `[runtime.docker]` blocks.
 #[derive(Debug, Clone, Default)]

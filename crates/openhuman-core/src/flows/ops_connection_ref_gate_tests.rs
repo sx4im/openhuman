@@ -46,7 +46,12 @@ async fn cached_probe_inference_readiness_caches_a_negative_result() {
     config.api_url = Some(format!("http://{addr}"));
 
     // First call: a real (mock) network round trip, definitively rejected.
-    let first = cached_probe_inference_readiness("summarization", &config).await;
+    let first = cached_probe_inference_readiness(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "summarization",
+        &config,
+    )
+    .await;
     let err = first.expect_err("a confirmed provider-not-configured 400 must reject");
     assert!(
         err.to_ascii_lowercase()
@@ -61,7 +66,12 @@ async fn cached_probe_inference_readiness_caches_a_negative_result() {
 
     // Second call, same (role, config_path) key, well within the TTL: must be
     // served from cache — the mock server's hit count must NOT increase.
-    let second = cached_probe_inference_readiness("summarization", &config).await;
+    let second = cached_probe_inference_readiness(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "summarization",
+        &config,
+    )
+    .await;
     assert!(
         second.is_err(),
         "the cached negative result must still be an Err"

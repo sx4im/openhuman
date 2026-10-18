@@ -8,7 +8,6 @@ use serde_json::{Map, Value};
 use tinyagents_session::run_ledger::command_center::ControlVerb;
 
 use crate::agent::harness::host_definition::AgentDefinitionRegistry;
-use crate::config::rpc as config_rpc;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::Outcome;
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};

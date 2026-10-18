@@ -407,6 +407,7 @@ pub(crate) struct WriteFence {
     token: Option<FenceToken<'static>>,
     state: &'static OwnerState,
     config: Arc<Config>,
+    ctx: crate::core::runtime::DispatchCtx,
 }
 
 impl Drop for WriteFence {
@@ -414,7 +415,7 @@ impl Drop for WriteFence {
         drop(self.token.take());
         drop(self.guard.take());
         if !self.state.gate.is_fenced() && tokio::runtime::Handle::try_current().is_ok() {
-            schedule_all(self.config.clone());
+            schedule_all(&self.ctx, self.config.clone());
         }
     }
 }
@@ -422,7 +423,10 @@ impl Drop for WriteFence {
 /// Stops each owner partition after its current mutation, durably clears
 /// earlier pending writes, and fences subsequent writes through explicit erase.
 /// Other owners sharing a workspace keep independent queues and barriers.
-pub(crate) async fn fence_and_clear(config: &Config) -> MemoryResult<WriteFence> {
+pub(crate) async fn fence_and_clear(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: &Config,
+) -> MemoryResult<WriteFence> {
     let state = owner_state(config);
     let token = state.gate.begin_fence();
     let fencing_generation = token.generation();
@@ -431,10 +435,11 @@ pub(crate) async fn fence_and_clear(config: &Config) -> MemoryResult<WriteFence>
         token: Some(token),
         state,
         config: Arc::new(config.clone()),
+        ctx: ctx.clone(),
     };
     fence.guard = Some(state.barrier.clone().write_owned().await);
     let snapshot_config = config.clone();
-    crate::core::runtime::DispatchCtx::ambient().spawn_blocking(move || {
+    ctx.spawn_blocking(move || {
         let _guard = LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -454,38 +459,43 @@ pub(crate) async fn fence_and_clear(config: &Config) -> MemoryResult<WriteFence>
 /// Starts a scoped background drain, retaining config only in memory.
 ///
 /// `root` is the layout root the write was queued under (`CallFacts::reach`).
-pub(super) fn schedule(config: Arc<Config>, root: &Namespace) {
+pub(super) fn schedule(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: Arc<Config>,
+    root: &Namespace,
+) {
     let file = queue_path(&config, root);
-    schedule_partition(config, file);
+    schedule_partition(ctx, config, file);
 }
 
 /// Retries all durable partitions belonging to this owner on auth/cron ticks.
-pub(super) fn schedule_all(config: Arc<Config>) {
+pub(super) fn schedule_all(ctx: &crate::core::runtime::DispatchCtx, config: Arc<Config>) {
     if super::engine::switched_off(&config) {
         return;
     }
-    crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+    let scan_ctx = ctx.clone();
+    ctx.spawn(async move {
         let scan_config = config.clone();
-        let files =
-            match crate::core::runtime::DispatchCtx::ambient().spawn_blocking(move || partitions(&scan_config))
-                .await
-            {
-                Ok(Ok(files)) => files,
-                _ => {
-                    tracing::debug!(
-                        code = "QUEUE_UNAVAILABLE",
-                        "[memory:tool_writes] retry discovery deferred"
-                    );
-                    return;
-                }
-            };
+        let files = match scan_ctx
+            .spawn_blocking(move || partitions(&scan_config))
+            .await
+        {
+            Ok(Ok(files)) => files,
+            _ => {
+                tracing::debug!(
+                    code = "QUEUE_UNAVAILABLE",
+                    "[memory:tool_writes] retry discovery deferred"
+                );
+                return;
+            }
+        };
         for file in files {
-            schedule_partition(config.clone(), file);
+            schedule_partition(&scan_ctx, config.clone(), file);
         }
     });
 }
 
-fn schedule_partition(config: Arc<Config>, file: PathBuf) {
+fn schedule_partition(ctx: &crate::core::runtime::DispatchCtx, config: Arc<Config>, file: PathBuf) {
     let owner = owner_state(&config);
     if owner.gate.is_fenced() {
         return;
@@ -498,7 +508,7 @@ fn schedule_partition(config: Arc<Config>, file: PathBuf) {
     let Ok(guard) = state.barrier.clone().try_lock_owned() else {
         return;
     };
-    crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+    ctx.spawn(async move {
         let _guard = guard;
         let _owner_guard = owner_guard;
         let _state = state;

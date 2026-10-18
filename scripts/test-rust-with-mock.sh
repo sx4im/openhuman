@@ -88,9 +88,9 @@ source "$SCRIPT_DIR/modules/stage-local-modules.sh"
 # against the core locally.
 local_source_ids=()
 if local_module_source_is_source; then
-  local_source_ids+=(tinyconnectors tinyjuice tinysearch tinyhosts tinymcp)
+  local_source_ids+=(tinyconnectors tinyflows tinyjuice tinysearch tinyhosts tinymcp)
 else
-  for released_id in tinychannels tinyjuice tinysearch; do
+  for released_id in tinychannels tinyflows tinyjuice tinysearch; do
     released_dir="$(stage_release_module "$released_id" "$wallet_platform" "$module_ext")"
     if [ "$released_id" = "tinychannels" ]; then
       tinychannels_dir="$released_dir"
@@ -270,8 +270,16 @@ run_in_process_modules() {
   while IFS= read -r module; do
     [ -n "$module" ] || continue
     echo "[test-rust-with-mock] in-process module: ${module}"
-    OPENHUMAN_MODULE_PATH="$connectors_module_path" \
-      cargo_test --test in_process_all -- "${module}::" "$@"
+    if [ "$module" = "config_auth_app_state_connectivity_e2e" ]; then
+      # RPC fixtures in this module bind ephemeral listeners and mutate
+      # process-wide credential state; parallel tests can tear down a peer's
+      # listener before its final auth call.
+      OPENHUMAN_MODULE_PATH="$connectors_module_path" \
+        cargo_test --test in_process_all -- "${module}::" --test-threads=1 "$@"
+    else
+      OPENHUMAN_MODULE_PATH="$connectors_module_path" \
+        cargo_test --test in_process_all -- "${module}::" "$@"
+    fi
   done < <(in_process_modules)
 }
 
@@ -285,6 +293,7 @@ run_json_rpc_e2e() {
     return 1
   fi
   test_names="$(printf '%s\n' "$listing" | sed -n 's/: test$//p')"
+  if [ -n "${JSON_RPC_E2E_FILTER:-}" ]; then test_names="$(printf "%s\n" "$test_names" | grep -- "$JSON_RPC_E2E_FILTER" || true)"; fi
   if [ -z "$test_names" ]; then
     echo "[test-rust-with-mock] ERROR: json_rpc_e2e enumeration returned no tests." >&2
     return 1

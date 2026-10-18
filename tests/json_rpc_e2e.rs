@@ -2539,6 +2539,137 @@ async fn json_rpc_cron_origin_delivery_lands_in_the_asking_thread_inner() {
 }
 
 #[test]
+fn json_rpc_cron_add_run_list_round_trip_over_the_tinyflows_module() {
+    run_json_rpc_e2e_on_agent_stack(
+        "json_rpc_cron_add_run_list_round_trip_over_the_tinyflows_module",
+        json_rpc_cron_add_run_list_round_trip_over_the_tinyflows_module_inner,
+    );
+}
+
+/// The cron surface end to end over JSON-RPC with the scheduler runtime, job
+/// store and schedule maths in the `tinyflows` module: an agent job is added,
+/// listed, run now (the module's `ExecuteJob` calling back into the host), its
+/// run is recorded, and removing it empties the list.
+async fn json_rpc_cron_add_run_list_round_trip_over_the_tinyflows_module_inner() {
+    let _env_lock = json_rpc_e2e_env_lock_async().await;
+    let tmp = tempdir().expect("tempdir");
+    let home = tmp.path();
+    let openhuman_home = home.join(".openhuman");
+
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
+    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
+    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
+    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
+    clear_forced_chat_completions();
+
+    let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
+    let mock_origin = format!("http://{mock_addr}");
+    write_min_config(&openhuman_home, &mock_origin);
+    write_min_config(&openhuman_home.join("users").join("e2e-user"), &mock_origin);
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{rpc_addr}");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let store = post_json_rpc(
+        &rpc_base,
+        1,
+        "openhuman.auth_store_session",
+        json!({ "token": "e2e-test-jwt", "user_id": "e2e-user" }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&store, "store_session");
+
+    // The workspace may hold the host's own system jobs; ours is not there yet.
+    let empty = post_json_rpc(&rpc_base, 2, "openhuman.cron_list", json!({})).await;
+    assert!(
+        !assert_no_jsonrpc_error(&empty, "cron_list")
+            .to_string()
+            .contains("roundtrip"),
+        "the job is not there before it is added"
+    );
+
+    let add = post_json_rpc(
+        &rpc_base,
+        3,
+        "openhuman.cron_add",
+        json!({
+            "name": "roundtrip",
+            "schedule": { "kind": "every", "every_ms": 3_600_000 },
+            "job_type": "agent",
+            "prompt": "Say the round trip phrase.",
+            "delivery": { "mode": "none" },
+        }),
+    )
+    .await;
+    let add_result = assert_no_jsonrpc_error(&add, "cron_add");
+    let job_id = add_result["result"]["id"]
+        .as_str()
+        .or_else(|| add_result["id"].as_str())
+        .unwrap_or_else(|| panic!("job id missing: {add_result}"))
+        .to_string();
+
+    let listed = post_json_rpc(&rpc_base, 4, "openhuman.cron_list", json!({})).await;
+    let listed_body = assert_no_jsonrpc_error(&listed, "cron_list").to_string();
+    assert!(
+        listed_body.contains(&job_id) && listed_body.contains("roundtrip"),
+        "the added job is listed: {listed_body}"
+    );
+
+    push_forced_chat_completion_when(
+        "Say the round trip phrase.",
+        forced_text_completion("round trip phrase"),
+    );
+    let run = post_json_rpc(
+        &rpc_base,
+        5,
+        "openhuman.cron_run",
+        json!({ "job_id": job_id }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&run, "cron_run");
+
+    let mut recorded = String::new();
+    for _ in 0..200 {
+        let runs = post_json_rpc(
+            &rpc_base,
+            6,
+            "openhuman.cron_runs",
+            json!({ "job_id": job_id }),
+        )
+        .await;
+        recorded = assert_no_jsonrpc_error(&runs, "cron_runs").to_string();
+        if recorded.contains("\"status\":\"ok\"") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(
+        recorded.contains("\"status\":\"ok\"") && recorded.contains("round trip phrase"),
+        "the run is recorded with the agent's output: {recorded}"
+    );
+
+    let remove = post_json_rpc(
+        &rpc_base,
+        7,
+        "openhuman.cron_remove",
+        json!({ "job_id": job_id }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&remove, "cron_remove");
+    let after = post_json_rpc(&rpc_base, 8, "openhuman.cron_list", json!({})).await;
+    assert!(
+        !assert_no_jsonrpc_error(&after, "cron_list")
+            .to_string()
+            .contains(&job_id),
+        "the removed job is gone"
+    );
+
+    mock_join.abort();
+    rpc_join.abort();
+}
+
+#[test]
 fn json_rpc_protocol_auth_and_agent_hello() {
     run_json_rpc_e2e_on_agent_stack(
         "json_rpc_protocol_auth_and_agent_hello",
@@ -5033,12 +5164,14 @@ async fn json_rpc_web_chat_custom_chat_provider_with_auth_none_omits_auth_header
         )),
         "reinjecting a reserved provider must retain its CA bundle"
     );
-    let (model, model_id) = openhuman_core::inference::provider::create_chat_model_with_model_id(
-        "chat",
-        &loaded_config,
-        0.0,
-    )
-    .expect("custom auth-none model should build");
+    let (model, model_id) =
+        openhuman_core::inference::provider::create_chat_model_with_model_id_in(
+            &openhuman_core::core::runtime::DispatchCtx::host_default(),
+            "chat",
+            &loaded_config,
+            0.0,
+        )
+        .expect("custom auth-none model should build");
     let direct = model
         .invoke(
             &(),

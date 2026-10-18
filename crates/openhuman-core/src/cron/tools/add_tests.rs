@@ -2,7 +2,7 @@ use super::*;
 use crate::config::Config;
 use crate::security::AutonomyLevel;
 use tempfile::TempDir;
-use tinyflows_schedule::types::ActiveHours;
+use tinyflows_bus::schedule::types::ActiveHours;
 
 async fn test_config(tmp: &TempDir) -> Arc<Config> {
     let config = Config {

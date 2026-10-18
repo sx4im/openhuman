@@ -23,11 +23,18 @@ impl Turn {
     /// [`CoreError::Unavailable`] when the `inference` domain family is off —
     /// that is a build/composition fact, not a failure, and a host should hide
     /// the surface rather than report an error.
-    pub async fn send(mut self) -> Result<TurnOutcome, CoreError> {
-        let environment = self.tool_env.take();
+    pub async fn send(self) -> Result<TurnOutcome, CoreError> {
+        let environment = self.tool_env.clone();
         let dispatch = Box::pin(self.send_scoped());
         match environment {
-            Some(environment) => environment.scope(dispatch).await,
+            Some(environment) => {
+                let command_environment = tinytools_std::timeout::CommandEnvironment::new(
+                    environment
+                        .iter()
+                        .map(|(name, value)| (name.clone(), value.clone())),
+                );
+                command_environment.scope(dispatch).await
+            }
             None => dispatch.await,
         }
     }
@@ -357,6 +364,7 @@ impl Turn {
         let chat_env = openhuman_core::inference::host_runtime::ops::AgentChatEnv {
             progress: self.progress.take(),
             host: openhuman_core::agent::turn_env::HostTurnEnv {
+                command_environment: self.tool_env.take(),
                 model_budget: budget.clone(),
                 spawn_depth_limit: self.spawn_depth_limit,
                 cancellation: self.native_cancellation.clone(),

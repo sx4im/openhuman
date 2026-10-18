@@ -26,8 +26,9 @@ pub(crate) async fn complete(
 ) -> Result<String, String> {
     // Built per call so a provider change in Settings applies without a
     // restart; construction is cheap and synchronous.
-    let (model, resolved) = provider::create_chat_model_with_model_id_in(ctx, ROLE, config, TEMPERATURE)
-        .map_err(|e| format!("openhuman inference unavailable: {e}"))?;
+    let (model, resolved) =
+        provider::create_chat_model_with_model_id_in(ctx, ROLE, config, TEMPERATURE)
+            .map_err(|e| format!("openhuman inference unavailable: {e}"))?;
     // Reasoning off for tinymemes' calls only (the rest of OpenHuman keeps
     // its configured reasoning). The managed backend honours the
     // `without_reasoning` flag; a BYOK route to OpenRouter needs

@@ -47,6 +47,7 @@ async fn start_channels_inner(mut config: Config, session: CancellationToken) ->
     // ArtifactFailed) as `artifact_ready` / `artifact_failed` web-channel
     // events so the frontend ArtifactCard can render in chat (#2779).
     crate::web_chat::register_artifact_surface_subscriber();
+    crate::threads::artifact_rows::register_artifact_row_subscriber();
     // Surface external-egress disclosure events (ExternalTransferPending) as
     // `external_transfer_pending` web-channel events so the frontend can show a
     // per-action "what leaves, to where, why" card (privacy epic S2, #4436).

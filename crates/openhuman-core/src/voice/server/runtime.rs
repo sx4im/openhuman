@@ -70,7 +70,11 @@ impl VoiceServer {
     /// Run the voice server. Blocks until stopped.
     ///
     /// This is the main entry point for both embedded and standalone modes.
-    pub async fn run(&self, app_config: &Config) -> Result<(), String> {
+    pub async fn run(
+        &self,
+        ctx: &crate::core::runtime::DispatchCtx,
+        app_config: &Config,
+    ) -> Result<(), String> {
         // Atomically transition Stopped → Idle to prevent concurrent run() calls.
         // The globe listener compilation can take several seconds; without this
         // guard the RPC handler sees "Stopped" and spawns a duplicate run().
@@ -114,6 +118,7 @@ impl VoiceServer {
         // rdev's CGEventTap can see it. Use the Swift-based globe listener
         // instead, which monitors NSEvent.flagsChanged for the .function flag.
         let (listener_handle, mut hotkey_rx) = match start_hotkey_listener(
+            ctx,
             app_config,
             &self.config.hotkey,
             self.config.activation_mode,
@@ -210,7 +215,7 @@ impl VoiceServer {
                             // event loop remains responsive to Release.
                             let (tx, rx) = tokio::sync::oneshot::channel();
                             let capture_config = app_config.clone();
-                            crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+                            ctx.spawn(async move {
                                 let expected_app = capture_expected_app_name(&capture_config).await;
                                 let result = audio_capture::start_recording(&capture_config).await
                                     .map(|handle| (handle, expected_app));
@@ -223,6 +228,7 @@ impl VoiceServer {
                             if let Some(handle) = recording.take() {
                                 debug!("{LOG_PREFIX} hotkey stop → stopping recording generation={generation}");
                                 self.spawn_process_recording(
+                                    ctx,
                                     handle,
                                     app_config,
                                     &recorder,
@@ -303,6 +309,7 @@ impl VoiceServer {
                             if let Some(handle) = recording.take() {
                                 info!("{LOG_PREFIX} deferred stop deadline reached, stopping recording");
                                 self.spawn_process_recording(
+                                    ctx,
                                     handle,
                                     app_config,
                                     &recorder,
@@ -368,6 +375,7 @@ impl VoiceServer {
     /// consecutive Fn presses are never missed.
     fn spawn_process_recording(
         &self,
+        ctx: &crate::core::runtime::DispatchCtx,
         handle: RecordingHandle,
         config: &Config,
         recorder: &Recorder,
@@ -386,7 +394,7 @@ impl VoiceServer {
             "{LOG_PREFIX} [pipeline={pipeline_id}] spawning process_recording (generation={generation})"
         );
 
-        crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+        ctx.spawn(async move {
             process_recording_bg(
                 &pipeline_id,
                 handle,

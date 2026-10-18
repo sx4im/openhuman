@@ -230,12 +230,14 @@ fn selected_managed_route_constructs_with_the_picker_model() {
     let config = Config::default();
     let selection = "openrouter/author/picked-model:free";
     let effective = effective_session_config(&config, Some(selection), None);
-    let (_, resolved_model) = crate::inference::provider::factory::create_chat_model_with_model_id(
-        "chat",
-        &effective,
-        effective.default_temperature,
-    )
-    .expect("managed picker selection should construct without network access");
+    let (_, resolved_model) =
+        crate::inference::provider::factory::create_chat_model_with_model_id_in(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            "chat",
+            &effective,
+            effective.default_temperature,
+        )
+        .expect("managed picker selection should construct without network access");
     assert_eq!(resolved_model, selection);
 }
 
@@ -251,7 +253,8 @@ fn selected_ollama_route_constructs_the_selected_model_without_network() {
         let selection = format!("ollama:{model}");
         let effective = effective_session_config(&config, Some(&selection), None);
         let (_, resolved_model) =
-            crate::inference::provider::factory::create_chat_model_with_model_id(
+            crate::inference::provider::factory::create_chat_model_with_model_id_in(
+                &crate::core::runtime::DispatchCtx::ambient(),
                 "chat",
                 &effective,
                 effective.default_temperature,
@@ -399,8 +402,13 @@ fn assert_huggingface_model_builds(config: &Config, expected_model: &str) {
     // Wait out any test that has a mock chat model installed process-wide.
     let _serial = crate::inference::provider::factory::test_provider_override::exclusive();
     let (_, resolved_model) =
-        crate::inference::provider::factory::create_chat_model_with_model_id("chat", config, 0.0)
-            .expect("case-insensitive cloud selection should resolve through its configured slug");
+        crate::inference::provider::factory::create_chat_model_with_model_id_in(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            "chat",
+            config,
+            0.0,
+        )
+        .expect("case-insensitive cloud selection should resolve through its configured slug");
     assert_eq!(resolved_model, expected_model);
 }
 

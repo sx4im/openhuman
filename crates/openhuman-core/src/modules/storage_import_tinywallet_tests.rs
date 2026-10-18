@@ -41,7 +41,9 @@ fn digest(path: &Path) -> Vec<u8> {
 async fn the_payment_history_moves_into_the_modules_stream_in_order() {
     let legacy = legacy_workspace();
     let scoped = scoped();
-    let outcome = import_into(&scoped, legacy.path()).await.unwrap();
+    let outcome = import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+        .await
+        .unwrap();
     assert_eq!(
         outcome,
         Outcome::Imported {
@@ -77,7 +79,9 @@ async fn the_legacy_ledger_is_left_untouched() {
     let legacy = legacy_workspace();
     let file = legacy.path().join(LEDGER_FILE);
     let before = digest(&file);
-    import_into(&scoped(), legacy.path()).await.unwrap();
+    import_into(&DispatchCtx::host_default(), &scoped(), legacy.path())
+        .await
+        .unwrap();
     assert_eq!(digest(&file), before);
 }
 
@@ -85,9 +89,13 @@ async fn the_legacy_ledger_is_left_untouched() {
 async fn a_second_run_does_not_repeat_the_history() {
     let legacy = legacy_workspace();
     let scoped = scoped();
-    import_into(&scoped, legacy.path()).await.unwrap();
+    import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+        .await
+        .unwrap();
     assert_eq!(
-        import_into(&scoped, legacy.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .unwrap(),
         Outcome::AlreadyDone
     );
     assert_eq!(scoped.streams().len(PAYMENTS_STREAM).await.unwrap(), 3);
@@ -106,7 +114,9 @@ async fn a_stream_the_module_already_wrote_is_not_preceded_by_old_records() {
         .await
         .unwrap();
     assert_eq!(
-        import_into(&scoped, legacy.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .unwrap(),
         Outcome::Imported {
             payments: 0,
             skipped: 1
@@ -120,12 +130,16 @@ async fn a_workspace_without_a_ledger_writes_no_marker() {
     let empty = tempfile::tempdir().unwrap();
     let scoped = scoped();
     assert_eq!(
-        import_into(&scoped, empty.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, empty.path())
+            .await
+            .unwrap(),
         Outcome::NoSource
     );
     let legacy = legacy_workspace();
     assert!(matches!(
-        import_into(&scoped, legacy.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .unwrap(),
         Outcome::Imported { .. }
     ));
 }
@@ -137,12 +151,18 @@ async fn an_unreadable_ledger_is_retried_instead_of_marked_done() {
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(&file, [0xff, 0xfe]).unwrap();
     let scoped = scoped();
-    assert!(import_into(&scoped, dir.path()).await.is_err());
+    assert!(
+        import_into(&DispatchCtx::host_default(), &scoped, dir.path())
+            .await
+            .is_err()
+    );
     assert_eq!(scoped.streams().len(PAYMENTS_STREAM).await.unwrap(), 0);
 
     std::fs::write(&file, format!("{}\n", record("p1", "settled"))).unwrap();
     assert_eq!(
-        import_into(&scoped, dir.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, dir.path())
+            .await
+            .unwrap(),
         Outcome::Imported {
             payments: 1,
             skipped: 0

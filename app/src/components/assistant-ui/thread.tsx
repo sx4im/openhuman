@@ -147,6 +147,20 @@ export type ThreadComponents = {
    * `null` when there is nothing to show.
    */
   TranscriptFooter?: ComponentType | undefined;
+  /**
+   * Host-owned content rendered after the last message, inside the
+   * scrollable transcript — artifact cards from versioned tools that
+   * carry no tool-call id and would otherwise be invisible to the
+   * inline tool-call renderer. Always mounted (not gated on isRunning).
+   */
+  AfterMessages?: ComponentType | undefined;
+  /**
+   * Host-owned artifact cards rendered inside each assistant message's
+   * content area (matched by requestId). Unlike AfterMessages which
+   * renders once at the end of the transcript, MessageArtifacts renders
+   * per-message so cards appear attached to the message that created them.
+   */
+  MessageArtifacts?: ComponentType | undefined;
   /** Host-owned attachment previews rendered above the editor. */
   ComposerAttachments?: ComponentType | undefined;
   /** Host-owned attachment picker rendered in the action row. */
@@ -344,7 +358,12 @@ const ThreadComponentsContext = createContext<ThreadComponents>(EMPTY_COMPONENTS
 // in a separate context so that change does not invalidate the full transcript.
 type MessageComponents = Pick<
   ThreadComponents,
-  'AssistantMessage' | 'ToolFallback' | 'ActivityGroup' | 'SourceGroup' | 'MessageTasks'
+  | 'AssistantMessage'
+  | 'ToolFallback'
+  | 'ActivityGroup'
+  | 'SourceGroup'
+  | 'MessageTasks'
+  | 'MessageArtifacts'
 >;
 const MessageComponentsContext = createContext<MessageComponents>(EMPTY_COMPONENTS);
 
@@ -406,6 +425,7 @@ export const Thread: FC<ThreadProps> = ({
       ActivityGroup: components.ActivityGroup,
       SourceGroup: components.SourceGroup,
       MessageTasks: components.MessageTasks,
+      MessageArtifacts: components.MessageArtifacts,
     }),
     [
       components.AssistantMessage,
@@ -413,6 +433,7 @@ export const Thread: FC<ThreadProps> = ({
       components.ActivityGroup,
       components.SourceGroup,
       components.MessageTasks,
+      components.MessageArtifacts,
     ]
   );
 
@@ -504,6 +525,7 @@ const ThreadRoot: FC<{
             <ThreadPrimitive.Messages>{() => <ThreadMessage />}</ThreadPrimitive.Messages>
             <RunningStatusSlot />
             <TranscriptFooterSlot />
+            <AfterMessagesSlot />
             {ActiveTasks && <ActiveTasks />}
           </div>
 
@@ -576,6 +598,13 @@ const TranscriptFooterSlot: FC = () => {
       <TranscriptFooter />
     </AuiIf>
   );
+};
+
+/** Host content after the last message; always mounted (not gated). */
+const AfterMessagesSlot: FC = () => {
+  const { AfterMessages } = useContext(ThreadComponentsContext);
+  if (!AfterMessages) return null;
+  return <AfterMessages />;
 };
 
 const ThreadMessage: FC = () => {
@@ -1146,6 +1175,7 @@ const AssistantMessage: FC = () => {
     ActivityGroup = DefaultActivityGroup,
     SourceGroup,
     MessageTasks,
+    MessageArtifacts,
   } = useContext(MessageComponentsContext);
   const stopped = useAuiState(isStoppedRun);
   const parts = useAuiState(s => s.message.parts);
@@ -1261,6 +1291,11 @@ const AssistantMessage: FC = () => {
         {MessageTasks && (
           <div>
             <MessageTasks />
+          </div>
+        )}
+        {MessageArtifacts && (
+          <div className="mt-2">
+            <MessageArtifacts />
           </div>
         )}
       </div>

@@ -6,7 +6,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{json, Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 
 fn required_text(params: &Map<String, Value>, key: &str) -> Result<String, String> {

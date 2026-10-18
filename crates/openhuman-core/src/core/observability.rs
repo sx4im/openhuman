@@ -935,7 +935,7 @@ fn is_embedding_model_rejected(lower: &str) -> bool {
 ///   streaming 401s still escalate — guarded by
 ///   `does_not_classify_streaming_byo_key_401_as_session_expired`.
 /// - `"SESSION_EXPIRED: backend session not active — sign in to resume LLM work"`
-///   — the `scheduler_gate::is_signed_out` sentinel from
+///   — the `llm_gate::is_signed_out` sentinel from
 ///   `providers::openhuman_backend::resolve_bearer`.
 /// - `"no backend session token; run auth_store_session first"` and
 ///   `"session JWT required"` — local pre-flight guards that fire when the

@@ -20,11 +20,8 @@ pub(crate) async fn dispatch_callback(
     }
     match request {
         Request::ListThreads => {
-            let threads = conversations::list_threads(
-                dispatch,
-                ctx.workspace_dir.to_path_buf(),
-            )
-            .map_err(|_| tinybus::Error::failed("conversation state unavailable"))?;
+            let threads = conversations::list_threads(dispatch, ctx.workspace_dir.to_path_buf())
+                .map_err(|_| tinybus::Error::failed("conversation state unavailable"))?;
             Ok(Response::Threads(
                 threads
                     .into_iter()

@@ -6,7 +6,7 @@
 //! `run_triage` → `apply_decision` path Composio webhooks use — so an agent
 //! can start working immediately; triage's classifier (drop / acknowledge /
 //! react / escalate) gates noise, and the proactive turn is held behind the
-//! `scheduler_gate` capacity semaphore so background AI throttling is
+//! `llm_gate` capacity semaphore so background AI throttling is
 //! respected. [`SourceTarget::TodoOnly`] sources are collected into the ledger
 //! and go no further.
 //!
@@ -21,7 +21,7 @@ use crate::agent::triage::{
 };
 use crate::agent::turn_origin::with_origin;
 use crate::config::Config;
-use crate::cron::scheduler_gate;
+use crate::platform::llm_gate;
 
 use super::types::{EnrichedTask, SourceTarget, TaskSource};
 
@@ -56,7 +56,7 @@ async fn dispatch_triage(
 ) -> Result<(), String> {
     // Respect background-AI throttling. When the gate denies capacity
     // (Off / paused), we keep the card but skip the proactive turn.
-    let Some(_permit) = scheduler_gate::wait_for_capacity().await else {
+    let Some(_permit) = llm_gate::wait_for_capacity().await else {
         tracing::info!(
             source_id = %source.id,
             "[task_sources:route] scheduler gate denied capacity; agent turn skipped"
@@ -81,7 +81,7 @@ async fn dispatch_triage(
         payload,
     );
 
-    let outcome = run_triage(&ctx, &envelope)
+    let outcome = run_triage(ctx, &envelope)
         .await
         .map_err(|e| format!("[task_sources:route] triage evaluation failed: {e}"))?;
 
@@ -90,7 +90,7 @@ async fn dispatch_triage(
             // Remote payload: the task arrived from an external board, so the
             // dispatch parks rather than running on a trust root (#5634).
             let origin = remote_trigger_origin(&envelope);
-            with_origin(origin, apply_decision(&ctx, run, &envelope))
+            with_origin(origin, apply_decision(ctx, run, &envelope))
                 .await
                 .map_err(|e| format!("[task_sources:route] apply_decision failed: {e}"))?;
             tracing::debug!(

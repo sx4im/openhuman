@@ -69,6 +69,29 @@ fn reply_remix_capability_shows_disabled_when_the_memes_component_is_off() {
     assert_eq!(apply_components(cap, &off("voice")).status, cap.status);
 }
 
+#[test]
+fn scheduled_job_capabilities_show_disabled_when_the_tinyflows_component_is_off() {
+    for id in [
+        "automation.view_cron_jobs",
+        "automation.set_job_intervals",
+        "automation.view_execution_history",
+        "automation.morning_briefing",
+    ] {
+        let cap = super::super::lookup(id).expect(id);
+        assert_ne!(cap.status, CapabilityStatus::Disabled, "{id}");
+        assert_eq!(
+            apply_components(cap, &off("tinyflows")).status,
+            CapabilityStatus::Disabled,
+            "{id}"
+        );
+        assert_eq!(
+            apply_components(cap, &off("flows")).status,
+            cap.status,
+            "{id}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn an_explicit_context_decides_which_capabilities_are_disabled() {
     use crate::core::runtime::context::CoreContext;

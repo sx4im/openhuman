@@ -54,6 +54,7 @@ async fn bound_turn(tmp: &tempfile::TempDir) -> Arc<MemoryTurn> {
         identity,
         thread_id: "t".into(),
         pack: None,
+        in_prompt_from: Arc::new(crate::memory::lifecycle::window::InPromptFrom::new(0, 20)),
         core: None,
     })
 }
@@ -122,6 +123,28 @@ async fn without_recall_the_summarizer_is_unchanged_and_its_failure_is_its_own()
 
     let failing = MemoryRecallSummarizer::wrap(Box::new(Failing), Some(turn));
     assert!(failing.summarize(&dropped()).await.is_err());
+}
+
+#[tokio::test]
+async fn with_recall_off_a_compaction_still_moves_the_memory_window() {
+    let tmp = tempfile::tempdir().unwrap();
+    let turn = bound_turn(&tmp).await;
+    let mut quiet = (*turn).clone();
+    quiet.identity.recall = false;
+    let quiet = Arc::new(quiet);
+    let summarizer = MemoryRecallSummarizer::wrap(Box::new(ConcatSummarizer), Some(quiet.clone()));
+    let text = summarizer
+        .summarize(&dropped())
+        .await
+        .unwrap()
+        .summary
+        .text();
+    assert!(!text.contains(RECALLED_HEADING), "no recall when it is off");
+    assert_eq!(
+        quiet.in_prompt().from_turn,
+        2,
+        "the agent's memory tool still reads by the window"
+    );
 }
 
 #[test]
@@ -237,6 +260,7 @@ async fn a_held_memory_engine_does_not_delay_transcript_compaction() {
         identity,
         thread_id: "held".into(),
         pack: None,
+        in_prompt_from: Arc::new(crate::memory::lifecycle::window::InPromptFrom::new(0, 20)),
         core: None,
     });
     let summarizer = MemoryRecallSummarizer::wrap(Box::new(ConcatSummarizer), Some(turn));
@@ -248,4 +272,34 @@ async fn a_held_memory_engine_does_not_delay_transcript_compaction() {
     .expect("memory must not hold the inner summarizer")
     .unwrap();
     assert!(record.summary.text().contains("March 3rd"));
+}
+
+#[tokio::test]
+async fn a_compaction_during_the_turn_moves_its_memory_window() {
+    let tmp = tempfile::tempdir().unwrap();
+    let turn = bound_turn(&tmp).await;
+    assert_eq!(turn.in_prompt().from_turn, 0);
+
+    // A failed fold folds nothing: the window stays.
+    let failing = MemoryRecallSummarizer::wrap(Box::new(Failing), Some(turn.clone()));
+    assert!(failing.summarize(&dropped()).await.is_err());
+    assert_eq!(turn.in_prompt().from_turn, 0);
+
+    // One user message folded: its turn and the reply leave the prompt, so the
+    // turn's next memory read may return them.
+    let summarizer = MemoryRecallSummarizer::wrap(Box::new(ConcatSummarizer), Some(turn.clone()));
+    summarizer.summarize(&dropped()).await.unwrap();
+    assert_eq!(turn.in_prompt().from_turn, 2);
+
+    // The same span folded again moves nothing; a new one moves it on.
+    summarizer.summarize(&dropped()).await.unwrap();
+    assert_eq!(turn.in_prompt().from_turn, 2);
+    summarizer
+        .summarize(&[
+            Message::user("what about the venue?"),
+            Message::assistant("The hall."),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(turn.in_prompt().from_turn, 4);
 }

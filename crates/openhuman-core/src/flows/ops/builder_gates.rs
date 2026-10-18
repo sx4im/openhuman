@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::runtime::DispatchCtx;
 
 /// The single canonical definition of the builder hard-gate stack: the
 /// author-time gates that reject (not warn) a graph an agent must not propose
@@ -68,7 +69,11 @@ pub(crate) fn validate_upload_paths(graph: &WorkflowGraph) -> Vec<String> {
     errors
 }
 
-pub(crate) async fn run_builder_gates(config: &Config, graph: &WorkflowGraph) -> Vec<String> {
+pub(crate) async fn run_builder_gates(
+    ctx: &DispatchCtx,
+    config: &Config,
+    graph: &WorkflowGraph,
+) -> Vec<String> {
     // The stack order, short-circuiting and mock-run preflight are
     // `tinyflows::gates::builder_failures`'; the host supplies the stages that
     // depend on its vocabulary (agent registry, connections, tool catalog).
@@ -76,7 +81,7 @@ pub(crate) async fn run_builder_gates(config: &Config, graph: &WorkflowGraph) ->
     // Provider connectivity (B45) is deliberately NOT a stage: it is an advisory
     // `inference_status` on the proposal payload and a run-time rejection, so a
     // graph that is only "not runnable yet" can still be shown to the user.
-    let host = OpenHumanBuilderGateHost { config };
+    let host = OpenHumanBuilderGateHost { ctx, config };
     match tinyflows::gates::builder_failures(
         graph,
         &host,
@@ -99,6 +104,7 @@ pub(crate) async fn run_builder_gates(config: &Config, graph: &WorkflowGraph) ->
 /// Host side of the builder gate stack: the four `HostGateStage`s and the
 /// saved-workflow lookup the compatibility walk needs.
 struct OpenHumanBuilderGateHost<'a> {
+    ctx: &'a DispatchCtx,
     config: &'a Config,
 }
 
@@ -130,8 +136,12 @@ impl tinyflows::gates::BuilderGateHost for OpenHumanBuilderGateHost<'_> {
         use tinyflows::gates::HostGateStage;
         Ok(match stage {
             HostGateStage::ToolPolicy => validate_upload_paths(graph),
-            HostGateStage::AgentReferences => validate_agent_refs(self.config, graph).await,
-            HostGateStage::Connections => validate_connection_refs(self.config, graph).await,
+            HostGateStage::AgentReferences => {
+                validate_agent_refs(self.ctx, self.config, graph).await
+            }
+            HostGateStage::Connections => {
+                validate_connection_refs(self.ctx, self.config, graph).await
+            }
             HostGateStage::ToolContracts => validate_tool_contracts(self.config, graph).await,
         })
     }
@@ -146,7 +156,11 @@ impl tinyflows::gates::BuilderGateHost for OpenHumanBuilderGateHost<'_> {
 /// on the canvas may save a work-in-progress graph); passing `strict: true`
 /// opts that call into the *same* gates an agent save must pass, so the two
 /// planes converge on one definition instead of diverging.
-pub(crate) async fn strict_gate(config: &Config, graph_json: &Value) -> Result<(), String> {
+pub(crate) async fn strict_gate(
+    ctx: &DispatchCtx,
+    config: &Config,
+    graph_json: &Value,
+) -> Result<(), String> {
     let graph = tinyflows::migrate::deserialize_graph(graph_json.clone())?;
     let structural = tinyflows::validate::validate_all(&graph);
     if !structural.is_empty() {
@@ -156,7 +170,7 @@ pub(crate) async fn strict_gate(config: &Config, graph_json: &Value) -> Result<(
             messages.join("\n")
         ));
     }
-    let gate_errors = run_builder_gates(config, &graph).await;
+    let gate_errors = run_builder_gates(ctx, config, &graph).await;
     if !gate_errors.is_empty() {
         return Err(format!(
             "strict validation failed:\n{}",
@@ -191,6 +205,7 @@ pub(crate) async fn strict_gate(config: &Config, graph_json: &Value) -> Result<(
 /// graph.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn build_builder_proposal(
+    ctx: &DispatchCtx,
     config: &Config,
     retry_tool: &str,
     name: &str,
@@ -203,7 +218,7 @@ pub(crate) async fn build_builder_proposal(
 ) -> Result<Value, String> {
     // The full builder hard-gate stack, run through the single canonical
     // runner so every proposal/save/strict-RPC path gates identically (F3).
-    let gate_errors = run_builder_gates(config, graph).await;
+    let gate_errors = run_builder_gates(ctx, config, graph).await;
     if !gate_errors.is_empty() {
         return Err(format!(
             "{}\n\nFix these and call {retry_tool} again.",
@@ -217,7 +232,7 @@ pub(crate) async fn build_builder_proposal(
     // Connector onboarding (Phase 5, item 18): tell the proposal card which
     // toolkits this graph needs and whether they're connected, so it can render
     // "Connect <toolkit>" CTAs instead of a bare gate error later.
-    let required_connections = compute_required_connections(config, graph).await;
+    let required_connections = compute_required_connections(ctx, config, graph).await;
     // B45 (design correction): the LLM-provider-connectivity evaluation is
     // ADVISORY here, never a rejection — `run_builder_gates` above no longer
     // includes it (that used to hard-block `propose_workflow`/`edit_workflow`
@@ -230,7 +245,7 @@ pub(crate) async fn build_builder_proposal(
     // shared, cached evaluator the run-time preflight (`validate_inference_readiness`
     // in `run_flow_body`) consumes, so a run right after this proposal reads
     // the cached result instead of re-probing the network.
-    let inference_readiness = evaluate_inference_readiness(config, graph).await;
+    let inference_readiness = evaluate_inference_readiness(ctx, config, graph).await;
     let graph_value = serde_json::to_value(graph).map_err(|e| e.to_string())?;
 
     tracing::info!(
@@ -340,7 +355,11 @@ pub(crate) async fn build_builder_proposal(
 /// non-harness `agent_ref`s previously triggered one `config_rpc::
 /// load_config_with_timeout` per node; an all-`Harness`/no-custom-ref graph
 /// still never reads it at all.
-pub(crate) async fn validate_agent_refs(config: &Config, graph: &WorkflowGraph) -> Vec<String> {
+pub(crate) async fn validate_agent_refs(
+    ctx: &DispatchCtx,
+    config: &Config,
+    graph: &WorkflowGraph,
+) -> Vec<String> {
     use crate::agent::harness::host_definition::AgentDefinitionRegistry;
     use crate::agent::registry::AgentRegistryEntry;
     use crate::flows::tinyflows::caps::{route_for_agent_ref, AgentRoute};
@@ -384,13 +403,7 @@ pub(crate) async fn validate_agent_refs(config: &Config, graph: &WorkflowGraph) 
             }
             AgentRoute::RegistryFallback => {
                 if custom_registry.is_none() {
-                    custom_registry = Some(
-                        crate::agent::registry::list_agents(
-                            &crate::core::runtime::DispatchCtx::ambient(),
-                            true,
-                        )
-                        .await,
-                    );
+                    custom_registry = Some(crate::agent::registry::list_agents(ctx, true).await);
                 }
                 match custom_registry.as_ref().expect("just populated") {
                     Ok(entries) => match entries.iter().find(|entry| entry.id == agent_ref) {

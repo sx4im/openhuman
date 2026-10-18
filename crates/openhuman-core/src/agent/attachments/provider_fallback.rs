@@ -239,7 +239,13 @@ impl AttachmentModel {
             .profile()
             .and_then(|p| p.provider.as_deref())
             .unwrap_or("unknown");
-        let prepared = wrap(&self.dispatch_ctx(), vision.clone(), self.config.clone(), &model_id, provider);
+        let prepared = wrap(
+            &self.dispatch_ctx(),
+            vision.clone(),
+            self.config.clone(),
+            &model_id,
+            provider,
+        );
         let known = prepared.profile().is_some_and(|p| p.modalities.image_in)
             || provider == "injected" && vision.profile().is_some_and(|p| p.modalities.image_in);
         if !known || !vision.supports_input(InputModality::Image, mime, InputSource::Base64) {

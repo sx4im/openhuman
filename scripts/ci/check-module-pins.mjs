@@ -90,6 +90,7 @@ const PIN_MAP = {
   tinychannels: { submodule: "vendor/tinychannels" },
   tinyhosts: { submodule: "vendor/tinyhosts" },
   tinymemes: { submodule: "vendor/tinymemes" },
+  tinyflows: { submodule: "vendor/tinyflows" },
 };
 
 const failures = [];

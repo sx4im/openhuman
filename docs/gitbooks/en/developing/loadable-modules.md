@@ -47,6 +47,7 @@ in [the module-boundary inventory](../../../module-boundary-inventory.md).
 | `tinyconnectors` | OAuth connector actions and triggers |
 | `tinybox` | Sandbox/resource lifecycle, bounded and supervised execution, jail and Docker operations, shell execution, file transfer and port forwarding |
 | `tinychannels` | Messaging channel transports |
+| `tinyflows` | Scheduled jobs: scheduler runtime, cron job store and schedule maths (`tinyflows-bus` schedule contract) |
 | `tinyhosts` | Hosting provider operations |
 
 Each record carries a version, the release it came from, and one `PlatformAsset` per supported build. Seven records publish eleven builds: `ubuntu-24.04` and `ubuntu-22.04` on `x86_64` and `arm64`, `macos-26` and `macos-15` on `arm64` and `x86_64`, `windows-2025-x86_64`, `windows-2022-x86_64` and `windows-11-arm64`. TinyComputer publishes sixteen assets; TinyBox, TinyMCP and TinyWallet each publish seventeen, adding Arch Linux and Fedora builds. Asset availability is module-specific, so a release's count should not be inferred from another module's matrix.

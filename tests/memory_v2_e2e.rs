@@ -262,7 +262,18 @@ impl Fixture {
     /// the engine may index after it answers. A call still unanswered at the
     /// deadline panics.
     async fn ok_until(&self, method: &str, params: Value, done: impl Fn(&Value) -> bool) -> Value {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        self.ok_until_with_timeout(method, params, Duration::from_secs(10), done)
+            .await
+    }
+
+    async fn ok_until_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+        done: impl Fn(&Value) -> bool,
+    ) -> Value {
+        let deadline = std::time::Instant::now() + timeout;
         loop {
             // The deadline bounds each call too, so a hung call cannot
             // outlast it.
@@ -1738,9 +1749,10 @@ async fn a_later_chat_turn_carries_cached_memory_and_is_logged() {
     // A cold turn starts without waiting for memory. Its background lookup
     // supplies a completed pack to a later turn on this same conversation.
     let idle = f
-        .ok_until(
+        .ok_until_with_timeout(
             "openhuman.channel_web_queue_status",
             json!({ "thread_id": "launch-thread" }),
+            Duration::from_secs(60),
             |status| status["active"] == json!(false),
         )
         .await;

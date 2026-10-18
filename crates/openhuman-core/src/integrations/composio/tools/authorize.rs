@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 
 use super::live_config::live_composio_config;
 use super::redact::redact_composio_outcome;
-use crate::config::Config;
 use crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool;
+use crate::config::Config;
 use crate::core::runtime::DispatchCtx;
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolRunContext};
 
@@ -76,7 +76,11 @@ impl Tool for ComposioAuthorizeTool {
 }
 
 impl ComposioAuthorizeTool {
-    async fn execute_unredacted(&self, ctx: &DispatchCtx, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute_unredacted(
+        &self,
+        ctx: &DispatchCtx,
+        args: Value,
+    ) -> anyhow::Result<ToolResult> {
         let toolkit = args
             .get("toolkit")
             .and_then(|v| v.as_str())

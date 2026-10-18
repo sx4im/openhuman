@@ -191,16 +191,24 @@ fn productivity_default_off_tools_retained_when_opted_in() {
 }
 
 #[tokio::test]
-async fn artifact_list_through_registry_returns_envelope() {
+async fn artifacts_created_through_the_registry_are_listed() {
     let tmp = TempDir::new().unwrap();
     let tools = expansion_tools_for(&tmp);
-    let out = find_tool(&tools, "artifact_list")
-        .execute(serde_json::json!({ "limit": 10 }))
+    let created = find_tool(&tools, "create_artifact")
+        .execute(serde_json::json!({ "kind": "markdown", "title": "Notes", "body": "# hi" }))
         .await
-        .expect("artifact_list execute");
+        .expect("create_artifact execute");
+    assert!(!created.is_error, "{}", created.output_for_llm(false));
+
+    let out = find_tool(&tools, "list_artifacts")
+        .execute(serde_json::json!({}))
+        .await
+        .expect("list_artifacts execute");
     let body = out.output_for_llm(false);
-    assert!(body.contains("artifacts"), "envelope missing: {body}");
-    assert!(body.contains("total"), "envelope missing total: {body}");
+    assert!(
+        body.contains("\"title\":\"Notes\""),
+        "listing missing the artifact: {body}"
+    );
 }
 
 #[test]

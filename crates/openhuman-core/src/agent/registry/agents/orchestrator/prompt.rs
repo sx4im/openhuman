@@ -446,9 +446,11 @@ fn render_connected_mcp_servers() -> String {
     use crate::mcp::registry::connections;
     let servers = match tokio::runtime::Handle::try_current() {
         Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
-            tokio::task::block_in_place(|| handle.block_on(connections::connected_overview(
-                &crate::core::runtime::DispatchCtx::ambient(),
-            )))
+            tokio::task::block_in_place(|| {
+                handle.block_on(connections::connected_overview(
+                    &crate::core::runtime::DispatchCtx::ambient(),
+                ))
+            })
         }
         _ => Vec::new(),
     };

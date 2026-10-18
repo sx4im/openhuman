@@ -17,6 +17,7 @@ pub(super) fn log_worker_join_result(result: Result<(), tokio::task::JoinError>)
 
 /// Start the portable typing lifecycle with OpenHuman's configured interval.
 pub(super) fn spawn_typing_task(
+    dispatch: &crate::core::runtime::DispatchCtx,
     channel: std::sync::Arc<dyn crate::channels::Channel>,
     recipient: String,
     cancellation_token: tokio_util::sync::CancellationToken,
@@ -24,7 +25,7 @@ pub(super) fn spawn_typing_task(
     let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
     // The worker retains ownership across cancellation of the caller while
     // StartTypingRefresh is in flight, then closes the returned module handle.
-    tokio::spawn(async move {
+    dispatch.spawn(async move {
         match channel
             .begin_typing_refresh(&recipient, CHANNEL_TYPING_REFRESH_INTERVAL_SECS)
             .await
@@ -43,7 +44,7 @@ pub(super) fn spawn_typing_task(
         }
         let _ = finished_tx.send(());
     });
-    tokio::spawn(async move {
+    dispatch.spawn(async move {
         let _ = finished_rx.await;
     })
 }

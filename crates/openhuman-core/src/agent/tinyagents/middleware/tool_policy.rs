@@ -2,7 +2,6 @@
 //! the session's channel-permission ceiling at the tool boundary, and render
 //! session-scoped `use_skill` listings.
 
-use crate::core::runtime::DispatchCtx;
 use std::sync::Arc;
 
 use async_trait::async_trait;

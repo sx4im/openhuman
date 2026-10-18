@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::runtime::DispatchCtx;
 
 fn tempdir() -> tempfile::TempDir {
     tempfile::tempdir().expect("tempdir")
@@ -46,15 +47,23 @@ async fn read_confined_refuses_a_file_swapped_for_an_outside_symlink() {
     let roots = vec![root.path().to_path_buf()];
     let (canonical_root, resolved) = confine_path_in(&roots, "view.html").unwrap();
     assert_eq!(
-        read_confined(canonical_root.clone(), resolved.clone())
-            .await
-            .unwrap(),
+        read_confined(
+            &DispatchCtx::ambient(),
+            canonical_root.clone(),
+            resolved.clone()
+        )
+        .await
+        .unwrap(),
         "<p>inside</p>"
     );
 
     std::fs::remove_file(&target).unwrap();
     std::os::unix::fs::symlink(outside.path().join("secret.html"), &target).unwrap();
-    assert!(read_confined(canonical_root, resolved).await.is_err());
+    assert!(
+        read_confined(&DispatchCtx::ambient(), canonical_root, resolved)
+            .await
+            .is_err()
+    );
 }
 
 #[cfg(unix)]
@@ -70,7 +79,11 @@ async fn read_confined_refuses_a_directory_swapped_for_an_outside_symlink() {
 
     std::fs::remove_dir_all(root.path().join("pages")).unwrap();
     std::os::unix::fs::symlink(outside.path(), root.path().join("pages")).unwrap();
-    assert!(read_confined(canonical_root, resolved).await.is_err());
+    assert!(
+        read_confined(&DispatchCtx::ambient(), canonical_root, resolved)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]

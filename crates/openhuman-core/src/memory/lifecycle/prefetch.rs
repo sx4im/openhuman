@@ -171,10 +171,11 @@ pub(crate) fn pre_turn(
                     if let Some(channel) = channel {
                         let workspace = config.workspace_dir.clone();
                         let thread = input.thread_id.clone();
-                        let _ = tokio::task::spawn_blocking(move || {
-                            crate::memory::channels::record(&workspace, &channel, &thread)
-                        })
-                        .await;
+                        let _ = dispatch
+                            .spawn_blocking(move || {
+                                crate::memory::channels::record(&workspace, &channel, &thread)
+                            })
+                            .await;
                     }
                 }
                 hooks::pre_turn_work(&dispatch, &config, &identity, input).await

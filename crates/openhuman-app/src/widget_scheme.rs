@@ -33,7 +33,7 @@ fn declared_origins(query: &str) -> (Vec<String>, Vec<String>) {
             _ => {}
         }
     }
-    let reduce = |items: Vec<Value>| tinymcp::ui::https_origins(Some(&Value::Array(items)));
+    let reduce = |items: Vec<Value>| tinymcp_bus::ui::https_origins(Some(&Value::Array(items)));
     (reduce(connect), reduce(resource))
 }
 

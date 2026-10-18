@@ -127,6 +127,7 @@ async fn run_unsandboxed(
     let state = tempfile::tempdir()?;
     let policy = unsandboxed_policy(workspace, state.path());
     execute_unsandboxed(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &crate::config::Config::default(),
         &policy,
         command,

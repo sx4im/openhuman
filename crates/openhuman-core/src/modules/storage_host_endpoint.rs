@@ -102,26 +102,30 @@ impl StorageHost {
         let mut signals = binding.server.signals();
         let tx = relay.tx.clone();
         relay.fed_by = Some(Arc::downgrade(binding));
-        relay.bridge = Some(tokio::spawn(async move {
-            loop {
-                match signals.recv().await {
-                    Ok(signal) => {
-                        // No receiver just means the bus forwarder is gone.
-                        let _ = tx.send(signal);
+        relay.bridge = Some(
+            // The forwarder only moves signals between channels and reads no
+            // scope, so it needs no tenant.
+            crate::core::runtime::DispatchCtx::host_default().spawn(async move {
+                loop {
+                    match signals.recv().await {
+                        Ok(signal) => {
+                            // No receiver just means the bus forwarder is gone.
+                            let _ = tx.send(signal);
+                        }
+                        Err(broadcast::error::RecvError::Lagged(missed)) => {
+                            // The watch ids in the skipped batch are gone; the
+                            // signal carries no reset form, so record the loss.
+                            tracing::warn!(
+                                target: "storage_host",
+                                missed,
+                                "[storage-host] watch relay lagged; dropped watch signals"
+                            );
+                        }
+                        Err(broadcast::error::RecvError::Closed) => return,
                     }
-                    Err(broadcast::error::RecvError::Lagged(missed)) => {
-                        // The watch ids in the skipped batch are gone; the
-                        // signal carries no reset form, so record the loss.
-                        tracing::warn!(
-                            target: "storage_host",
-                            missed,
-                            "[storage-host] watch relay lagged; dropped watch signals"
-                        );
-                    }
-                    Err(broadcast::error::RecvError::Closed) => return,
                 }
-            }
-        }));
+            }),
+        );
     }
 }
 

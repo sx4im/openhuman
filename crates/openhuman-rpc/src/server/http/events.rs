@@ -153,7 +153,11 @@ pub(super) async fn webhook_events_handler() -> Response {
 ///
 /// Requires bearer auth. Streams all domain events as JSON with event type
 /// set to the domain name (agent, tool, memory, etc.).
-pub(super) async fn domain_events_handler(headers: axum::http::HeaderMap) -> Response {
+pub(super) async fn domain_events_handler(
+    headers: axum::http::HeaderMap,
+    ctx: Option<Extension<DispatchCtx>>,
+) -> Response {
+    let ctx = ctx.map_or_else(DispatchCtx::unbound, |Extension(ctx)| ctx);
     let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -178,7 +182,8 @@ pub(super) async fn domain_events_handler(headers: axum::http::HeaderMap) -> Res
     }
 
     // Read dashboard config for event stream settings.
-    let es_cfg = crate::core_host::config::rpc::load_config_with_timeout()
+    let es_cfg = ctx
+        .load_config()
         .await
         .map(|c| c.dashboard.event_stream)
         .unwrap_or_default();

@@ -30,7 +30,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.64.15"
+version = "0.64.18"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/tinyhumansai/openhuman"
@@ -63,6 +63,26 @@ tinybus = { path = "vendor/tinybus/crates/tinybus" }
 tinybus-macros = { path = "vendor/tinybus/crates/tinybus-macros" }
 tinybus-module = { path = "vendor/tinybus/crates/tinybus-module" }
 
+[patch."https://github.com/tinyhumansai/tinystoragedrivers"]
+# One editable checkout every module resolves onto: each vendor/tiny* manifest
+# names tinystoragedrivers by git tag, and this redirects them all to
+# vendor/tinystoragedrivers. This reverses #7754's removal of the patch on
+# purpose. The vendored commit must stay semver-compatible with the tag modules
+# declare; scripts/ci/check-storage-owner.mjs enforces that every tsd package
+# resolves to a path under vendor/tinystoragedrivers/. tinystoragedrivers-tinybus
+# is left out: nothing here depends on it, and an unused patch warns. Add it with
+# the first dependent.
+tinystoragedrivers = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers" }
+tinystoragedrivers-bus = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-bus" }
+tinystoragedrivers-busproxy = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-busproxy" }
+tinystoragedrivers-client = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-client" }
+tinystoragedrivers-core = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-core" }
+tinystoragedrivers-file = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-file" }
+tinystoragedrivers-mongodb = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-mongodb" }
+tinystoragedrivers-s3 = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-s3" }
+tinystoragedrivers-secrets = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-secrets" }
+tinystoragedrivers-sqlite = { path = "vendor/tinystoragedrivers/crates/tinystoragedrivers-sqlite" }
+
 [patch."https://github.com/tinyhumansai/tinyinference"]
 # tinymemes depends on the Jev client by git; resolve it to the vendored copy.
 tinyinference-decisions = { path = "vendor/tinyagents/vendor/tinyinference/crates/tinyinference-decisions" }
@@ -90,6 +110,7 @@ tinyinference-providers = { path = "vendor/tinyagents/vendor/tinyinference/crate
 tinyinference-voice = { path = "vendor/tinyagents/vendor/tinyinference/crates/tinyinference-voice" }
 tinyflows = { path = "vendor/tinyflows/crates/tinyflows" }
 tinychannels = { path = "vendor/tinychannels" }
+tiny-artifacts = { path = "vendor/tiny-artifacts/crates/tiny-artifacts" }
 
 # Emit enough release DWARF for server-side Sentry symbolication while keeping
 # shipped binaries small. The CI profile deliberately disables LTO/debug info.

@@ -155,3 +155,18 @@ fn require_config_refuses_with_the_typed_error_only_when_the_flag_is_off() {
     assert!(err.contains("COMPONENT_DISABLED:computer"), "{err}");
     assert!(require_config(&config, "search").is_ok());
 }
+
+#[test]
+fn the_tinyflows_flag_stops_the_cron_service_and_nothing_else() {
+    let desktop = ServiceSet::desktop();
+    assert!(desktop.cron, "the desktop preset runs the scheduler");
+    let narrowed = off("tinyflows").narrow_services(desktop);
+    assert!(!narrowed.cron);
+    assert_eq!(narrowed.channels, desktop.channels);
+    // `flows` is a different switch: it leaves the scheduler running.
+    assert!(off("flows").narrow_services(desktop).cron);
+    assert_eq!(
+        off("tinyflows").require("tinyflows").unwrap_err().message,
+        "COMPONENT_DISABLED:tinyflows"
+    );
+}

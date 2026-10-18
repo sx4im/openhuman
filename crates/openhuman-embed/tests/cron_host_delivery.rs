@@ -31,7 +31,10 @@ impl CronDelivery for Recorder {
 
 /// A `cron add` call for a one-shot agent job a few seconds from now.
 fn add_job(name: &str, prompt: &str) -> serde_json::Value {
-    let at = chrono::Utc::now() + chrono::Duration::seconds(2);
+    // A provider turn plus scheduler setup can take longer than two seconds,
+    // especially under coverage. Keep the one-shot in the future until the
+    // cron tool has committed it.
+    let at = chrono::Utc::now() + chrono::Duration::seconds(10);
     let arguments = serde_json::json!({
         "action": "add", "job_type": "agent", "name": name, "prompt": prompt,
         "delivery": {"mode": "origin"},
@@ -67,6 +70,7 @@ fn a_library_agents_scheduled_reply_is_handed_to_the_host() {
                 .config(config)
                 .workspace(Workspace::Stateless)
                 .session_store(Arc::new(InMemorySessionStores::new()))
+                .api_key("th_test_key")
                 .backend_url(backend.uri())
                 .cron_delivery(recorder.clone())
                 .services(ServiceSet {

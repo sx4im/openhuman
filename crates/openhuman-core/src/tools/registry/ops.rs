@@ -4,6 +4,7 @@ use serde_json::{json, Map, Value};
 
 use crate::config::Config;
 use crate::core::all;
+use crate::core::runtime::DispatchCtx;
 use crate::core::Outcome;
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};
 use crate::mcp::audit::McpWriteListQuery;
@@ -28,8 +29,8 @@ const POLICY_SURFACES: &[&str] = &[
 ];
 
 /// Return the current read-only tool registry snapshot.
-pub fn list_tools() -> Outcome<ToolRegistryList> {
-    let tools = registry_entries();
+pub fn list_tools(ctx: &DispatchCtx) -> Outcome<ToolRegistryList> {
+    let tools = registry_entries(ctx);
     log::debug!(
         "[tool_registry] list_tools completed entries={}",
         tools.len()
@@ -196,13 +197,13 @@ async fn mcp_write_audit_health(config: &Config) -> McpWriteAuditHealth {
 }
 
 /// Look up one registry entry by stable `tool_id`.
-pub fn get_tool(tool_id: &str) -> Result<Outcome<ToolRegistryEntry>, String> {
+pub fn get_tool(ctx: &DispatchCtx, tool_id: &str) -> Result<Outcome<ToolRegistryEntry>, String> {
     let normalized = tool_id.trim();
     if normalized.is_empty() {
         return Err("tool_id must be a non-empty string".to_string());
     }
 
-    let tool = registry_entries()
+    let tool = registry_entries(ctx)
         .into_iter()
         .find(|entry| entry.tool_id == normalized)
         .ok_or_else(|| format!("tool not found in registry: {normalized}"))?;
@@ -225,9 +226,10 @@ pub fn get_tool(tool_id: &str) -> Result<Outcome<ToolRegistryEntry>, String> {
 /// The connected-client tools come from whichever workspace `mcp::init` claimed
 /// as the process default. That is right for the shipped app, which opens one;
 /// a caller that holds a `Config` should prefer
-/// [`registry_entries_for_config`], which names the workspace it means.
-pub fn registry_entries() -> Vec<ToolRegistryEntry> {
-    build_registry_entries(None)
+/// [`registry_entries_for_config`], which names the workspace it means. The
+/// connections are read for the context `ctx` the caller was handed.
+pub fn registry_entries(ctx: &DispatchCtx) -> Vec<ToolRegistryEntry> {
+    build_registry_entries(McpSource::Ctx(ctx))
 }
 
 /// The same snapshot, with connected-client tools read from `config`'s
@@ -240,11 +242,20 @@ pub fn registry_entries() -> Vec<ToolRegistryEntry> {
 /// `tool_registry_entries_include_connected_mcp_client_tools` came to pass
 /// alone and fail beside its neighbours.
 pub fn registry_entries_for_config(config: &Config) -> Vec<ToolRegistryEntry> {
-    build_registry_entries(Some(config))
+    build_registry_entries(McpSource::Config(config))
 }
 
-/// The shared body. `config` selects the MCP host; everything else is identical.
-fn build_registry_entries(config: Option<&Config>) -> Vec<ToolRegistryEntry> {
+/// Where the connected MCP client servers are read from.
+#[derive(Clone, Copy)]
+enum McpSource<'a> {
+    /// The workspace `config` names.
+    Config(&'a Config),
+    /// The process default host, as seen by the context handed in.
+    Ctx(&'a DispatchCtx),
+}
+
+/// The shared body. `source` selects the MCP host; everything else is identical.
+fn build_registry_entries(source: McpSource<'_>) -> Vec<ToolRegistryEntry> {
     let mut entries = BTreeMap::new();
 
     for spec in crate::mcp::server::tool_specs() {
@@ -270,16 +281,11 @@ fn build_registry_entries(config: Option<&Config>) -> Vec<ToolRegistryEntry> {
                 if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
                     tokio::task::block_in_place(|| {
                         handle.block_on(async {
-                            match config {
-                                Some(config) => {
+                            match source {
+                                McpSource::Config(config) => {
                                     connections::all_connected_tools_for_config(config).await
                                 }
-                                None => {
-                                    connections::all_connected_tools(
-                                        &crate::core::runtime::DispatchCtx::ambient(),
-                                    )
-                                    .await
-                                }
+                                McpSource::Ctx(ctx) => connections::all_connected_tools(ctx).await,
                             }
                         })
                     })

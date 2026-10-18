@@ -54,13 +54,21 @@ async fn the_file_store_dispatches_to_documents_when_a_backend_is_pinned() {
     value.insert("gmail".to_string(), 7u32);
     // Pin on this thread for the awaits below (a current-thread runtime).
     super::TEST_OVERRIDE.with(|slot| *slot.borrow_mut() = Some(docs.clone()));
-    super::super::file_store::save(&config, "composio_identities.json", &value)
-        .await
-        .unwrap();
-    let loaded: BTreeMap<String, u32> =
-        super::super::file_store::load(&config, "composio_identities.json")
-            .await
-            .unwrap();
+    super::super::file_store::save(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        "composio_identities.json",
+        &value,
+    )
+    .await
+    .unwrap();
+    let loaded: BTreeMap<String, u32> = super::super::file_store::load(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        "composio_identities.json",
+    )
+    .await
+    .unwrap();
     super::TEST_OVERRIDE.with(|slot| *slot.borrow_mut() = None);
     assert_eq!(loaded, value);
     assert!(!dir.path().join("storage").exists());

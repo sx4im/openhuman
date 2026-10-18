@@ -16,7 +16,7 @@ fn handle_create(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFutu
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
-            ops::strict_gate(&config, &graph).await?;
+            ops::strict_gate(&ctx, &config, &graph).await?;
         }
         to_json(ops::flows_create(&config, name, graph, require_approval).await?)
     })
@@ -70,7 +70,7 @@ fn handle_list(ctx: DispatchCtx, _params: Map<String, Value>) -> ControllerFutur
 fn handle_list_connections(ctx: DispatchCtx, _params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
         let config = ctx.load_config().await?;
-        to_json(ops::flows_list_connections(&config).await?)
+        to_json(ops::flows_list_connections(&ctx, &config).await?)
     })
 }
 
@@ -99,7 +99,7 @@ fn handle_update(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFutu
             .unwrap_or(false)
         {
             if let Some(graph_json) = graph.as_ref() {
-                ops::strict_gate(&config, graph_json).await?;
+                ops::strict_gate(&ctx, &config, graph_json).await?;
             }
         }
         to_json(
@@ -144,6 +144,7 @@ fn handle_run(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture 
         let inputs = read_declared_inputs(&params)?;
         to_json(
             ops::flows_run(
+                &ctx,
                 &config,
                 id.trim(),
                 input,
@@ -163,6 +164,7 @@ fn handle_run_detached(ctx: DispatchCtx, params: Map<String, Value>) -> Controll
         let inputs = read_declared_inputs(&params)?;
         to_json(
             ops::flows_run_detached(
+                &ctx,
                 &config,
                 id.trim(),
                 input,
@@ -220,7 +222,15 @@ fn handle_resume(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFutu
             .map_err(|e| format!("invalid 'rejections': {e}"))?
             .unwrap_or_default();
         to_json(
-            ops::flows_resume(&config, id.trim(), thread_id.trim(), approvals, rejections).await?,
+            ops::flows_resume(
+                &ctx,
+                &config,
+                id.trim(),
+                thread_id.trim(),
+                approvals,
+                rejections,
+            )
+            .await?,
         )
     })
 }
@@ -362,7 +372,7 @@ fn handle_required_connections(ctx: DispatchCtx, params: Map<String, Value>) -> 
     Box::pin(async move {
         let config = ctx.load_config().await?;
         let graph = read_required::<Value>(&params, "graph")?;
-        to_json(ops::flows_required_connections(&config, graph).await?)
+        to_json(ops::flows_required_connections(&ctx, &config, graph).await?)
     })
 }
 

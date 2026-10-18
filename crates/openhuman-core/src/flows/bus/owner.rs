@@ -86,12 +86,7 @@ async fn resolve(
 
 /// Runs `step`, handed the owner's context, as `flow_id`'s owner; logs and skips it when the owner is
 /// unknown (a failed lookup) or no context can act for it.
-pub(super) async fn as_owner<F, Fut>(
-    ctx: &DispatchCtx,
-    config: &Config,
-    flow_id: &str,
-    step: F,
-)
+pub(super) async fn as_owner<F, Fut>(ctx: &DispatchCtx, config: &Config, flow_id: &str, step: F)
 where
     F: FnOnce(DispatchCtx) -> Fut,
     Fut: std::future::Future<Output = ()>,

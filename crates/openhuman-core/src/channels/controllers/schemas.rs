@@ -5,7 +5,6 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::config::Config;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::ControllerSchema;

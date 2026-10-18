@@ -3,7 +3,9 @@ use super::shell_description::{command_param_description, shell_description};
 use super::shell_support::container_environment;
 use super::shell_support::{command_failure, exec_result, python_utf8_env, tool_timeout_message};
 use crate::agent::host_runtime::RuntimeAdapter;
-use crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool;
+use crate::agent::tinyagents::host::run_context::{
+    command_environment_for_tool, dispatch_ctx_for_tool,
+};
 use crate::config::Config;
 use crate::core::runtime::DispatchCtx;
 use crate::security::{AuditLogger, CommandExecutionLog, SecurityPolicy};
@@ -297,13 +299,12 @@ impl ShellTool {
         // `tool_timeout::explicit_call_timeout_*`. Shell has no default deadline
         // (issue #4023) — long scripts must run to completion.
         let requested_timeout = args.get("timeout_secs").and_then(|v| v.as_u64());
-
         let start = Instant::now();
         let (allowed, result) = crate::sandbox::shell_progress::with_shell_progress(
             context,
             crate::sandbox::shell_progress::HEARTBEAT_INTERVAL,
             |meter| {
-                self.run_with_security_in_context(&ctx, command, requested_timeout, context, meter)
+                self.run_with_security_in_context(ctx, command, requested_timeout, context, meter)
             },
         )
         .await;
@@ -337,7 +338,7 @@ impl ShellTool {
         command: &str,
         requested_timeout: Option<u64>,
     ) -> (bool, ToolResult) {
-        self.run_with_security_in_context(&ctx, command, requested_timeout, None, None)
+        self.run_with_security_in_context(ctx, command, requested_timeout, None, None)
             .await
     }
 
@@ -349,6 +350,7 @@ impl ShellTool {
         context: Option<&dyn ToolRunContext>,
         meter: Option<crate::sandbox::shell_progress::ShellOutputMeter>,
     ) -> (bool, ToolResult) {
+        let command_environment = command_environment_for_tool(context);
         // Revalidate facts immediately before execution. The authorization
         // hook supplies the same module-owned parser to the harness gate; this
         // second call keeps direct/workflow execution on the same contract and
@@ -418,8 +420,16 @@ impl ShellTool {
             let action_dir = saas_action_dir;
             return match resolved {
                 Ok(policy) => {
-                    self.run_in_policy(&ctx, policy, command, requested_timeout, &action_dir, meter)
-                        .await
+                    self.run_in_policy(
+                        ctx,
+                        policy,
+                        command,
+                        requested_timeout,
+                        &action_dir,
+                        context,
+                        meter,
+                    )
+                    .await
                 }
                 Err(why) => {
                     tracing::warn!(reason = %why, "[shell] SaaS sandbox refused the command");
@@ -432,7 +442,7 @@ impl ShellTool {
         // A sandboxed agent or an explicit operator backend uses the sandbox
         // execution path. Security checks above still apply.
         let sandbox_required = match crate::sandbox::command_requires_sandbox(
-            &ctx,
+            ctx,
             crate::agent::tinyagents::host::run_context::sandbox_mode_for_tool(context),
         )
         .await
@@ -448,7 +458,7 @@ impl ShellTool {
         if sandbox_required {
             let action_dir = self.effective_action_dir_for_context(context);
             return self
-                .run_sandboxed(&ctx, command, requested_timeout, &action_dir, meter)
+                .run_sandboxed(ctx, command, requested_timeout, &action_dir, context, meter)
                 .await;
         }
 
@@ -489,7 +499,7 @@ impl ShellTool {
                 request.timeout_ms = timeout_ms;
             }
 
-            let Some(mut env) = container_environment() else {
+            let Some(mut env) = container_environment(command_environment.as_deref()) else {
                 return (
                     false,
                     ToolResult::error("Docker environment contains a non-UTF-8 value."),
@@ -541,6 +551,14 @@ impl ShellTool {
             );
         }
         let mut env = std::collections::BTreeMap::new();
+
+        if let Some(overrides) = command_environment.as_deref() {
+            env.extend(
+                overrides
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            );
+        }
 
         // A turn that owns its child environment (library agents) keeps it: the
         // module starts from the process snapshot, so the turn's own values for
@@ -626,7 +644,7 @@ impl ShellTool {
         run.python_utf8 = true;
         run.hide_window = self.runtime.hide_window();
         run.meter = meter;
-        let result = crate::sandbox::shell_exec::run(&config, run).await;
+        let result = crate::sandbox::shell_exec::run(ctx, &config, run).await;
         (true, exec_result(result, effective))
     }
 
@@ -638,6 +656,7 @@ impl ShellTool {
         command: &str,
         requested_timeout: Option<u64>,
         action_dir: &Path,
+        context: Option<&dyn ToolRunContext>,
         meter: Option<crate::sandbox::shell_progress::ShellOutputMeter>,
     ) -> (bool, ToolResult) {
         let config = crate::config::RuntimeConfig::default();
@@ -649,8 +668,16 @@ impl ShellTool {
             &config,
             false,
         );
-        self.run_in_policy(&ctx, policy, command, requested_timeout, action_dir, meter)
-            .await
+        self.run_in_policy(
+            ctx,
+            policy,
+            command,
+            requested_timeout,
+            action_dir,
+            context,
+            meter,
+        )
+        .await
     }
 
     /// Execute a command under a resolved sandbox `policy`.
@@ -661,6 +688,7 @@ impl ShellTool {
         command: &str,
         requested_timeout: Option<u64>,
         action_dir: &Path,
+        context: Option<&dyn ToolRunContext>,
         meter: Option<crate::sandbox::shell_progress::ShellOutputMeter>,
     ) -> (bool, ToolResult) {
         use crate::sandbox;
@@ -671,11 +699,27 @@ impl ShellTool {
             "[shell] routing to sandbox backend"
         );
 
-        let mut extra_env = std::collections::HashMap::new();
+        let mut extra_env =
+            std::collections::HashMap::<std::ffi::OsString, std::ffi::OsString>::new();
+        let command_environment = command_environment_for_tool(context);
+        super::shell_support::extend_explicit_environment(
+            &mut extra_env,
+            command_environment.as_deref(),
+        );
         // Apply the same Git config hardening to local and sandboxed shells.
         extra_env.extend(tinytools_std::filesystem::shell_git_env());
         // And the same Python UTF-8 defaults the native path sets.
-        for (var, val) in python_utf8_env(|name| std::env::var_os(name)) {
+        for (var, val) in python_utf8_env(|name| {
+            command_environment
+                .as_ref()
+                .and_then(|overrides| overrides.get(name).map(std::ffi::OsString::from))
+                .or_else(|| {
+                    command_environment
+                        .is_none()
+                        .then(|| std::env::var_os(name))
+                        .flatten()
+                })
+        }) {
             extra_env.insert(var.into(), val);
         }
 
@@ -694,7 +738,7 @@ impl ShellTool {
         );
 
         let result = sandbox::ops::execute_in_sandbox_metered(
-            &ctx, &policy, command, action_dir, extra_env, effective, meter,
+            ctx, &policy, command, action_dir, extra_env, effective, meter,
         )
         .await;
         (true, exec_result(result, effective))

@@ -6,7 +6,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 use crate::integrations::composio::ops;
 
@@ -48,7 +47,7 @@ pub(super) fn handle_list_connections(
 ) -> ControllerFuture {
     Box::pin(async move {
         let config = ctx.load_config().await?;
-        to_json(ops::composio_list_connections(&config).await?)
+        to_json(ops::composio_list_connections(&ctx, &config).await?)
     })
 }
 
@@ -68,7 +67,7 @@ pub(super) fn handle_delete_connection(
     Box::pin(async move {
         let config = ctx.load_config().await?;
         let connection_id = read_required_non_empty(&params, "connection_id")?;
-        to_json(ops::composio_delete_connection(&config, &connection_id).await?)
+        to_json(ops::composio_delete_connection(&ctx, &config, &connection_id).await?)
     })
 }
 

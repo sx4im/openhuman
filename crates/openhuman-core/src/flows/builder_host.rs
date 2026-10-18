@@ -35,6 +35,13 @@ impl FlowsHost {
     pub fn new(config: Arc<Config>) -> Arc<Self> {
         Arc::new(Self { config })
     }
+
+    /// The context a port call runs under. The copilot ports carry none, so
+    /// this is the one place the host reads the calling task's ambient scope
+    /// (#7801) until the ports take a carrier.
+    fn ctx(&self) -> crate::core::runtime::DispatchCtx {
+        crate::core::runtime::DispatchCtx::ambient()
+    }
 }
 
 #[async_trait]
@@ -132,7 +139,8 @@ impl FlowStore for FlowsHost {
         approve: Vec<String>,
         reject: Vec<String>,
     ) -> PortResult<Value> {
-        ops::flows_resume(&self.config, flow_id, run_id, approve, reject)
+        let ctx = self.ctx();
+        ops::flows_resume(&ctx, &self.config, flow_id, run_id, approve, reject)
             .await
             .map(|o| o.value)
     }
@@ -151,11 +159,11 @@ impl BuilderGates for FlowsHost {
     }
 
     async fn run_gates(&self, graph: &WorkflowGraph) -> Vec<String> {
-        ops::run_builder_gates(&self.config, graph).await
+        ops::run_builder_gates(&self.ctx(), &self.config, graph).await
     }
 
     async fn strict_gate(&self, graph: &Value) -> PortResult<()> {
-        ops::strict_gate(&self.config, graph).await
+        ops::strict_gate(&self.ctx(), &self.config, graph).await
     }
 
     async fn engine_compatibility_errors(&self, graph: &WorkflowGraph) -> Vec<String> {
@@ -182,6 +190,7 @@ impl BuilderGates for FlowsHost {
         flow_id: Option<String>,
     ) -> Result<Value, String> {
         ops::build_builder_proposal(
+            &self.ctx(),
             &self.config,
             retry_tool,
             name,
@@ -222,12 +231,9 @@ impl BuilderGates for FlowsHost {
 #[async_trait]
 impl AgentDirectory for FlowsHost {
     async fn list(&self) -> PortResult<Vec<AgentDefinition>> {
-        let agents = crate::agent::registry::list_agents(
-            &crate::core::runtime::DispatchCtx::ambient(),
-            false,
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let agents = crate::agent::registry::list_agents(&self.ctx(), false)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(agents
             .iter()
             .map(|a| AgentDefinition {

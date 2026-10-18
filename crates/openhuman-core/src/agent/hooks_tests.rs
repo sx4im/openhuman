@@ -183,3 +183,41 @@ async fn fired_hooks_observe_the_firing_dispatchs_core_context() {
          not the process default"
     );
 }
+
+/// The process-wide snapshot is independent of any task scope: a hook the host
+/// registered is listed by name whatever context is active, and the per-context
+/// snapshot starts from the same list.
+#[tokio::test]
+async fn embedder_snapshots_read_the_process_registry_not_the_task_scope() {
+    use crate::core::runtime::context::CoreContext;
+
+    struct Named;
+    #[async_trait::async_trait]
+    impl PostTurnHook for Named {
+        fn name(&self) -> &str {
+            "snapshot-scope-probe"
+        }
+        async fn on_turn_complete(&self, _ctx: &TurnContext) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    replace_embedder_post_turn_hook("snapshot-scope-probe", Some(std::sync::Arc::new(Named)));
+    let tenant_ctx = CoreContext::for_test(crate::core::runtime::DomainSet::full(), None);
+    let in_scope = CoreContext::scope(tenant_ctx, async {
+        embedder_post_turn_hooks()
+            .iter()
+            .any(|hook| hook.name() == "snapshot-scope-probe")
+    })
+    .await;
+    let via_ctx = embedder_post_turn_hooks_in(&crate::core::runtime::DispatchCtx::unbound())
+        .iter()
+        .any(|hook| hook.name() == "snapshot-scope-probe");
+    replace_embedder_post_turn_hook("snapshot-scope-probe", None);
+
+    assert!(in_scope, "the process registry is visible under a scope");
+    assert!(
+        via_ctx,
+        "the per-context snapshot extends the same registry"
+    );
+}

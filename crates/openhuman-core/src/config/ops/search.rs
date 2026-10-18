@@ -18,8 +18,6 @@ use crate::core::Outcome;
 use crate::search::providers;
 use tinysearch_bus::{parse_role, role_key, ROLES};
 
-use super::loader::load_config_with_timeout;
-
 /// Partial update of one provider.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SearchProviderPatch {

@@ -29,6 +29,11 @@ use crate::agent::tinyagents::use_skill_dispatch::UseSkillDispatch;
 use crate::agent::tools::{DelegateToolDispatch, TodoToolDispatch};
 use crate::core::runtime::CoreContext;
 
+type RegisteredToolDispatch = Arc<dyn ToolDispatch<(), OpenHumanRunContext>>;
+type ToolDispatchSelectorFn =
+    dyn Fn(&str, Arc<dyn tinytools::Tool>) -> Option<RegisteredToolDispatch> + Send + Sync;
+type ToolDispatchSelector = Arc<ToolDispatchSelectorFn>;
+
 /// Typed-dispatch selection shared by the direct per-turn registration below
 /// and by [`UseSkillDispatch`], which must resolve the SAME live-parent
 /// dispatch for a packed archetype delegation (`create_image`, `do_crypto`,

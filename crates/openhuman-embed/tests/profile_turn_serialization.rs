@@ -136,8 +136,8 @@ async fn scenario() {
     assert!(!chat.is_finished(), "alice's turn is still running");
 
     // The sweep runs Alice's job, but only once her chat turn is over.
-    let later = chrono::Utc::now() + chrono::Duration::hours(1);
-    let report = runtime.sweep_cron_at(later).await;
+    common::wait_until(soon).await;
+    let report = runtime.sweep_cron_at(chrono::Utc::now()).await;
     assert_eq!(
         report.ran, 1,
         "the occurrence is deferred, not skipped: {report:?}"

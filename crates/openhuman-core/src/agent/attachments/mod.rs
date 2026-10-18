@@ -176,7 +176,13 @@ pub(crate) async fn thread_action_dir(
 }
 
 fn policy(config: &Config, root: &Path) -> SecurityPolicy {
-    SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir, root)
+    let policy = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir, root);
+    *policy
+        .media_files_roots
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(crate::agent::artifacts::FileRoots::from_config(config));
+    policy
 }
 
 /// Resolve a local attachment under the same filesystem policy as acting

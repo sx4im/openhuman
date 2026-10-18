@@ -1,7 +1,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::json;
 
-use crate::config::rpc as config_rpc;
 use crate::skills::init_workflows_dir;
 use std::path::Path;
 

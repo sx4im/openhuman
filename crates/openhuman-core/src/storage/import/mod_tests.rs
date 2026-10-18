@@ -411,7 +411,9 @@ async fn without_an_installed_backend_the_host_import_does_nothing() {
     legacy_device(&config, "chan-a", "Phone", false);
     assert!(crate::storage::installed().is_none());
 
-    assert!(run(&config).await.is_empty());
+    assert!(run(&crate::core::runtime::DispatchCtx::unbound(), &config)
+        .await
+        .is_empty());
 }
 
 #[test]

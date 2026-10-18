@@ -104,7 +104,8 @@ async fn events_stream_forwards_only_the_bound_client() {
     let token = crate::core_host::core::event_bind_tokens::issue("stream-client", None)
         .expect("bind token")
         .token;
-    let response = events_handler(HeaderMap::new(), None, query("stream-client", Some(&token))).await;
+    let response =
+        events_handler(HeaderMap::new(), None, query("stream-client", Some(&token))).await;
     assert_eq!(response.status(), StatusCode::OK);
     let mut body = response.into_body().into_data_stream();
 
@@ -131,7 +132,7 @@ async fn events_stream_forwards_only_the_bound_client() {
 
 #[tokio::test]
 async fn domain_events_require_a_bearer() {
-    let response = domain_events_handler(HeaderMap::new()).await;
+    let response = domain_events_handler(HeaderMap::new(), None).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(String::from_utf8_lossy(&body).contains("Bearer token required"));
@@ -164,7 +165,7 @@ async fn domain_events_stream_config_then_published_events() {
         header::AUTHORIZATION,
         format!("Bearer {token}").parse().unwrap(),
     );
-    let response = domain_events_handler(headers).await;
+    let response = domain_events_handler(headers, None).await;
     assert_eq!(response.status(), StatusCode::OK);
     let mut chunks = response.into_body().into_data_stream();
 

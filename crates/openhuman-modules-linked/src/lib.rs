@@ -17,7 +17,7 @@
 //! One cargo feature per registry module id, plus `all`. Every module crate is
 //! built with its own `static-link` feature, which exports a Rust
 //! `linked_module()` instead of the C `TINYBUS_MODULE_ABI_V1` symbols, so all
-//! eleven share one executable without duplicate symbols:
+//! twelve share one executable without duplicate symbols:
 //!
 //! | feature          | crate                                   |
 //! | ---------------- | --------------------------------------- |
@@ -26,6 +26,7 @@
 //! | `tinycomputer`   | `tinycomputer`                          |
 //! | `tinyconnectors` | `tinyconnectors`                        |
 //! | `tinydocs`       | `tinydocs-module`                       |
+//! | `tinyflows`      | `tinyflows-module`                      |
 //! | `tinyhosts`      | `tinyhosts`                             |
 //! | `tinyjuice`      | `tinyjuice-module`                      |
 //! | `tinymcp`        | `tinymcp`                               |
@@ -72,6 +73,8 @@ pub fn linked_modules() -> Vec<(&'static str, LinkedFactory)> {
         ("tinyconnectors", tinyconnectors::linked_module),
         #[cfg(feature = "tinydocs")]
         ("tinydocs", tinydocs_module::linked_module),
+        #[cfg(feature = "tinyflows")]
+        ("tinyflows", tinyflows_module::linked_module),
         #[cfg(feature = "tinyhosts")]
         ("tinyhosts", tinyhosts::linked_module),
         #[cfg(feature = "tinyjuice")]

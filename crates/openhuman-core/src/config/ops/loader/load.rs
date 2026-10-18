@@ -91,12 +91,6 @@ pub async fn load_current_or_init(ctx: &DispatchCtx) -> anyhow::Result<Config> {
     Ok(config)
 }
 
-/// [`load_current_or_init`] for a caller with no context of its own yet: reads
-/// the task's ambient one. Transitional (#7801), like `DispatchCtx::ambient`.
-pub async fn load_current_or_init_ambient() -> anyhow::Result<Config> {
-    load_current_or_init(&crate::core::runtime::DispatchCtx::ambient()).await
-}
-
 /// Loads the config that belongs to `workspace_dir`, rather than whichever one
 /// the process-global active-user / `OPENHUMAN_WORKSPACE` resolution currently
 /// selects.

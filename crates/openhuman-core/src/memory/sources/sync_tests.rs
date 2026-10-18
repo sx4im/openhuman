@@ -118,7 +118,12 @@ async fn start_sync_walks_syncing_then_idle_and_records_items() {
         .sources
         .push(folder_source("src-ok", &dir, None));
 
-    let started = start_sync(&config, Some("src-ok")).unwrap();
+    let started = start_sync(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        Some("src-ok"),
+    )
+    .unwrap();
     assert_eq!(started, vec!["src-ok".to_string()]);
     let done = wait_for_idle(&config, "src-ok").await;
     assert_eq!(done.status, SourceStatus::Idle);
@@ -143,7 +148,7 @@ async fn a_failing_sync_lands_in_error_with_the_message() {
         .sources
         .push(folder_source("src-bad", &missing, None));
 
-    start_sync(&config, None).unwrap();
+    start_sync(&crate::core::runtime::DispatchCtx::ambient(), &config, None).unwrap();
     let done = wait_for_idle(&config, "src-bad").await;
     assert_eq!(done.status, SourceStatus::Error);
     assert!(done.error.as_deref().is_some_and(|e| !e.is_empty()));
@@ -155,16 +160,26 @@ fn start_sync_refuses_unknown_ids_and_memory_off() {
     let tmp = tempfile::tempdir().unwrap();
     let config = config_in(&tmp);
     assert_eq!(
-        start_sync(&config, None).unwrap_err().code(),
+        start_sync(&crate::core::runtime::DispatchCtx::ambient(), &config, None)
+            .unwrap_err()
+            .code(),
         crate::memory::error::MEMORY_OFF
     );
     bind_reference(&config);
     assert_eq!(
-        start_sync(&config, Some("src-nope")).unwrap_err().code(),
+        start_sync(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            Some("src-nope")
+        )
+        .unwrap_err()
+        .code(),
         INVALID_REQUEST
     );
     assert!(
-        start_sync(&config, None).unwrap().is_empty(),
+        start_sync(&crate::core::runtime::DispatchCtx::ambient(), &config, None)
+            .unwrap()
+            .is_empty(),
         "no sources, nothing started"
     );
 }
@@ -182,9 +197,24 @@ async fn a_source_already_syncing_is_not_started_twice() {
     // Hold a claim as a running sync would: a second request starts nothing.
     let held = syncer_for(&config).start(Some("src-once")).unwrap();
     assert_eq!(held.len(), 1);
-    assert!(start_sync(&config, Some("src-once")).unwrap().is_empty());
+    assert!(start_sync(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        Some("src-once")
+    )
+    .unwrap()
+    .is_empty());
     drop(held);
-    assert_eq!(start_sync(&config, Some("src-once")).unwrap().len(), 1);
+    assert_eq!(
+        start_sync(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            Some("src-once")
+        )
+        .unwrap()
+        .len(),
+        1
+    );
     wait_for_idle(&config, "src-once").await;
 }
 
@@ -211,12 +241,16 @@ async fn sync_due_starts_only_scheduled_sources_that_are_due() {
         s.last_sync_at = Some(now);
     });
 
-    let started = sync_due(&config, now);
+    let started = sync_due(&crate::core::runtime::DispatchCtx::ambient(), &config, now);
     assert_eq!(started, vec!["src-sched".to_string()]);
     wait_for_idle(&config, "src-sched").await;
 
     // Fifteen minutes later everything scheduled is due again; manual never is.
-    let later = sync_due(&config, now + chrono::Duration::minutes(16));
+    let later = sync_due(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        now + chrono::Duration::minutes(16),
+    );
     assert!(later.contains(&"src-sched".to_string()));
     assert!(later.contains(&"src-fresh".to_string()));
     assert!(!later.contains(&"src-manual".to_string()));
@@ -232,7 +266,12 @@ fn sync_due_with_memory_off_starts_nothing() {
         .memory
         .sources
         .push(folder_source("s", tmp.path(), Some(15)));
-    assert!(sync_due(&config, Utc::now()).is_empty());
+    assert!(sync_due(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        Utc::now()
+    )
+    .is_empty());
 }
 
 #[test]

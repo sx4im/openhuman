@@ -12,6 +12,7 @@ icon: toggle-on
 ```toml
 [components]
 flows = true       # tinyflows: saved workflows
+tinyflows = true   # tinyflows module: scheduled jobs (cron) runtime, store and schedule maths
 memes = true       # tinymemes
 documents = true   # tinydocs
 search = true      # tinysearch
@@ -41,6 +42,10 @@ Loadable modules follow the same switches. A module whose component is off is ne
 A flag change takes effect on the next core start. There is no hot toggling.
 
 Each component's domain wires itself to its switch (tools, services and RPC) in its own change; until then a switch removes only the families, services and tool groups listed in the core's component set.
+
+## Tinyflows
+
+`tinyflows = false` stops the cron scheduler service and makes every `cron.*` RPC answer `COMPONENT_DISABLED:tinyflows`; the `tinyflows` module is never downloaded or loaded, so no job runs and none can be stored. It is separate from `flows`, which only stops schedule-triggered flows while agent, shell and system jobs keep running.
 
 ## Not toggleable
 

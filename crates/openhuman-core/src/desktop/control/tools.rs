@@ -180,17 +180,20 @@ impl Tool for DesktopTool {
                 Err(error) => Err(error.into()),
             },
             DesktopToolKind::Goal => {
-                let live_config = match crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool(context)
+                let live_config =
+                    match crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool(
+                        context,
+                    )
                     .load_config()
                     .await
-                {
-                    Ok(config) => config,
-                    Err(error) => {
-                        return Ok(ToolResult::error(format!(
-                            "Desktop approval setting is unavailable: {error}"
-                        )))
-                    }
-                };
+                    {
+                        Ok(config) => config,
+                        Err(error) => {
+                            return Ok(ToolResult::error(format!(
+                                "Desktop approval setting is unavailable: {error}"
+                            )))
+                        }
+                    };
                 approvals_enabled = live_config.desktop.approvals_enabled;
                 match declared::goal_request(&args, approvals_enabled) {
                     Ok((member, request)) => {

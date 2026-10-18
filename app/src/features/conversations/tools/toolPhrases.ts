@@ -214,6 +214,9 @@ export const TOOL_PHRASES = {
   setUpWorkspace: { active: 'Setting up workspace', done: 'Set up workspace' },
   checkArtifacts: { active: 'Checking artifacts', done: 'Checked artifacts' },
   deleteArtifact: { active: 'Deleting artifact', done: 'Deleted artifact' },
+  createArtifact: { active: 'Creating artifact', done: 'Created artifact' },
+  updateArtifact: { active: 'Updating artifact', done: 'Updated artifact' },
+  shareArtifact: { active: 'Sharing artifact', done: 'Shared artifact' },
 } as const satisfies Record<string, { active: string; done: string }>;
 
 export type ToolPhraseId = keyof typeof TOOL_PHRASES;

@@ -10,7 +10,7 @@ use serde_json::Value;
 use tinyjuice_bus::handle;
 use tinyjuice_bus::repl::{ReplLimits, ReplOp};
 use tinyjuice_bus::wire::{QueryError, QueryRequest, QueryResponse, QueryTarget};
-use tinytools::{PermissionLevel, Tool, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolResult, ToolRunContext};
 
 /// The query tools TinyJuice declares. The footer suggests a subset of these.
 use tinyjuice_bus::tools::REPL_TOOLS;
@@ -30,7 +30,13 @@ const RELATIVE_ARTIFACT_PREFIX: &str = "artifacts/tool-results/";
 /// Contract requests are executed inside the compiled module.
 #[async_trait]
 pub(crate) trait QuerySource: Send + Sync {
-    async fn query(&self, request: QueryRequest) -> Result<QueryResponse, String>;
+    /// `ctx` is the context the calling tool runs under; a source bound to a
+    /// config of its own ignores it.
+    async fn query(
+        &self,
+        ctx: &DispatchCtx,
+        request: QueryRequest,
+    ) -> Result<QueryResponse, String>;
 }
 
 struct ModuleSource {
@@ -39,10 +45,14 @@ struct ModuleSource {
 
 #[async_trait]
 impl QuerySource for ModuleSource {
-    async fn query(&self, request: QueryRequest) -> Result<QueryResponse, String> {
+    async fn query(
+        &self,
+        ctx: &DispatchCtx,
+        request: QueryRequest,
+    ) -> Result<QueryResponse, String> {
         match &self.config {
             Some(config) => super::query_for_config(config, request).await,
-            None => super::query(&DispatchCtx::ambient(), request).await,
+            None => super::query(ctx, request).await,
         }
     }
 }
@@ -239,7 +249,12 @@ fn miss_message() -> &'static str {
 }
 
 impl ModuleReplTool {
-    async fn run_query(&self, target: QueryTarget, mut args: Value) -> anyhow::Result<ToolResult> {
+    async fn run_query(
+        &self,
+        ctx: &DispatchCtx,
+        target: QueryTarget,
+        mut args: Value,
+    ) -> anyhow::Result<ToolResult> {
         if let Some(object) = args.as_object_mut() {
             object.insert("op".into(), Value::String(self.op.clone()));
         }
@@ -253,13 +268,16 @@ impl ModuleReplTool {
         };
         let response = self
             .source
-            .query(QueryRequest {
-                target,
-                op,
-                limits: self.limits,
-                context_token: None,
-                scope: None,
-            })
+            .query(
+                ctx,
+                QueryRequest {
+                    target,
+                    op,
+                    limits: self.limits,
+                    context_token: None,
+                    scope: None,
+                },
+            )
             .await;
         Ok(match response {
             Ok(Ok(output)) => ToolResult::json(serde_json::to_value(output)?),
@@ -279,7 +297,12 @@ impl ModuleReplTool {
     }
 
     /// The handle slot held a path: query the persisted artifact it names.
-    async fn execute_on_artifact(&self, path: String, args: Value) -> anyhow::Result<ToolResult> {
+    async fn execute_on_artifact(
+        &self,
+        ctx: &DispatchCtx,
+        path: String,
+        args: Value,
+    ) -> anyhow::Result<ToolResult> {
         let Some(dir) = self.artifacts_dir.clone() else {
             log::debug!(
                 "[tokenjuice][repl] {} artifact path with no workspace",
@@ -287,11 +310,10 @@ impl ModuleReplTool {
             );
             return Ok(ToolResult::error(not_a_handle_message()));
         };
-        let read = tokio::task::spawn_blocking(move || {
-            read_tool_result_artifact(&dir, &path, MAX_ARTIFACT_BYTES)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("juice: artifact read task failed: {e}"))?;
+        let read = ctx
+            .spawn_blocking(move || read_tool_result_artifact(&dir, &path, MAX_ARTIFACT_BYTES))
+            .await
+            .map_err(|e| anyhow::anyhow!("juice: artifact read task failed: {e}"))?;
         match read {
             Ok(content) => {
                 log::debug!(
@@ -299,7 +321,8 @@ impl ModuleReplTool {
                     self.name,
                     content.len()
                 );
-                self.run_query(QueryTarget::Content { content }, args).await
+                self.run_query(ctx, QueryTarget::Content { content }, args)
+                    .await
             }
             Err(message) => {
                 log::debug!("[tokenjuice][repl] {} artifact refused", self.name);
@@ -324,18 +347,31 @@ impl Tool for ModuleReplTool {
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+        self.execute_with_context(args, ToolCallOptions::default(), None)
+            .await
+    }
+
+    async fn execute_with_context(
+        &self,
+        args: Value,
+        _options: ToolCallOptions,
+        tool_context: Option<&dyn ToolRunContext>,
+    ) -> anyhow::Result<ToolResult> {
+        let ctx = crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool(tool_context);
         let Some(raw) = args.get("handle").and_then(Value::as_str) else {
             return Ok(ToolResult::error("missing required argument: handle"));
         };
         let handle = match handle::classify(raw) {
             handle::HandleArg::Handle(handle) => handle,
-            handle::HandleArg::Path(path) => return self.execute_on_artifact(path, args).await,
+            handle::HandleArg::Path(path) => {
+                return self.execute_on_artifact(&ctx, path, args).await
+            }
             handle::HandleArg::Invalid => {
                 log::debug!("[tokenjuice][repl] {} rejected a non-handle", self.name);
                 return Ok(ToolResult::error(not_a_handle_message()));
             }
         };
-        self.run_query(QueryTarget::Handle { token: handle }, args)
+        self.run_query(&ctx, QueryTarget::Handle { token: handle }, args)
             .await
     }
 

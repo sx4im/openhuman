@@ -211,7 +211,7 @@ pub struct Config {
     /// Background-AI scheduler gate — throttles embeddings and other
     /// LLM-bound background work based on power
     /// state, CPU pressure, and deployment mode. See
-    /// [`crate::cron::scheduler_gate`].
+    /// [`crate::platform::llm_gate`].
     #[serde(default)]
     pub scheduler_gate: SchedulerGateConfig,
 

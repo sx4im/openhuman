@@ -132,14 +132,18 @@ async fn concurrent_operations_complete_without_stalling_the_single_async_worker
     // genuinely blocking wait — the same shape as `parking_lot::Mutex::lock`.
     let probe_entered = Arc::new(AtomicBool::new(false));
     let (release, held) = std::sync::mpsc::channel::<()>();
-    let probe = tokio::spawn(run("blocked_probe", {
-        let probe_entered = Arc::clone(&probe_entered);
-        move || {
-            probe_entered.store(true, Ordering::SeqCst);
-            let _ = held.recv();
-            Ok::<(), String>(())
-        }
-    }));
+    let probe = tokio::spawn(run(
+        crate::core::runtime::DispatchCtx::ambient(),
+        "blocked_probe",
+        {
+            let probe_entered = Arc::clone(&probe_entered);
+            move || {
+                probe_entered.store(true, Ordering::SeqCst);
+                let _ = held.recv();
+                Ok::<(), String>(())
+            }
+        },
+    ));
 
     // A cooperative task that only ever yields: it can make progress solely
     // because no store call is holding the worker hostage.
@@ -411,4 +415,35 @@ async fn explicit_context_picks_the_conversation_scope_without_an_ambient_scope(
         .collect();
     assert_eq!(alice_ids, vec!["alice-thread".to_string()]);
     assert_eq!(bob_ids, vec!["bob-thread".to_string()]);
+}
+
+fn agent_ctx(agent: &str) -> std::sync::Arc<crate::core::runtime::CoreContext> {
+    use crate::core::runtime::{ContextOverlay, CoreContext, DomainSet};
+    CoreContext::for_test(DomainSet::full(), None).derive_with(
+        ContextOverlay::new(
+            crate::config::Config::default(),
+            DomainSet::full(),
+            Default::default(),
+        )
+        .session_agent(agent),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_acts_under_the_handed_context_not_the_active_one() {
+    use crate::core::runtime::CoreContext;
+    let asha = DispatchCtx::new(agent_ctx("u-asha"));
+    let ravi = DispatchCtx::new(agent_ctx("u-ravi"));
+    // The caller's own scope is Ravi's; the call was handed Asha's.
+    let seen = CoreContext::scope(ravi.into_core().unwrap(), async {
+        run(asha, "who", || {
+            Ok::<_, String>(
+                CoreContext::current().and_then(|c| c.session_agent().map(str::to_owned)),
+            )
+        })
+        .await
+    })
+    .await
+    .unwrap();
+    assert_eq!(seen.as_deref(), Some("u-asha"));
 }

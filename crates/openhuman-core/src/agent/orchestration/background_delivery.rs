@@ -53,7 +53,6 @@ use super::busy_guard::{busy, clear_busy_for_thread, TurnBusy};
 use super::completion_notice::build_undelivered_notice;
 use super::completion_owners;
 use super::delivery_drain::{run_drain, DrainFence, DrainOutcome, RECOVERY_BUSY_POLL};
-use crate::core::runtime::tenant;
 use crate::core::runtime::CoreContext;
 
 /// Coalesce completions landing within this window into one delivery turn.
@@ -64,7 +63,7 @@ const DEBOUNCE: Duration = Duration::from_secs(3);
 const RECOVERY_DELAY: Duration = Duration::from_secs(15);
 
 /// Threads whose delivery turn is in flight — prevents two concurrent turns.
-/// Keyed by [`tenant::profile_key_in`] of the thread id, for the same reason.
+/// Keyed by the tenant profile derived from the thread id, for the same reason.
 fn delivering() -> &'static Mutex<HashSet<String>> {
     static D: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     D.get_or_init(|| Mutex::new(HashSet::new()))
@@ -210,8 +209,10 @@ pub(super) fn drain_schedule_in(
                 &DispatchCtx::new(Arc::clone(ctx)),
                 session,
             ),
-            // No owner: the unscoped (desktop) drain reads the ambient context.
-            None => background_completions::thread_for_session(&DispatchCtx::ambient(), session),
+            // No owner: the unscoped (desktop) drain reads the host's own context.
+            None => {
+                background_completions::thread_for_session(&DispatchCtx::host_default(), session)
+            }
         };
         if thread_id.is_none() {
             log::trace!("[background_delivery] session has no delivery thread; not scheduling");
@@ -401,8 +402,8 @@ async fn try_deliver(busy_ctx: DispatchCtx, thread_id: String, fence: DrainFence
     };
     let router = background_completions::router_for_workspace(&workspace_dir);
     let turn_workspace = workspace_dir.clone();
-    // A drain is event-driven and carries no context of its own.
-    let ctx = DispatchCtx::host_default();
+    // The turn runs under the context the drain was scheduled for.
+    let ctx = busy_ctx.clone();
     let give_up_ctx = busy_ctx.clone();
     let retry_after = try_deliver_with(
         &busy_ctx,

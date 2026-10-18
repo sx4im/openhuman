@@ -82,8 +82,8 @@ impl WalletModuleTool {
         chat: Option<&crate::security::approval::ApprovalChatContext>,
     ) -> anyhow::Result<ToolResult> {
         let result = match self.name() {
-            "wallet_status" => outcome_value(crate::web3::wallet::status(&ctx).await),
-            "wallet_chain_status" => outcome_value(crate::web3::wallet::chain_status(&ctx).await),
+            "wallet_status" => outcome_value(crate::web3::wallet::status(ctx).await),
+            "wallet_chain_status" => outcome_value(crate::web3::wallet::chain_status(ctx).await),
             "wallet_prepare_transfer" => {
                 let params = match serde_json::from_value(args) {
                     Ok(params) => params,
@@ -110,7 +110,7 @@ impl WalletModuleTool {
                 let result = match self.name() {
                     "wallet_tx_status" => outcome_value(
                         crate::web3::wallet::tx_status(
-                            &ctx,
+                            ctx,
                             query.chain,
                             query.evm_network,
                             &query.hash,
@@ -119,7 +119,7 @@ impl WalletModuleTool {
                     ),
                     "wallet_tx_receipt" => outcome_value(
                         crate::web3::wallet::tx_receipt(
-                            &ctx,
+                            ctx,
                             query.chain,
                             query.evm_network,
                             &query.hash,
@@ -128,7 +128,7 @@ impl WalletModuleTool {
                     ),
                     _ => outcome_value(
                         crate::web3::wallet::lookup_tx(
-                            &ctx,
+                            ctx,
                             query.chain,
                             query.evm_network,
                             &query.hash,

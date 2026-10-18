@@ -34,7 +34,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use tinystoragedrivers::{CollectionSpec, Precondition, Query, Sort};
+use tinystoragedrivers::{CollectionSpec, Filter, IndexSpec, Precondition, Query, Sort};
 
 use super::types::ArtifactMeta;
 use crate::storage::documents::Repo;
@@ -45,7 +45,11 @@ const ARGS: &str = "artifact_args";
 const DOMAIN: &str = "artifacts::store";
 
 fn collections() -> Vec<CollectionSpec> {
-    vec![CollectionSpec::new(ARTIFACTS), CollectionSpec::new(ARGS)]
+    vec![
+        CollectionSpec::new(ARTIFACTS)
+            .index(IndexSpec::new("by_thread", ["thread_id", "created_ms"])),
+        CollectionSpec::new(ARGS),
+    ]
 }
 
 /// The document store for this call: the installed backend, else the
@@ -126,15 +130,20 @@ impl Docs {
     /// Every record, newest first. A document that no longer parses is skipped
     /// with a warning, as a corrupt `meta.json` is.
     pub(super) fn list_meta(&self) -> Result<Vec<ArtifactMeta>> {
-        let stored = self.0.run(|docs| async move {
-            docs.query_all(
-                ARTIFACTS,
-                &Query::all()
-                    .sort(Sort::desc("created_ms"))
-                    .sort(Sort::asc("_id")),
-            )
-            .await
-        })?;
+        self.query_meta(Query::all())
+    }
+
+    /// The records of one thread, newest first, read through the `by_thread`
+    /// index rather than by listing the workspace.
+    pub(super) fn list_meta_for_thread(&self, thread_id: &str) -> Result<Vec<ArtifactMeta>> {
+        self.query_meta(Query::filter(Filter::eq("thread_id", thread_id)))
+    }
+
+    fn query_meta(&self, query: Query) -> Result<Vec<ArtifactMeta>> {
+        let query = query.sort(Sort::desc("created_ms")).sort(Sort::asc("_id"));
+        let stored = self
+            .0
+            .run(|docs| async move { docs.query_all(ARTIFACTS, &query).await })?;
         Ok(stored
             .into_iter()
             .filter_map(|item| match serde_json::from_value(item.doc) {
@@ -267,7 +276,8 @@ pub(super) async fn on_docs<T: Send + 'static>(
     docs: Docs,
     f: impl FnOnce(Docs) -> anyhow::Result<T> + Send + 'static,
 ) -> Result<T, String> {
-    crate::core::runtime::DispatchCtx::ambient().spawn_blocking(move || f(docs))
+    crate::core::runtime::DispatchCtx::ambient()
+        .spawn_blocking(move || f(docs))
         .await
         .map_err(|e| format!("[artifacts] storage task failed: {e}"))?
         .map_err(|e| format!("[artifacts] storage: {e:#}"))

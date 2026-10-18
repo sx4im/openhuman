@@ -77,9 +77,14 @@ fn digest(path: &Path) -> Vec<u8> {
 async fn servers_env_and_audit_rows_move_into_the_modules_storage() {
     let legacy = legacy_dir();
     let rig = rig();
-    let outcome = import_into(&rig.scoped, &rig.secrets, legacy.path())
-        .await
-        .unwrap();
+    let outcome = import_into(
+        &DispatchCtx::host_default(),
+        &rig.scoped,
+        &rig.secrets,
+        legacy.path(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         outcome,
         Outcome::Imported {
@@ -141,18 +146,28 @@ async fn servers_env_and_audit_rows_move_into_the_modules_storage() {
 async fn the_import_runs_once_and_never_resurrects_a_deleted_server() {
     let legacy = legacy_dir();
     let rig = rig();
-    import_into(&rig.scoped, &rig.secrets, legacy.path())
-        .await
-        .unwrap();
+    import_into(
+        &DispatchCtx::host_default(),
+        &rig.scoped,
+        &rig.secrets,
+        legacy.path(),
+    )
+    .await
+    .unwrap();
     let docs = rig.scoped.documents();
     let held = docs.get(SERVERS, "srv-1").await.unwrap().unwrap();
     docs.delete(SERVERS, "srv-1", held.unchanged())
         .await
         .unwrap();
 
-    let again = import_into(&rig.scoped, &rig.secrets, legacy.path())
-        .await
-        .unwrap();
+    let again = import_into(
+        &DispatchCtx::host_default(),
+        &rig.scoped,
+        &rig.secrets,
+        legacy.path(),
+    )
+    .await
+    .unwrap();
     assert_eq!(again, Outcome::AlreadyDone);
     assert!(docs.get(SERVERS, "srv-1").await.unwrap().is_none());
     assert_eq!(
@@ -167,9 +182,14 @@ async fn the_legacy_files_are_left_untouched() {
     let legacy = legacy_dir();
     let before = [CLIENTS_DB, AUDIT_DB].map(|path| digest(&legacy.path().join(path)));
     let rig = rig();
-    import_into(&rig.scoped, &rig.secrets, legacy.path())
-        .await
-        .unwrap();
+    import_into(
+        &DispatchCtx::host_default(),
+        &rig.scoped,
+        &rig.secrets,
+        legacy.path(),
+    )
+    .await
+    .unwrap();
     let after = [CLIENTS_DB, AUDIT_DB].map(|path| digest(&legacy.path().join(path)));
     assert_eq!(before, after);
     assert!(!legacy
@@ -199,9 +219,14 @@ async fn a_record_the_module_already_wrote_is_not_overwritten() {
         .await
         .unwrap();
 
-    let outcome = import_into(&rig.scoped, &rig.secrets, legacy.path())
-        .await
-        .unwrap();
+    let outcome = import_into(
+        &DispatchCtx::host_default(),
+        &rig.scoped,
+        &rig.secrets,
+        legacy.path(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         outcome,
         Outcome::Imported {
@@ -226,9 +251,14 @@ async fn a_data_dir_with_no_legacy_files_is_a_no_op() {
     let empty = tempfile::tempdir().unwrap();
     let rig = rig();
     assert_eq!(
-        import_into(&rig.scoped, &rig.secrets, empty.path())
-            .await
-            .unwrap(),
+        import_into(
+            &DispatchCtx::host_default(),
+            &rig.scoped,
+            &rig.secrets,
+            empty.path()
+        )
+        .await
+        .unwrap(),
         Outcome::NoSource
     );
 }
@@ -244,9 +274,14 @@ async fn an_unreadable_file_writes_no_marker_so_the_next_start_retries() {
     )
     .unwrap();
     let rig = rig();
-    assert!(import_into(&rig.scoped, &rig.secrets, dir.path())
-        .await
-        .is_err());
+    assert!(import_into(
+        &DispatchCtx::host_default(),
+        &rig.scoped,
+        &rig.secrets,
+        dir.path()
+    )
+    .await
+    .is_err());
     let marker = rig
         .scoped
         .documents()

@@ -56,8 +56,8 @@ mod turn_model;
 pub(crate) use access_gates::current_host_requires_session;
 pub(crate) use chat_model::resolves_to_managed_backend;
 pub use chat_model::{
-    create_chat_model, create_chat_model_from_string, create_chat_model_from_string_with_model_id,
-    create_chat_model_with_model_id, create_chat_model_with_model_id_in, probe_inference_readiness,
+    create_chat_model_from_string, create_chat_model_from_string_with_model_id,
+    create_chat_model_in, create_chat_model_with_model_id_in, probe_inference_readiness,
 };
 pub(crate) use credentials::openai_bearer_is_oauth;
 pub use credentials::{auth_key_for_slug, lookup_key_for_slug, redact_endpoint};

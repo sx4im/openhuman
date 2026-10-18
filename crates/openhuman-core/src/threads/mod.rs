@@ -4,6 +4,7 @@
 //! CRUD. Storage is [`store`] (the storage backend, through `tinyagents_session::threads`);
 //! this module owns the RPC surface and controller registry.
 
+pub mod artifact_rows;
 pub mod error;
 pub mod ops;
 pub mod rpc_models;

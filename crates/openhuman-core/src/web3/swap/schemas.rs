@@ -9,7 +9,6 @@ use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::{ControllerSchema, FieldSchema, Outcome, TypeSchema};
 
 use super::super::{execute_inputs, json_result, opt_str, req_json};
-use crate::config::rpc as config_rpc;
 use crate::modules::web3_service;
 use tinywallet_bus::names::methods;
 

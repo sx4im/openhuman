@@ -284,12 +284,13 @@ pub(crate) async fn idle_watchdog(activity: TurnActivity, window: Duration) -> D
 /// it drains the agent-side channel faster than the bridge, which publishes.
 /// It ends when the agent's sender drops, closing the bridge's stream in turn.
 pub(crate) fn tap(
+    ctx: &crate::core::runtime::DispatchCtx,
     activity: TurnActivity,
     mut agent_rx: mpsc::Receiver<AgentProgress>,
     capacity: usize,
 ) -> mpsc::Receiver<AgentProgress> {
     let (bridge_tx, bridge_rx) = mpsc::channel(capacity);
-    tokio::spawn(async move {
+    ctx.spawn(async move {
         while let Some(event) = agent_rx.recv().await {
             activity.observe(&event);
             if bridge_tx.send(event).await.is_err() {

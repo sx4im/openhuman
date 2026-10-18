@@ -36,10 +36,10 @@ fn register_probe() {
     register_controller_extension(ControllerExtension {
         group: DomainGroup::Hosted,
         controllers: vec![RegisteredController {
-            schema: schema("ctx_probe", "whoami", vec![]),
+            schema: schema("ext_ctx_probe", "whoami", vec![]),
             handler: whoami,
         }],
-        namespaces: &[("ctx_probe", "Dispatch context probe.")],
+        namespaces: &[("ext_ctx_probe", "Dispatch context probe.")],
     })
     .expect("register ctx probe");
 }
@@ -50,7 +50,7 @@ async fn handler_receives_the_context_the_caller_dispatched_with() {
     let ctx = CoreContext::for_test(DomainSet::full(), Some("/tmp/ctx-probe-a".into()));
     let value = try_invoke_registered_rpc(
         DispatchCtx::new(ctx),
-        "openhuman.ctx_probe_whoami",
+        "openhuman.ext_ctx_probe_whoami",
         Map::new(),
     )
     .await
@@ -76,7 +76,7 @@ async fn concurrent_dispatches_never_see_each_others_context() {
     let call = |ctx: Arc<CoreContext>| {
         try_invoke_registered_rpc(
             DispatchCtx::new(ctx),
-            "openhuman.ctx_probe_whoami",
+            "openhuman.ext_ctx_probe_whoami",
             Map::new(),
         )
     };
@@ -98,7 +98,7 @@ async fn explicit_context_overrides_the_calling_tasks_scope() {
     let value = CoreContext::scope(scoped, async {
         try_invoke_registered_rpc(
             DispatchCtx::new(explicit),
-            "openhuman.ctx_probe_whoami",
+            "openhuman.ext_ctx_probe_whoami",
             Map::new(),
         )
         .await

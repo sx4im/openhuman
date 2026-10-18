@@ -173,7 +173,12 @@ async fn a_long_tool_call_holds_off_the_watchdog_until_it_closes() {
 async fn tap_records_and_forwards_in_order() {
     let activity = TurnActivity::new();
     let (tx, rx) = mpsc::channel(4);
-    let mut bridge_rx = tap(activity.clone(), rx, 4);
+    let mut bridge_rx = tap(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        activity.clone(),
+        rx,
+        4,
+    );
     tx.send(tool_started("a")).await.unwrap();
     tx.send(text("x")).await.unwrap();
     drop(tx);

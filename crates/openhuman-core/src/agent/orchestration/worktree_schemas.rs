@@ -20,7 +20,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::Outcome;
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};

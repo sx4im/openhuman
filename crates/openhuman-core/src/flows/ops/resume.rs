@@ -18,6 +18,7 @@ use super::*;
 /// unknown) is rejected outright — resuming an already-settled thread_id is
 /// no longer treated as a harmless no-op, it's a clear error.
 pub async fn flows_resume(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     flow_id: &str,
     thread_id: &str,
@@ -208,7 +209,12 @@ pub async fn flows_resume(
     }
     let compiled = tinyflows::compiler::compile(&flow.graph).map_err(|e| e.to_string())?;
     let config_arc = Arc::new(config.clone());
+    // The run acts under its own trusted `Workflow` origin: its capabilities
+    // read the origin from this context, not from the calling task's scope.
+    let origin = workflow_origin(flow_id, flow.require_approval);
+    let run_ctx = ctx.with_turn_origin(origin.clone());
     let caps = crate::flows::tinyflows::build_capabilities(
+        &run_ctx,
         config_arc.clone(),
         format!("flow:{flow_id}"),
         Some(FlowRunContext {
@@ -279,7 +285,6 @@ pub async fn flows_resume(
         "[flows] flows_resume: resuming checkpointed run"
     );
 
-    let origin = workflow_origin(flow_id, flow.require_approval);
     // Same per-run journal as `flows_run`: the resumed execution mints a new
     // tinyagents run id, so its observation slice is read under that id.
     let journal = Arc::new(tinyflows::engine::InMemoryGraphEventJournal::new());

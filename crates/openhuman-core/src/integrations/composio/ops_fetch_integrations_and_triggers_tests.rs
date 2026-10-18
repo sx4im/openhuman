@@ -578,7 +578,8 @@ async fn composio_list_connections_routes_through_direct_mode() {
     // remote will reject the test request, so we assert on the error
     // shape: it must reference `composio` AND must NOT reference the
     // backend-session path (proving the factory routed us to direct).
-    let result = composio_list_connections(&config).await;
+    let result =
+        composio_list_connections(&crate::core::runtime::DispatchCtx::ambient(), &config).await;
     match result {
         Ok(outcome) => {
             // Some sandboxes resolve OK with an empty list — accept
@@ -646,7 +647,7 @@ async fn composio_list_connections_returns_empty_when_direct_mode_no_key() {
     // RC of TAURI-RUST-R4: this MUST be Ok(empty), not Err — no error is
     // constructed, so nothing reaches Sentry and the 5 s poll stops
     // churning.
-    let outcome = composio_list_connections(&config)
+    let outcome = composio_list_connections(&crate::core::runtime::DispatchCtx::ambient(), &config)
         .await
         .expect("direct mode with no key must return an empty list, not an error");
     assert!(

@@ -88,12 +88,14 @@ impl RouteCallbacks {
         context: ChannelRuntimeContext,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Self {
+        let ctx = context.dispatch_ctx();
         Self {
-            context,
-            core_context: crate::core::runtime::CoreContext::current(),
-            tenant: crate::core::runtime::tenant::current_tenant_or_isolated(
+            core_context: ctx.resolved(),
+            tenant: crate::core::runtime::tenant::isolated_unless_tenant(
+                ctx.tenant(),
                 "channel_remote_control",
             ),
+            context,
             cancellation,
         }
     }

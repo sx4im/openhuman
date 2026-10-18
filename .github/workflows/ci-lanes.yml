@@ -10,10 +10,6 @@
 #           `openhuman-ex63`, host code in tinyhumansai/gh-hosted-runner). All
 #           lanes run at once; target dirs live on the per-job scratch disk;
 #           sccache, cargo and pnpm caches live on a 10 GB capped cache disk.
-#           Rust compiles go through tinymold (a per-job local store on scratch
-#           plus the host's shared, signed remote) when the guest provides
-#           both, and through sccache otherwise (rustWrapperFor in
-#           lanes-plan.mjs).
 #   hosted  the same lanes split over a few GitHub-hosted jobs sized to fit
 #           those runners, with GitHub's Actions cache.
 #

@@ -1701,8 +1701,9 @@ async fn credentials_public_ops_cover_service_and_missing_session_error_paths() 
     std::fs::create_dir_all(config.config_path.parent().expect("config parent"))
         .expect("create config parent");
 
-    openhuman_core::security::credentials::start_credential_gated_services(&config).await;
-    openhuman_core::security::credentials::stop_credential_gated_services(&config).await;
+    let ctx = openhuman_core::core::runtime::DispatchCtx::host_default();
+    openhuman_core::security::credentials::start_credential_gated_services(&ctx, &config).await;
+    openhuman_core::security::credentials::stop_credential_gated_services(&ctx, &config).await;
 
     // The account-bound link-token and OAuth ops live in `openhuman-tinyhumans`
     // (`hosted::{channel_link, oauth}`); validation still runs first, and a

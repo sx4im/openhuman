@@ -27,6 +27,7 @@ use tinystoragedrivers::{CollectionSpec, ScopedStorage};
 
 use super::storage_grant_tinybox::{JAIL_INDEX_COLLECTION, MODULE_ID};
 use super::storage_import_support as support;
+use crate::core::runtime::DispatchCtx;
 
 const LOG_PREFIX: &str = "[tinybox-import]";
 /// The registry the module opens over the workspace's jails directory.
@@ -51,8 +52,8 @@ pub(crate) enum Outcome {
 
 /// Imports the index under `<workspace_dir>/jails` into the module's scope of
 /// the installed backend.
-pub(crate) async fn import_legacy(workspace_dir: &Path) -> Result<Outcome> {
-    let Some(scoped) = support::module_scope(MODULE_ID)? else {
+pub(crate) async fn import_legacy(ctx: &DispatchCtx, workspace_dir: &Path) -> Result<Outcome> {
+    let Some(scoped) = support::module_scope(ctx, MODULE_ID)? else {
         return Ok(Outcome::NoBackend);
     };
     import_into(&scoped, &workspace_dir.join(BASE_DIR)).await

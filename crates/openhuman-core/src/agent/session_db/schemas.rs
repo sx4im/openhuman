@@ -3,7 +3,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::Outcome;
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};

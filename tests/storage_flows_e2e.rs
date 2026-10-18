@@ -175,7 +175,12 @@ async fn legacy_tinyflows_files_are_imported_into_a_configured_backend(case: Cas
     let before = digest(workspace.path());
     case.install();
 
-    for report in openhuman_core::storage::import::run(&config).await {
+    for report in openhuman_core::storage::import::run(
+        &openhuman_core::core::runtime::DispatchCtx::process_default(),
+        &config,
+    )
+    .await
+    {
         report.outcome.unwrap();
     }
 
@@ -191,7 +196,12 @@ async fn legacy_tinyflows_files_are_imported_into_a_configured_backend(case: Cas
     .unwrap();
 
     // Run again: the markers say it is done, and nothing is rewritten.
-    for report in openhuman_core::storage::import::run(&config).await {
+    for report in openhuman_core::storage::import::run(
+        &openhuman_core::core::runtime::DispatchCtx::process_default(),
+        &config,
+    )
+    .await
+    {
         report.outcome.unwrap();
     }
     assert_eq!(

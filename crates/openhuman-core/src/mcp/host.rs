@@ -117,7 +117,7 @@ pub fn client_config(config: &Config) -> tinymcp_bus::McpClientConfig {
     client.client_identity.name = config.mcp_client.client_identity.name.clone();
     client.client_identity.title = config.mcp_client.client_identity.title.clone();
     client.client_identity.version = config.mcp_client.client_identity.version.clone();
-    client.client_identity.capabilities = tinymcp::ui::client_capabilities();
+    client.client_identity.capabilities = tinymcp_bus::ui::client_capabilities();
     client.registry_auth = config.mcp_client.registry_auth.clone();
 
     // GitBooks uses dedicated deferred tools and is not part of the configured

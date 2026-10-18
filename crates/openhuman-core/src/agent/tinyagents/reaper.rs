@@ -24,10 +24,10 @@ pub(crate) async fn reap_orphaned_runs(workspace: &Path) -> usize {
         "run reaper",
         |_| reap_unless_shared(workspace, shared),
     )
-        .await
-        .into_iter()
-        .map(|(_, reaped)| reaped)
-        .sum()
+    .await
+    .into_iter()
+    .map(|(_, reaped)| reaped)
+    .sum()
 }
 
 async fn reap_unless_shared(workspace: &Path, shared: bool) -> usize {

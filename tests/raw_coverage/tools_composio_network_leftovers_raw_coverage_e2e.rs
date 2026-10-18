@@ -252,6 +252,7 @@ async fn round20_composio_ops_cover_authorize_scopes() {
     assert_eq!(authorized.connection_id, "conn-authorize");
 
     let listed = composio_list_tools(
+        &openhuman_core::core::runtime::DispatchCtx::host_default(),
         &harness.config,
         Some(vec!["gmail".into(), "github".into()]),
         Some(vec!["readOnlyHint".into()]),

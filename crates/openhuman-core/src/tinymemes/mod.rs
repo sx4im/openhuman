@@ -196,18 +196,15 @@ async fn load(
     let config = config.clone();
     let thread_id = thread_id.to_owned();
     let ctx = ctx.clone();
-    ctx.clone().spawn_blocking(move || {
-        crate::threads::store::get_messages(
-            &ctx,
-            config.workspace_dir.clone(),
-            &thread_id,
-        )
-        .map_err(|e| log::warn!("[tinymemes] thread history unavailable: {e}"))
+    ctx.clone()
+        .spawn_blocking(move || {
+            crate::threads::store::get_messages(&ctx, config.workspace_dir.clone(), &thread_id)
+                .map_err(|e| log::warn!("[tinymemes] thread history unavailable: {e}"))
+                .ok()
+        })
+        .await
         .ok()
-    })
-    .await
-    .ok()
-    .flatten()
+        .flatten()
 }
 
 /// What the host decides for the module: the meme cooldown

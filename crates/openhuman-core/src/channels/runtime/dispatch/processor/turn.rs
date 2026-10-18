@@ -388,6 +388,7 @@ pub(crate) async fn process_channel_runtime_message(
     // spawn the background refresh task that keeps the indicator alive during long turns.
     let typing_task = match (target_channel.as_ref(), typing_cancellation.as_ref()) {
         (Some(channel), Some(token)) => Some(AbortOnDropHandle::new(spawn_typing_task(
+            &ctx.dispatch_ctx(),
             Arc::clone(channel),
             msg.reply_target.clone(),
             token.clone(),
@@ -462,8 +463,7 @@ pub(crate) async fn process_channel_runtime_message(
         )),
     };
     let llm_result =
-        tokio::time::timeout(Duration::from_secs(ctx.message_timeout_secs), agent_call)
-    .await;
+        tokio::time::timeout(Duration::from_secs(ctx.message_timeout_secs), agent_call).await;
 
     // Wait for draft updater to finish
     if let Some(handle) = draft_updater {

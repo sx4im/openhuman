@@ -24,7 +24,6 @@ use crate::channels::{ChannelSendExt, SendMessage};
 use crate::config::Config;
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
-use crate::core::runtime::DispatchCtx;
 use tinychannels_bus as traits;
 
 pub(crate) mod posture;

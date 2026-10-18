@@ -68,7 +68,7 @@ pub(super) fn handle_update_voice_server_settings(
         match ctx.load_config().await {
             Ok(config) => {
                 log::info!("[config][rpc] voice settings saved; applying live always-on state");
-                crate::voice::always_on::start_if_enabled(&config).await;
+                crate::voice::always_on::start_if_enabled(&ctx, &config).await;
             }
             Err(error) => {
                 log::warn!(

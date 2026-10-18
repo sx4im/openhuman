@@ -553,12 +553,22 @@ async fn a_noted_cron_completion_names_its_agent() {
         success: true,
         output: String::new(),
     };
-    let owner = event_owner(&crate::core::runtime::DispatchCtx::host_default(), &crate::config::Config::default(), &event).await;
+    let owner = event_owner(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &crate::config::Config::default(),
+        &event,
+    )
+    .await;
     assert_eq!(owner, Ok(Some("notif-owner-agent".to_string())));
     // Taken: asked again, the job is no one's (no backend installed here).
     if crate::storage::installed().is_none() {
         assert_eq!(
-            event_owner(&crate::core::runtime::DispatchCtx::host_default(), &crate::config::Config::default(), &event).await,
+            event_owner(
+                &crate::core::runtime::DispatchCtx::host_default(),
+                &crate::config::Config::default(),
+                &event
+            )
+            .await,
             Ok(None)
         );
     }

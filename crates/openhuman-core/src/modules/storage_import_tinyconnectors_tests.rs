@@ -70,7 +70,9 @@ fn tree_digest(root: &Path) -> Vec<(String, Vec<u8>)> {
 async fn preferences_and_the_trigger_archive_move_into_the_modules_storage() {
     let legacy = legacy_state();
     let scoped = scoped();
-    let outcome = import_into(&scoped, legacy.path()).await.unwrap();
+    let outcome = import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+        .await
+        .unwrap();
     // gmail + slack; the corrupt preference, the non-day archive name and the
     // unparsable archive line are skipped.
     assert_eq!(
@@ -117,7 +119,9 @@ async fn preferences_and_the_trigger_archive_move_into_the_modules_storage() {
 async fn the_legacy_files_are_left_untouched() {
     let legacy = legacy_state();
     let before = tree_digest(legacy.path());
-    import_into(&scoped(), legacy.path()).await.unwrap();
+    import_into(&DispatchCtx::host_default(), &scoped(), legacy.path())
+        .await
+        .unwrap();
     assert_eq!(tree_digest(legacy.path()), before);
 }
 
@@ -125,7 +129,9 @@ async fn the_legacy_files_are_left_untouched() {
 async fn a_second_run_is_a_noop_even_after_the_module_changed_the_data() {
     let legacy = legacy_state();
     let scoped = scoped();
-    import_into(&scoped, legacy.path()).await.unwrap();
+    import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+        .await
+        .unwrap();
     // The user later deletes a preference; the untouched file must not bring
     // it back.
     scoped
@@ -134,7 +140,9 @@ async fn a_second_run_is_a_noop_even_after_the_module_changed_the_data() {
         .await
         .unwrap();
     assert_eq!(
-        import_into(&scoped, legacy.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .unwrap(),
         Outcome::AlreadyDone
     );
     assert!(scoped
@@ -165,7 +173,9 @@ async fn records_the_module_already_wrote_are_never_replaced_or_duplicated() {
         .await
         .unwrap();
 
-    let outcome = import_into(&scoped, legacy.path()).await.unwrap();
+    let outcome = import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+        .await
+        .unwrap();
     assert_eq!(
         outcome,
         Outcome::Imported {
@@ -195,13 +205,17 @@ async fn a_state_directory_without_legacy_files_writes_no_marker() {
     let empty = tempfile::tempdir().unwrap();
     let scoped = scoped();
     assert_eq!(
-        import_into(&scoped, empty.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, empty.path())
+            .await
+            .unwrap(),
         Outcome::NoSource
     );
     // Files that show up later (an older build still running) are still taken.
     let legacy = legacy_state();
     assert!(matches!(
-        import_into(&scoped, legacy.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .unwrap(),
         Outcome::Imported { .. }
     ));
 }
@@ -216,7 +230,11 @@ async fn an_unreadable_preference_file_is_retried_instead_of_marked_done() {
     )
     .unwrap();
     let scoped = scoped();
-    assert!(import_into(&scoped, legacy.path()).await.is_err());
+    assert!(
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .is_err()
+    );
     assert!(scoped
         .documents()
         .get(PREFS_COLLECTION, "gmail")
@@ -226,7 +244,9 @@ async fn an_unreadable_preference_file_is_retried_instead_of_marked_done() {
 
     std::fs::remove_file(legacy.path().join(PREFS_DIR).join("bad.json")).unwrap();
     assert!(matches!(
-        import_into(&scoped, legacy.path()).await.unwrap(),
+        import_into(&DispatchCtx::host_default(), &scoped, legacy.path())
+            .await
+            .unwrap(),
         Outcome::Imported { prefs: 2, .. }
     ));
 }

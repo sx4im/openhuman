@@ -5,7 +5,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 use crate::integrations::composio::ops;
 
@@ -59,7 +58,7 @@ pub(super) fn handle_list_trigger_history(
         let config = ctx.load_config().await?;
         let payload: TriggerHistoryParams = serde_json::from_value(Value::Object(params))
             .map_err(|e| format!("invalid params: {e}"))?;
-        to_json(ops::composio_list_trigger_history(&config, payload.limit).await?)
+        to_json(ops::composio_list_trigger_history(&ctx, &config, payload.limit).await?)
     })
 }
 

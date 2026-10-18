@@ -507,7 +507,7 @@ async fn start_credential_gated_services_completes_with_all_services_disabled() 
     // immediately; the generous ceiling only guards against a deadlock.
     tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        start_credential_gated_services(&config),
+        start_credential_gated_services(&crate::core::runtime::DispatchCtx::default(), &config),
     )
     .await
     .expect("start_credential_gated_services must return, not block");

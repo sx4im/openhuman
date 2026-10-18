@@ -1,7 +1,7 @@
 use super::*;
 use crate::cron::get_job;
 use tempfile::TempDir;
-use tinyflows_schedule::types::ActiveHours;
+use tinyflows_bus::schedule::types::ActiveHours;
 
 fn test_config(tmp: &TempDir) -> Config {
     let config = Config {
@@ -202,6 +202,9 @@ fn update_rejects_expression_for_non_cron_schedule() {
 fn add_once_creates_future_at_schedule() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
+    // The first call in a process starts the module runtime and attaches the
+    // module (seconds); take the baseline after it so only the call is timed.
+    crate::cron::list_jobs(&config).unwrap();
     let before = chrono::Utc::now();
     let job = add_once(&config, "5m", "echo hello").unwrap();
     match job.schedule {
@@ -539,7 +542,7 @@ fn single_flight_system_job(config: &Config, name: &str) -> CronJob {
         config,
         &job.id,
         CronJobPatch {
-            policy: Some(tinyflows_schedule::JobPolicy {
+            policy: Some(tinyflows_bus::schedule::JobPolicy {
                 retries: Some(0),
                 single_flight: true,
             }),

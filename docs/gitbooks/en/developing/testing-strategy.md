@@ -83,7 +83,7 @@ For example, the lease model retains the expired-holder reacquisition case as `r
 ## What the existing harness gives you
 
 - Mock backend: `startMockServer` and `stopMockServer` in `app/test/e2e/mock-server.ts`.
-- Auth shortcut: `triggerAuthDeepLink` and `triggerAuthDeepLinkBypass` in `helpers/deep-link-helpers.ts` skip real OAuth.
+- Auth shortcut: use `triggerAuthLoopbackBypass` in `helpers/loopback-auth-helpers.ts`. It uses a test JWT but exercises the loopback listener and state-nonce validation without a real OAuth provider.
 - Element helpers: `clickNativeButton`, `waitForWebView` and `clickToggle` in `helpers/element-helpers.ts`. Use these instead of raw `XCUIElementType*` selectors.
 - Shared flows: `completeOnboardingIfVisible`, `navigateViaHash`, `navigateToSkills` and `walkOnboarding` in `helpers/shared-flows.ts`.
 - Core RPC from a spec: `callOpenhumanRpc` in `helpers/core-rpc.ts` drives the embedded core directly when a UI step would be brittle.

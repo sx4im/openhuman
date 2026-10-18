@@ -315,20 +315,20 @@ impl OpenHumanModelResolver {
 
         // The one construction chokepoint: provider resolution, BYOK/local/managed
         // selection, and the egress disclosure all happen inside here.
-        let (model, model_id) =
-            create_chat_model_with_model_id_in(
-                &self.dispatch.clone().unwrap_or_else(crate::core::runtime::DispatchCtx::host_default),
-                role,
-                &self.config,
-                self.temperature,
-            )
-            .map_err(
-                |error| {
-                    TinyAgentsError::Model(format!(
-                        "openhuman: no model for workload role `{role}`: {error}"
-                    ))
-                },
-            )?;
+        let (model, model_id) = create_chat_model_with_model_id_in(
+            &self
+                .dispatch
+                .clone()
+                .unwrap_or_else(crate::core::runtime::DispatchCtx::host_default),
+            role,
+            &self.config,
+            self.temperature,
+        )
+        .map_err(|error| {
+            TinyAgentsError::Model(format!(
+                "openhuman: no model for workload role `{role}`: {error}"
+            ))
+        })?;
 
         tracing::debug!(
             target: "tinyagents",

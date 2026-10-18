@@ -18,8 +18,8 @@ use crate::web_chat::{publish_web_channel_event, WebChannelEvent};
 use anyhow::{anyhow, Result};
 use std::path::Path;
 use {
-    crate::cron::channel_bridge, tinyflows_schedule::types::CronJob,
-    tinyflows_schedule::types::DeliveryStatus, tinyflows_schedule::types::JobOrigin,
+    crate::cron::channel_bridge, tinyflows_bus::schedule::types::CronJob,
+    tinyflows_bus::schedule::types::DeliveryStatus, tinyflows_bus::schedule::types::JobOrigin,
 };
 
 /// What a scheduled run replies when it has nothing worth sending.
@@ -263,19 +263,21 @@ async fn deliver_to_web_thread(
     let persist_request = request_id.clone();
     let persist_text = text.to_string();
     let persist_ctx = ctx.clone();
-    persist_ctx.clone().spawn_blocking(move || {
-        crate::web_chat::persist_delivered_reply(
-            &persist_ctx,
-            &workspace,
-            &persist_thread,
-            &persist_request,
-            &persist_text,
-            &[],
-        )
-    })
-    .await
-    .map_err(|e| anyhow!("origin reply persistence task failed: {e}"))?
-    .map_err(|e| anyhow!("could not store the reply in the origin thread: {e}"))?;
+    persist_ctx
+        .clone()
+        .spawn_blocking(move || {
+            crate::web_chat::persist_delivered_reply(
+                &persist_ctx,
+                &workspace,
+                &persist_thread,
+                &persist_request,
+                &persist_text,
+                &[],
+            )
+        })
+        .await
+        .map_err(|e| anyhow!("origin reply persistence task failed: {e}"))?
+        .map_err(|e| anyhow!("could not store the reply in the origin thread: {e}"))?;
 
     publish_web_channel_event(WebChannelEvent {
         event: "proactive_message".to_string(),

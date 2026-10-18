@@ -20,8 +20,9 @@ use serde::{Deserialize, Serialize};
 use super::defaults::default_true;
 
 /// Names of every toggleable component, in declaration order.
-pub const COMPONENT_NAMES: [&str; 15] = [
+pub const COMPONENT_NAMES: [&str; 16] = [
     "flows",
+    "tinyflows",
     "memes",
     "documents",
     "search",
@@ -44,6 +45,11 @@ pub struct ComponentsConfig {
     /// Saved workflows (tinyflows).
     #[serde(default = "default_true")]
     pub flows: bool,
+    /// Scheduled jobs and workflow authoring runtime (the tinyflows module:
+    /// scheduler, job store, schedule maths). Off, `cron.*` answers
+    /// `COMPONENT_DISABLED:tinyflows` and no scheduler runs.
+    #[serde(default = "default_true")]
+    pub tinyflows: bool,
     /// Meme remixing (tinymemes).
     #[serde(default = "default_true")]
     pub memes: bool,
@@ -92,6 +98,7 @@ impl Default for ComponentsConfig {
     fn default() -> Self {
         Self {
             flows: true,
+            tinyflows: true,
             memes: true,
             documents: true,
             search: true,
@@ -115,6 +122,7 @@ impl ComponentsConfig {
     pub fn get(&self, name: &str) -> Option<bool> {
         Some(match name {
             "flows" => self.flows,
+            "tinyflows" => self.tinyflows,
             "memes" => self.memes,
             "documents" => self.documents,
             "search" => self.search,
@@ -137,6 +145,7 @@ impl ComponentsConfig {
     pub fn set(&mut self, name: &str, value: bool) -> bool {
         let slot = match name {
             "flows" => &mut self.flows,
+            "tinyflows" => &mut self.tinyflows,
             "memes" => &mut self.memes,
             "documents" => &mut self.documents,
             "search" => &mut self.search,

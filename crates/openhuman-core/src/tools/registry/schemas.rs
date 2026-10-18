@@ -87,21 +87,21 @@ pub fn schemas(function: &str) -> ControllerSchema {
     }
 }
 
-fn handle_list(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
+fn handle_list(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
         log::debug!(
             "[tool_registry] rpc list requested param_count={}",
             params.len()
         );
-        to_json(crate::tools::registry::ops::list_tools())
+        to_json(crate::tools::registry::ops::list_tools(&ctx))
     })
 }
 
-fn handle_get(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
+fn handle_get(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
         let tool_id = required_tool_id(&params)?;
         log::debug!("[tool_registry] rpc get requested tool_id={tool_id}");
-        to_json(crate::tools::registry::ops::get_tool(tool_id)?)
+        to_json(crate::tools::registry::ops::get_tool(&ctx, tool_id)?)
     })
 }
 

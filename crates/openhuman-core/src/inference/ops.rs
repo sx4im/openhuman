@@ -228,7 +228,7 @@ pub async fn inference_analyze_sentiment(
          User message: {message}"
     );
     let runtime = crate::inference::local_runtime_config(config);
-    let Some(_permit) = crate::cron::scheduler_gate::wait_for_capacity().await else {
+    let Some(_permit) = crate::platform::llm_gate::wait_for_capacity().await else {
         return Ok(Outcome::single_log(
             SentimentResult::neutral(),
             "local inference paused while signed out",
@@ -253,7 +253,7 @@ pub async fn inference_analyze_sentiment(
 
 pub async fn inference_get_client_config(ctx: &DispatchCtx) -> Result<Outcome<Value>, String> {
     debug!("{LOG_PREFIX} get_client_config:start");
-    let result = config_rpc::load_and_get_client_config_snapshot(&ctx).await;
+    let result = config_rpc::load_and_get_client_config_snapshot(ctx).await;
     match &result {
         Ok(_) => debug!("{LOG_PREFIX} get_client_config:ok"),
         Err(err) => warn!(error = %err, "{LOG_PREFIX} get_client_config:error"),
@@ -266,7 +266,7 @@ pub async fn inference_update_model_settings(
     update: config_rpc::ModelSettingsPatch,
 ) -> Result<Outcome<Value>, String> {
     debug!("{LOG_PREFIX} update_model_settings:start");
-    let result = config_rpc::load_and_apply_model_settings(&ctx, update).await;
+    let result = config_rpc::load_and_apply_model_settings(ctx, update).await;
     match &result {
         Ok(_) => debug!("{LOG_PREFIX} update_model_settings:ok"),
         Err(err) => warn!(error = %err, "{LOG_PREFIX} update_model_settings:error"),
@@ -279,7 +279,7 @@ pub async fn inference_update_local_settings(
     update: config_rpc::LocalAiSettingsPatch,
 ) -> Result<Outcome<Value>, String> {
     debug!("{LOG_PREFIX} update_local_settings:start");
-    let result = config_rpc::load_and_apply_local_ai_settings(&ctx, update).await;
+    let result = config_rpc::load_and_apply_local_ai_settings(ctx, update).await;
     match &result {
         Ok(_) => {
             debug!("{LOG_PREFIX} update_local_settings:ok");

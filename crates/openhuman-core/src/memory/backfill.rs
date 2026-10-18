@@ -20,6 +20,11 @@
 //!   in `<workspace>/memory/conversations_backfill.json`, so an interrupted run
 //!   resumes and a later run sends only what is new. A re-sent item is a
 //!   replay (its id is a content digest), never a duplicate.
+//! - **Accepted, then visible.** Every batch but the last goes in with
+//!   accepted writes: the engine returns once it holds them durably, and
+//!   indexes them after. The last waits until it is visible, and the scope's
+//!   log is ordered, so a `done` run is searchable. An engine without
+//!   accepted writes stores every batch as before.
 //! - **Consent.** It uploads chat history to the selected engine, so
 //!   [`start`] refuses without `consent`.
 
@@ -34,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::memory::engine::{self, BoundEngine};
 use crate::memory::error::{MemoryError, MemoryResult};
-use crate::memory::ops::store_many_on;
+use crate::memory::ops::store_many_on_with;
 use crate::memory::scope::{MemoryIdentity, ResolvedIdentity};
 use crate::memory::types::ImportPhase;
 use crate::threads::store::blocking as threads;
@@ -209,7 +214,8 @@ pub async fn status(ctx: &DispatchCtx, config: &Config) -> MemoryResult<Backfill
 pub async fn start(
     ctx: &DispatchCtx,
     config: &Config,
-    params: BackfillStartParams) -> MemoryResult<BackfillView> {
+    params: BackfillStartParams,
+) -> MemoryResult<BackfillView> {
     if !params.consent {
         return Err(MemoryError::invalid(
             "storing past chats uploads them to the selected engine; pass consent: true",
@@ -271,9 +277,10 @@ async fn run(
     mut file: BackfillFile,
     plans: Vec<ThreadPlan>,
 ) {
-    for plan in plans {
+    let last = last_batch(identity, &plans);
+    for (thread, plan) in plans.into_iter().enumerate() {
         // Groups of whole turns, so the stored counter never splits a turn.
-        for group in turn_groups(plan.range.clone()) {
+        for (index, group) in turn_groups(plan.range.clone()).into_iter().enumerate() {
             let items = group_items(
                 &identity.layout,
                 &identity.agent_id,
@@ -283,7 +290,18 @@ async fn run(
             );
             let count = items.len() as u64;
             if count > 0 {
-                if let Err(error) = store_many_on(bound, items).await {
+                // Accepted, not indexed: waiting on the engine to index every
+                // batch made a few thousand messages take hours on CortexDB.
+                // The last batch waits until it is visible: the scope's log
+                // is ordered, so everything stored before it is then too, and
+                // `done` still means searchable.
+                let options = if last == Some((thread, index)) {
+                    tinymemory_api::WriteOptions::visible()
+                } else {
+                    tinymemory_api::WriteOptions::accepted()
+                };
+                let stored = store_many_on_with(bound, items, options).await;
+                if let Err(error) = stored {
                     tracing::warn!(
                         code = error.code(),
                         "[memory:backfill] storing a batch failed; stopping"
@@ -315,6 +333,28 @@ async fn run(
         turns = file.state.turns_stored,
         "[memory:backfill] done"
     );
+}
+
+/// The last batch of the run that stores anything, as (thread, group): the
+/// one the run waits on until it is visible.
+fn last_batch(identity: &ResolvedIdentity, plans: &[ThreadPlan]) -> Option<(usize, usize)> {
+    plans.iter().enumerate().rev().find_map(|(thread, plan)| {
+        turn_groups(plan.range.clone())
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, group)| {
+                !group_items(
+                    &identity.layout,
+                    &identity.agent_id,
+                    &plan.thread_id,
+                    &plan.turns,
+                    group,
+                )
+                .is_empty()
+            })
+            .map(|(index, _)| (thread, index))
+    })
 }
 
 #[cfg(test)]

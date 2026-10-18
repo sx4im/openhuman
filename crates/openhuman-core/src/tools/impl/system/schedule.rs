@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::sync::Arc;
 use tinytools::{PermissionLevel, Tool, ToolResult};
-use {crate::cron, tinyflows_schedule::types::Schedule};
+use {crate::cron, tinyflows_bus::schedule::types::Schedule};
 
 /// Tool that lets the agent manage recurring and one-shot scheduled tasks.
 pub struct ScheduleTool {
@@ -325,7 +325,8 @@ impl ScheduleTool {
                     active_hours: None,
                 }
             } else if let Some(delay_str) = delay {
-                let at = Utc::now() + tinyflows_schedule::validation::parse_human_delay(delay_str)?;
+                let at = Utc::now()
+                    + crate::cron::client::parse_human_delay(&self.config, delay_str).await?;
                 Schedule::At { at }
             } else if let Some(at_str) = run_at {
                 let at: DateTime<Utc> = DateTime::parse_from_rfc3339(at_str)

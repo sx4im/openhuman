@@ -27,6 +27,8 @@ agent/registry/agents/loader_tests_specialist_agents_tests.rs
 agent/tinyagents/mod.rs
 commands/ops.rs
 config/migrations/retire_local_whisper_stt_tests.rs
+cron/bus_host.rs
+cron/bus_host_tests.rs
 core/all.rs
 core/all_tests.rs
 core/cli_tests.rs

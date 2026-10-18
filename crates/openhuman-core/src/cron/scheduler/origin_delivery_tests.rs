@@ -4,8 +4,8 @@ use tinyagents_session::transcript::{
     SessionRef, TranscriptMessage, TranscriptMeta, TranscriptTurn,
 };
 use {
-    tinyflows_schedule::types::DeliveryConfig, tinyflows_schedule::types::JobType,
-    tinyflows_schedule::types::Schedule, tinyflows_schedule::types::SessionTarget,
+    tinyflows_bus::schedule::types::DeliveryConfig, tinyflows_bus::schedule::types::JobType,
+    tinyflows_bus::schedule::types::Schedule, tinyflows_bus::schedule::types::SessionTarget,
 };
 
 fn config(tmp: &tempfile::TempDir) -> Config {

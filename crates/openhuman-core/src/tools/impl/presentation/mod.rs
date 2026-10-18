@@ -5,19 +5,18 @@
 //! 1. Validate the JSON-Schema input early (`types::validate_input`)
 //!    so the agent gets a structured `InvalidInput` it can self-correct
 //!    on instead of a low-level error.
-//! 2. Allocate an artifact dir via `artifacts::create_artifact`. The
-//!    returned `meta` starts at `ArtifactStatus::Pending` so an
-//!    interrupted run never surfaces as Ready.
+//! 2. Start a [`Production`]: it reserves `<title>.pptx` in the files folder
+//!    (the card shows "generating…") and opens the versioned artifact — or,
+//!    with an `artifact_id` arg or a regenerate in scope, a new version of
+//!    that artifact under the same id and file.
 //! 3. Generate the deck bytes via [`engine::generate`] — pure Rust,
 //!    `ppt-rs`-backed, no Python runtime, no subprocess. Wrapped in
 //!    `spawn_blocking` + `tokio::time::timeout` so the synchronous
 //!    library work neither blocks the async executor nor can wedge
 //!    the agent loop.
-//! 4. Write the bytes to the artifact's output path, stat for size,
-//!    flip artifact to `Ready` via `artifacts::finalize_artifact`,
-//!    return the artifact id + path.
-//! 5. On failure: flip artifact to `Failed` via
-//!    `artifacts::fail_artifact` so the UI can surface the reason.
+//! 4. Write the bytes and [`Production::complete`]: the file becomes the
+//!    artifact's newest version and the card turns ready.
+//! 5. On failure: [`Production::fail`] so the UI can surface the reason.
 //!
 //! Originally shipped in #2778 against a managed python-pptx venv;
 //! refactored to a native-Rust engine in #2780-follow-up to drop the
@@ -36,10 +35,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::agent::artifacts::{
-    create_artifact_regenerating, fail_artifact, finalize_artifact, read_artifact_bytes,
-    ArtifactKind,
-};
+use crate::agent::artifacts::production::Production;
+use crate::agent::artifacts::read_artifact_bytes;
 use crate::security::SecurityPolicy;
 use tinytools::{PermissionLevel, Tool, ToolResult};
 
@@ -262,6 +259,10 @@ impl Tool for PresentationTool {
                     "description": "Deck title. Surfaced on the title slide and used as the artifact's human-readable name. Required, non-empty.",
                     "maxLength": types::MAX_TEXT_CHARS,
                 },
+                "artifact_id": {
+                    "type": "string",
+                    "description": "Optional artifact id to update. Pass an id from a prior generate_presentation call to save this deck as a new version of that artifact instead of creating a new one.",
+                },
                 "author": {
                     "type": "string",
                     "description": "Optional author byline shown on the title slide.",
@@ -356,31 +357,41 @@ impl PresentationTool {
             );
         }
 
-        let (meta, output_path) = create_artifact_regenerating(
+        // Reserve the file and open the artifact: a new one, or a new version
+        // of `artifact_id` / the regenerate target (same id, same file,
+        // history kept).
+        let production = Production::start(
             &self.workspace_dir,
-            &self.files_dir,
-            ArtifactKind::Presentation,
+            self.files_dir.clone(),
+            tiny_artifacts::ArtifactKind::File,
             &input.title,
             "pptx",
             None,
-            self.regenerate_target.as_deref(),
+            input
+                .artifact_id
+                .as_deref()
+                .or(self.regenerate_target.as_deref()),
             chat,
         )
         .await
         .map_err(anyhow::Error::msg)?;
+        let output_path = production.path().to_path_buf();
 
         // Persist the verbatim args next to meta.json so a failed card's
         // Retry can re-dispatch this exact spec deterministically (#3162).
         // Best-effort: a write failure only forfeits future regeneration,
         // it must not abort an otherwise-successful generation.
-        if let Err(err) =
-            crate::agent::artifacts::store::save_artifact_args(&self.workspace_dir, &meta.id, &args)
-                .await
+        if let Err(err) = crate::agent::artifacts::store::save_artifact_args(
+            &self.workspace_dir,
+            production.id(),
+            &args,
+        )
+        .await
         {
             tracing::warn!(
                 target: "presentation",
                 err = %err,
-                artifact_id = %meta.id,
+                artifact_id = %production.id(),
                 "[presentation] failed to persist args.json; artifact will not be regenerable"
             );
         }
@@ -395,14 +406,7 @@ impl PresentationTool {
         {
             Ok(bytes) => bytes,
             Err(err) => {
-                let _ = fail_artifact(
-                    &self.workspace_dir,
-                    &self.files_dir,
-                    &meta.id,
-                    &err.to_string(),
-                    chat,
-                )
-                .await;
+                production.fail(&err.to_string()).await;
                 tracing::warn!(
                     target: "presentation",
                     err = %err,
@@ -418,49 +422,26 @@ impl PresentationTool {
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let reason = format!("failed to write generated deck ({filename}): {err}");
-            let _ = fail_artifact(
-                &self.workspace_dir,
-                &self.files_dir,
-                &meta.id,
-                &reason,
-                chat,
-            )
-            .await;
+            production.fail(&reason).await;
             tracing::warn!(
                 target: "presentation",
                 err = %err,
-                artifact_id = %meta.id,
+                artifact_id = %production.id(),
                 filename = %filename,
                 "[presentation] artifact file write failed"
             );
             return Ok(ToolResult::error(reason));
         }
 
-        let size_bytes = bytes.len() as u64;
-        let updated = match finalize_artifact(&self.workspace_dir, &meta.id, size_bytes, chat).await
-        {
-            Ok(updated) => updated,
-            Err(err) => {
-                let reason = format!("failed to finalize artifact: {err}");
-                // File is already on disk but the ledger transition failed.
-                // Flip the artifact to Failed so the UI surfaces the error
-                // instead of leaving it stuck in `Pending`. Fail-artifact
-                // errors are swallowed — they can only happen if the same
-                // ledger backend is unavailable, in which case nothing we
-                // do here will help.
-                let _ = fail_artifact(
-                    &self.workspace_dir,
-                    &self.files_dir,
-                    &meta.id,
-                    &reason,
-                    chat,
-                )
-                .await;
+        // Record the file as the artifact's newest version; the card turns
+        // ready from that record.
+        let size_bytes = match production.complete().await {
+            Ok(size) => size,
+            Err(reason) => {
                 tracing::warn!(
                     target: "presentation",
-                    err = %err,
-                    artifact_id = %meta.id,
-                    "[presentation] finalize_artifact failed; flipped to Failed"
+                    artifact_id = %production.id(),
+                    "[presentation] {reason}"
                 );
                 return Ok(ToolResult::error(reason));
             }
@@ -468,14 +449,14 @@ impl PresentationTool {
 
         tracing::info!(
             target: "presentation",
-            artifact_id = %updated.id,
+            artifact_id = %production.id(),
             size_bytes,
             slide_count = input.slides.len(),
             "[presentation] generation complete"
         );
 
         let out = GeneratePresentationOutput {
-            artifact_id: updated.id.clone(),
+            artifact_id: production.id().to_string(),
             artifact_path: output_path.display().to_string(),
             slide_count: input.slides.len(),
             size_bytes,

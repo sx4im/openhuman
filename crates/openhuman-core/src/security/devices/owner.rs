@@ -152,10 +152,11 @@ pub(super) async fn owner_of(
             Some(Ok(false)) | None => forget(channel_id),
         }
     }
-    let lookups = crate::storage::agents::for_each_scope(ctx, "device owner", |scope_ctx| async move {
-        has_live_device(&scope_ctx, channel_id).await
-    })
-    .await;
+    let lookups =
+        crate::storage::agents::for_each_scope(ctx, "device owner", |scope_ctx| async move {
+            has_live_device(&scope_ctx, channel_id).await
+        })
+        .await;
     let owner = decide(lookups)?;
     if let Some(owner) = &owner {
         log::debug!(

@@ -138,5 +138,15 @@
     "category": "A",
     "reason": "Process-wide agent definition registry: built-in harness definitions plus config allowlist overlays applied at boot and on update_agent. The same definitions serve every tenant in the process; it carries no per-tenant data.",
     "verification": "agent/harness/host_definition_tests.rs: apply_registry_entries_refreshes_the_process_registry"
+  },
+  {
+    "file": "crates/openhuman-core/src/threads/artifact_rows.rs",
+    "scope": "",
+    "name": "ARTIFACT_ROW_HANDLE",
+    "type": "OnceLock<SubscriptionHandle>",
+    "count": 1,
+    "category": "A",
+    "reason": "Keeps the one process-wide event-bus subscription that writes artifact rows alive and makes registration idempotent; it holds no data, and each event names the workspace and thread its row is written to.",
+    "verification": "threads/artifact_rows_tests.rs: recording_an_artifact_twice_writes_one_row"
   }
 ]

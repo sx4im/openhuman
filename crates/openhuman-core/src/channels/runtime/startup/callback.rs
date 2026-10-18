@@ -29,14 +29,16 @@ pub(super) struct ChannelHostCallbacks {
 
 impl ChannelHostCallbacks {
     pub(super) fn new(
+        ctx: &crate::core::runtime::DispatchCtx,
         config: Arc<Config>,
         context: Arc<OnceLock<Weak<ChannelRuntimeContext>>>,
         dispatch: mpsc::Sender<RuntimeChannelMessage>,
     ) -> Self {
         Self {
             config,
-            core_context: crate::core::runtime::CoreContext::current(),
-            tenant: crate::core::runtime::tenant::current_tenant_or_isolated(
+            core_context: ctx.resolved(),
+            tenant: crate::core::runtime::tenant::isolated_unless_tenant(
+                ctx.tenant(),
                 "channel_host_callback",
             ),
             cancellation: crate::channels::runtime::session::channel_session(),

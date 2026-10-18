@@ -10,12 +10,12 @@ use std::path::{Component, Path, PathBuf};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tinytools::{PermissionLevel, Tool, ToolExposure, ToolResult};
+use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolExposure, ToolResult, ToolRunContext};
 
 use super::cache::{self, InlineEntry};
 use super::resolve::{MAX_RESOURCE_BYTES, MAX_STRUCTURED_BYTES};
 use super::types::{McpUiPresentation, UiCsp, UiFlavor, UiResource, MCP_APP_MIME, MCP_UI_KIND};
-use tinymcp::ui::extract_links;
+use tinymcp_bus::ui::extract_links;
 
 /// The tool's registered name.
 pub const SHOW_UI_TOOL: &str = "show_ui";
@@ -109,8 +109,12 @@ pub fn confine_path_in(roots: &[PathBuf], path: &str) -> Result<(PathBuf, PathBu
 /// # Errors
 ///
 /// When the open is refused, the file is not regular, or it is too large.
-pub async fn read_confined(root: PathBuf, resolved: PathBuf) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+pub async fn read_confined(
+    ctx: &crate::core::runtime::DispatchCtx,
+    root: PathBuf,
+    resolved: PathBuf,
+) -> Result<String, String> {
+    ctx.spawn_blocking(move || {
         use std::io::Read;
         let file = crate::agent::attachments::provider::open::secure_open(&resolved, &root)
             .map_err(|error| {
@@ -180,6 +184,17 @@ impl Tool for ShowUiTool {
     }
 
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
+        self.execute_with_context(args, ToolCallOptions::default(), None)
+            .await
+    }
+
+    async fn execute_with_context(
+        &self,
+        args: Value,
+        _options: ToolCallOptions,
+        tool_context: Option<&dyn ToolRunContext>,
+    ) -> anyhow::Result<ToolResult> {
+        let ctx = crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool(tool_context);
         let html_arg = args.get("html").and_then(Value::as_str);
         let path_arg = args.get("path").and_then(Value::as_str);
         let html = match (html_arg, path_arg) {
@@ -189,7 +204,7 @@ impl Tool for ShowUiTool {
                     Ok(found) => found,
                     Err(error) => return Ok(ToolResult::error(format!("show_ui: {error}"))),
                 };
-                match read_confined(root, resolved).await {
+                match read_confined(&ctx, root, resolved).await {
                     Ok(html) => html,
                     Err(error) => return Ok(ToolResult::error(format!("show_ui: {error}"))),
                 }

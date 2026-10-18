@@ -14,6 +14,7 @@ async fn flows_run_detached_returns_running_run_id_and_inserts_row() {
     .unwrap();
 
     let outcome = flows_run_detached(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &flow.id,
         json!({}),
@@ -56,6 +57,7 @@ async fn flows_run_detached_registers_the_run_before_returning_its_id() {
     .unwrap();
 
     let outcome = flows_run_detached(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &flow.id,
         json!({}),

@@ -488,7 +488,11 @@ async fn scheduler_tick_once_publishes_health_recovery_signal_on_empty_queue() {
     tick_once(
         &config,
         &mut last_emitted_health,
-        &mut JobDispatcher::new(&config, &security),
+        &mut JobDispatcher::new(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            &security,
+        ),
     )
     .await;
 
@@ -551,7 +555,11 @@ async fn scheduler_tick_once_does_not_re_emit_recovery_signal_on_steady_state() 
     tick_once(
         &config,
         &mut last_emitted_health,
-        &mut JobDispatcher::new(&config, &security),
+        &mut JobDispatcher::new(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            &security,
+        ),
     )
     .await;
     assert_eq!(
@@ -569,7 +577,11 @@ async fn scheduler_tick_once_does_not_re_emit_recovery_signal_on_steady_state() 
         tick_once(
             &config,
             &mut last_emitted_health,
-            &mut JobDispatcher::new(&config, &security),
+            &mut JobDispatcher::new(
+                &crate::core::runtime::DispatchCtx::ambient(),
+                &config,
+                &security,
+            ),
         )
         .await;
         assert_eq!(

@@ -123,6 +123,7 @@ mod storage_import_tinymcp;
 mod storage_import_tinywallet;
 #[cfg(feature = "modules")]
 pub mod tinybox;
+pub(crate) mod tinyflows;
 #[cfg(feature = "modules")]
 mod tokenjuice_host;
 pub mod types;
@@ -170,14 +171,17 @@ pub use types::{LoadPolicy, ModuleRecord, ModuleSource, ModuleState, ModuleStatu
 /// Imports tinymcp's legacy SQLite files under `data_dir` into the module's
 /// storage, once per directory. Never fails the caller: an error is logged and
 /// the import is retried at the next open.
-pub async fn import_legacy_mcp(data_dir: &std::path::Path) {
+pub async fn import_legacy_mcp(
+    ctx: &crate::core::runtime::DispatchCtx,
+    data_dir: &std::path::Path,
+) {
     #[cfg(feature = "modules")]
-    match storage_import_tinymcp::import_legacy(data_dir).await {
+    match storage_import_tinymcp::import_legacy(ctx, data_dir).await {
         Ok(outcome) => log::debug!("[mcp] legacy storage import: {outcome:?}"),
         Err(error) => log::warn!("[mcp] legacy storage import failed, will retry: {error:#}"),
     }
     #[cfg(not(feature = "modules"))]
-    let _ = data_dir;
+    let _ = (ctx, data_dir);
 }
 
 /// What an importer's outcome says about whether it may be skipped next time.
@@ -228,6 +232,7 @@ fn imported_once() -> &'static ImportedSet {
 /// finishes, so a cancelled caller leaves nothing behind.
 #[cfg(feature = "modules")]
 async fn import_once<F, T>(
+    ctx: &crate::core::runtime::DispatchCtx,
     kind: &'static str,
     module_id: &str,
     dir: &std::path::Path,
@@ -237,7 +242,7 @@ where
     F: std::future::Future<Output = anyhow::Result<T>>,
     T: std::fmt::Debug + Settled,
 {
-    let scope = match storage_host::current_module_scope(&crate::core::runtime::DispatchCtx::ambient(), module_id) {
+    let scope = match storage_host::current_module_scope(ctx, module_id) {
         Ok(scope) => format!("{scope:?}"),
         Err(error) => {
             log::warn!("[{kind}] legacy storage import skipped: {:?}", error.kind());
@@ -267,17 +272,21 @@ where
 /// Imports the connector module's legacy preference and trigger-archive files
 /// under `state_dir` into its storage, once per directory. Never fails the
 /// caller: an error is logged and the import is retried at the next call.
-pub async fn import_legacy_connectors(state_dir: &std::path::Path) {
+pub async fn import_legacy_connectors(
+    ctx: &crate::core::runtime::DispatchCtx,
+    state_dir: &std::path::Path,
+) {
     #[cfg(feature = "modules")]
     import_once(
+        ctx,
         "connectors",
         storage_grant_tinyconnectors::MODULE_ID,
         state_dir,
-        storage_import_tinyconnectors::import_legacy(state_dir),
+        storage_import_tinyconnectors::import_legacy(ctx, state_dir),
     )
     .await;
     #[cfg(not(feature = "modules"))]
-    let _ = state_dir;
+    let _ = (ctx, state_dir);
 }
 
 /// Imports the x402 ledger's legacy `payments.jsonl` under `workspace_dir`
@@ -285,18 +294,22 @@ pub async fn import_legacy_connectors(state_dir: &std::path::Path) {
 /// caller: an error is logged and the import is retried at the next call. Returns
 /// false when the import failed, so the caller can refuse to open a ledger that
 /// would ignore the legacy payments.
-pub async fn import_legacy_x402(workspace_dir: &std::path::Path) -> bool {
+pub async fn import_legacy_x402(
+    ctx: &crate::core::runtime::DispatchCtx,
+    workspace_dir: &std::path::Path,
+) -> bool {
     #[cfg(all(feature = "modules", feature = "web3"))]
     return import_once(
+        ctx,
         "x402",
         storage_grant_tinywallet::MODULE_ID,
         workspace_dir,
-        storage_import_tinywallet::import_legacy(workspace_dir),
+        storage_import_tinywallet::import_legacy(ctx, workspace_dir),
     )
     .await;
     #[cfg(not(all(feature = "modules", feature = "web3")))]
     {
-        let _ = workspace_dir;
+        let _ = (ctx, workspace_dir);
         true
     }
 }
@@ -304,17 +317,21 @@ pub async fn import_legacy_x402(workspace_dir: &std::path::Path) -> bool {
 /// Imports the legacy jail registry index under `<workspace_dir>/jails` into
 /// the tinybox module's storage, once. Never fails the caller: an error is
 /// logged and the import is retried at the next call.
-pub async fn import_legacy_tinybox(workspace_dir: &std::path::Path) {
+pub async fn import_legacy_tinybox(
+    ctx: &crate::core::runtime::DispatchCtx,
+    workspace_dir: &std::path::Path,
+) {
     #[cfg(feature = "modules")]
     import_once(
+        ctx,
         "tinybox",
         storage_grant_tinybox::MODULE_ID,
         workspace_dir,
-        storage_import_tinybox::import_legacy(workspace_dir),
+        storage_import_tinybox::import_legacy(ctx, workspace_dir),
     )
     .await;
     #[cfg(not(feature = "modules"))]
-    let _ = workspace_dir;
+    let _ = (ctx, workspace_dir);
 }
 
 /// Scopes, under the current tenant, that hold expiring blobs written by
@@ -322,12 +339,14 @@ pub async fn import_legacy_tinybox(workspace_dir: &std::path::Path) {
 /// whose scope cannot be resolved here is skipped. Without the `modules`
 /// feature no module writes blobs, so there is nothing to sweep.
 #[cfg(feature = "modules")]
-pub(crate) fn expiring_blob_module_scopes() -> Vec<crate::storage::Scope> {
+pub(crate) fn expiring_blob_module_scopes(
+    ctx: &crate::core::runtime::DispatchCtx,
+) -> Vec<crate::storage::Scope> {
     #[cfg(feature = "modules")]
     {
         [storage_grant_tinyjuice::MODULE_ID]
             .into_iter()
-            .filter_map(|id| storage_host::current_module_scope(&crate::core::runtime::DispatchCtx::ambient(), id).ok())
+            .filter_map(|id| storage_host::current_module_scope(ctx, id).ok())
             .collect()
     }
     // Without the loader no module holds blobs.
@@ -361,7 +380,9 @@ pub(crate) fn expiring_blob_module_scopes_for(
 
 /// See the `modules` build: with the feature off no module writes blobs.
 #[cfg(not(feature = "modules"))]
-pub(crate) fn expiring_blob_module_scopes() -> Vec<crate::storage::Scope> {
+pub(crate) fn expiring_blob_module_scopes(
+    _ctx: &crate::core::runtime::DispatchCtx,
+) -> Vec<crate::storage::Scope> {
     Vec::new()
 }
 
@@ -369,17 +390,22 @@ pub(crate) fn expiring_blob_module_scopes() -> Vec<crate::storage::Scope> {
 /// module's blob storage, once per directory. `ttl` is the configured original
 /// lifetime. Never fails the caller: an error is logged and the import is
 /// retried at the next install.
-pub async fn import_legacy_tinyjuice(root: &std::path::Path, ttl: Option<std::time::Duration>) {
+pub async fn import_legacy_tinyjuice(
+    ctx: &crate::core::runtime::DispatchCtx,
+    root: &std::path::Path,
+    ttl: Option<std::time::Duration>,
+) {
     #[cfg(feature = "modules")]
     import_once(
+        ctx,
         "tinyjuice",
         storage_grant_tinyjuice::MODULE_ID,
         root,
-        storage_import_tinyjuice::import_legacy(root, ttl),
+        storage_import_tinyjuice::import_legacy(ctx, root, ttl),
     )
     .await;
     #[cfg(not(feature = "modules"))]
-    let _ = (root, ttl);
+    let _ = (ctx, root, ttl);
 }
 
 #[cfg(all(test, feature = "modules"))]

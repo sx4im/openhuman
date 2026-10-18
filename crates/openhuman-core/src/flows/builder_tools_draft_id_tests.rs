@@ -17,6 +17,7 @@ async fn cancel_flow_run_cancels_when_flow_id_matches_the_owner() {
     .unwrap()
     .value;
     let run = ops::flows_run(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &flow.id,
         json!({}),

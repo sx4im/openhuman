@@ -19,13 +19,13 @@ async fn handle_ignores_non_auth_events() {
     // events to every subscriber. The handler must guard internally.
     let s = SessionExpiredSubscriber::new();
     // Reset state we depend on.
-    scheduler_gate::set_signed_out(false);
+    llm_gate::set_signed_out(false);
     s.handle(&DomainEvent::SystemStartup {
         component: "test".into(),
     })
     .await;
     assert!(
-        !scheduler_gate::is_signed_out(),
+        !llm_gate::is_signed_out(),
         "non-auth event must not flip the override"
     );
 }
@@ -33,7 +33,7 @@ async fn handle_ignores_non_auth_events() {
 #[tokio::test]
 async fn session_expired_in_saas_returns_before_any_teardown() {
     let s = SessionExpiredSubscriber::new();
-    scheduler_gate::set_signed_out(false);
+    llm_gate::set_signed_out(false);
     // In single-user mode this would load the config and may flip the gate;
     // in SaaS it must return at once, leaving the gate untouched.
     tokio::time::timeout(
@@ -49,5 +49,5 @@ async fn session_expired_in_saas_returns_before_any_teardown() {
     )
     .await
     .expect("SaaS early return must not await the config load");
-    assert!(!scheduler_gate::is_signed_out());
+    assert!(!llm_gate::is_signed_out());
 }

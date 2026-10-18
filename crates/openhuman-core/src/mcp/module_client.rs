@@ -464,7 +464,11 @@ impl McpConfiguredClient {
                     // Servers and audit rows from before the storage contract
                     // move into the module's storage before it reads them.
                     // Best effort: a failure is retried at the next open.
-                    crate::modules::import_legacy_mcp(std::path::Path::new(&self.data_dir)).await;
+                    crate::modules::import_legacy_mcp(
+                        &crate::core::runtime::DispatchCtx::ambient(),
+                        std::path::Path::new(&self.data_dir),
+                    )
+                    .await;
                     let reply = self.port.open_configured(&self.data_dir, &config).await;
                     state.open_replied(reply.clone().map_err(|_| ()));
                     reply?;

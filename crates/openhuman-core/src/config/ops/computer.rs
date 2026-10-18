@@ -5,7 +5,7 @@ use crate::config::{ComputerConfig, Config, DecisionModel};
 use crate::core::runtime::DispatchCtx;
 use crate::core::Outcome;
 
-use super::loader::{load_config_with_timeout, snapshot_config_json};
+use super::loader::snapshot_config_json;
 
 /// A partial update to `[computer]`. An empty model string restores the
 /// module's default.

@@ -185,5 +185,9 @@ mod crate_native_diagnostics_tests;
 mod crate_native_tests;
 #[path = "factory_egress_fallback_tests.rs"]
 mod egress_fallback_tests;
+#[path = "factory_explicit_ctx_tests.rs"]
+mod explicit_ctx_tests;
+#[path = "factory_managed_ledger_tests.rs"]
+mod managed_ledger_tests;
 #[path = "factory_route_resolution_tests.rs"]
 mod route_resolution_tests;

@@ -3,7 +3,6 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use openhuman_embed::__host::config::rpc as config_rpc;
 use openhuman_embed::__host::core::all::{ControllerFuture, RegisteredController};
 use openhuman_embed::__host::core::Outcome;
 use openhuman_embed::__host::core::{ControllerSchema, FieldSchema, TypeSchema};
@@ -102,11 +101,11 @@ pub fn channel_link_schemas(function: &str) -> ControllerSchema {
 }
 
 fn handle_auth_create_channel_link_token(
-    _ctx: DispatchCtx,
+    ctx: DispatchCtx,
     params: Map<String, Value>,
 ) -> ControllerFuture {
     Box::pin(async move {
-        let config = config_rpc::load_config_with_timeout().await?;
+        let config = ctx.load_config().await?;
         let payload = deserialize_params::<AuthCreateChannelLinkTokenParams>(params)?;
         to_json(
             crate::hosted::channel_link::auth_create_channel_link_token(
@@ -118,16 +117,16 @@ fn handle_auth_create_channel_link_token(
     })
 }
 
-fn handle_telegram_login_start(_ctx: DispatchCtx, _params: Map<String, Value>) -> ControllerFuture {
+fn handle_telegram_login_start(ctx: DispatchCtx, _params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
-        let config = config_rpc::load_config_with_timeout().await?;
+        let config = ctx.load_config().await?;
         to_json(crate::hosted::channel_link::telegram_login_start(&config).await?)
     })
 }
 
-fn handle_telegram_login_check(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
+fn handle_telegram_login_check(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
-        let config = config_rpc::load_config_with_timeout().await?;
+        let config = ctx.load_config().await?;
         let p = deserialize_params::<LinkCheckParams>(params)?;
         to_json(
             crate::hosted::channel_link::telegram_login_check(&config, p.link_token.trim()).await?,
@@ -135,16 +134,16 @@ fn handle_telegram_login_check(_ctx: DispatchCtx, params: Map<String, Value>) ->
     })
 }
 
-fn handle_discord_link_start(_ctx: DispatchCtx, _params: Map<String, Value>) -> ControllerFuture {
+fn handle_discord_link_start(ctx: DispatchCtx, _params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
-        let config = config_rpc::load_config_with_timeout().await?;
+        let config = ctx.load_config().await?;
         to_json(crate::hosted::channel_link::discord_link_start(&config).await?)
     })
 }
 
-fn handle_discord_link_check(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
+fn handle_discord_link_check(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
-        let config = config_rpc::load_config_with_timeout().await?;
+        let config = ctx.load_config().await?;
         let p = deserialize_params::<LinkCheckParams>(params)?;
         to_json(
             crate::hosted::channel_link::discord_link_check(&config, p.link_token.trim()).await?,

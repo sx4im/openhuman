@@ -10,8 +10,8 @@
 use crate::agent::turn_origin::{self, AgentTurnOrigin};
 use serde_json::Value;
 use {
-    tinyflows_schedule::types::delivery_mode, tinyflows_schedule::types::CronJob,
-    tinyflows_schedule::types::JobOrigin,
+    tinyflows_bus::schedule::types::delivery_mode, tinyflows_bus::schedule::types::CronJob,
+    tinyflows_bus::schedule::types::JobOrigin,
 };
 
 /// Map a live turn origin onto the origin a job created in it records.

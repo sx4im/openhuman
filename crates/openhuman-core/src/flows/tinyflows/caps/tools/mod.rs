@@ -46,6 +46,8 @@ pub(crate) const NATIVE_TOOL_PREFIX: &str = "oh:";
 ///
 /// Borrowed rather than owned so dispatch clones nothing per call.
 pub(crate) struct ToolCallCtx<'a> {
+    /// The context the run acts under.
+    pub dispatch: &'a crate::core::runtime::DispatchCtx,
     /// Host config — credentials, entity id, composio mode.
     pub config: &'a Config,
     /// The autonomy tier / approval policy in force for this run.

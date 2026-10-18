@@ -38,11 +38,14 @@ pub fn replace_embedder_post_turn_hook(name: &str, hook: Option<Arc<dyn PostTurn
     }
 }
 
-/// Snapshot hooks supplied by the embedding host, for the calling task's
-/// ambient context. Library callers outside a turn use this; the core passes
-/// its own context to [`embedder_post_turn_hooks_in`].
+/// Snapshot of the process-wide hooks the embedding host registered, without
+/// any agent-local ones. The host's install/restore bookkeeping reads this; a
+/// turn passes its own context to [`embedder_post_turn_hooks_in`].
 pub fn embedder_post_turn_hooks() -> Vec<Arc<dyn PostTurnHook>> {
-    embedder_post_turn_hooks_in(&crate::core::runtime::DispatchCtx::ambient())
+    EMBEDDER_POST_TURN_HOOKS
+        .lock()
+        .expect("embedder post-turn hooks poisoned")
+        .clone()
 }
 
 /// Snapshot hooks supplied by the embedding host, plus the agent-local ones of
@@ -50,10 +53,7 @@ pub fn embedder_post_turn_hooks() -> Vec<Arc<dyn PostTurnHook>> {
 pub fn embedder_post_turn_hooks_in(
     ctx: &crate::core::runtime::DispatchCtx,
 ) -> Vec<Arc<dyn PostTurnHook>> {
-    let mut hooks = EMBEDDER_POST_TURN_HOOKS
-        .lock()
-        .expect("embedder post-turn hooks poisoned")
-        .clone();
+    let mut hooks = embedder_post_turn_hooks();
     if let Some(local) = ctx.host_overrides() {
         hooks.extend(local.post_turn_hooks());
     }
@@ -248,6 +248,18 @@ pub trait ToolHook: Send + Sync {
         }
     }
 
+    /// [`before_tool_decision`](ToolHook::before_tool_decision) for the call
+    /// `dispatch` runs for: the context of the turn that raised it. A hook that
+    /// reads the acting tenant or profile overrides this and takes it from
+    /// `dispatch`; the default ignores it.
+    async fn before_tool_decision_in(
+        &self,
+        _dispatch: &crate::core::runtime::DispatchCtx,
+        context: &ToolHookContext,
+    ) -> ToolHookDecision {
+        self.before_tool_decision(context).await
+    }
+
     /// Observe a completed tool and optionally append text to its result, which
     /// the model then sees. Defaults to [`after_tool`](ToolHook::after_tool)
     /// with no appended text.
@@ -285,19 +297,19 @@ pub fn replace_embedder_tool_hook(name: &str, hook: Option<Arc<dyn ToolHook>>) {
     }
 }
 
-/// Snapshot tool hooks supplied by the embedding host, for the calling task's
-/// ambient context. See [`embedder_post_turn_hooks`].
+/// Snapshot of the process-wide tool hooks the embedding host registered,
+/// without any agent-local ones. See [`embedder_post_turn_hooks`].
 pub fn embedder_tool_hooks() -> Vec<Arc<dyn ToolHook>> {
-    embedder_tool_hooks_in(&crate::core::runtime::DispatchCtx::ambient())
+    EMBEDDER_TOOL_HOOKS
+        .lock()
+        .expect("embedder tool hooks poisoned")
+        .clone()
 }
 
 /// Snapshot tool hooks supplied by the embedding host, plus the agent-local
 /// ones of the agent `ctx` runs for.
 pub fn embedder_tool_hooks_in(ctx: &crate::core::runtime::DispatchCtx) -> Vec<Arc<dyn ToolHook>> {
-    let mut hooks = EMBEDDER_TOOL_HOOKS
-        .lock()
-        .expect("embedder tool hooks poisoned")
-        .clone();
+    let mut hooks = embedder_tool_hooks();
     if let Some(local) = ctx.host_overrides() {
         hooks.extend(local.tool_hooks());
     }

@@ -84,11 +84,9 @@ impl ApprovalGate {
         }
         // SaaS has no per-user approval surface: never park, allow only what
         // the deployment's sandboxed tool groups open.
-        if let Some(outcome) = saas_outcome_with(
-            &crate::core::runtime::DispatchCtx::ambient(),
-            crate::core::runtime::is_saas(),
-            tool_name,
-        ) {
+        if let Some(outcome) =
+            saas_outcome_with(&turn_ctx, crate::core::runtime::is_saas(), tool_name)
+        {
             return (outcome, None);
         }
         if forced
@@ -205,8 +203,8 @@ impl ApprovalGate {
         // `auto_approve_all_allows_a_remote_triage_dispatch_without_an_audit_row`
         // below pins that outcome, so a change to this exclusion list has to
         // confront the decision rather than discover it.
-        let auto_all =
-            self.is_auto_approve_all_enabled(&turn_ctx) && !matches!(&origin, AgentTurnOrigin::Unknown);
+        let auto_all = self.is_auto_approve_all_enabled(&turn_ctx)
+            && !matches!(&origin, AgentTurnOrigin::Unknown);
 
         if auto_all && !forced {
             // `origin_class` is the sanitized variant label (no thread/client
@@ -227,9 +225,7 @@ impl ApprovalGate {
             return (GateOutcome::Allow, None);
         }
 
-        if !forced
-            && !matches!(&origin, AgentTurnOrigin::Unknown)
-            && turn_ctx.approvals_disabled()
+        if !forced && !matches!(&origin, AgentTurnOrigin::Unknown) && turn_ctx.approvals_disabled()
         {
             tracing::info!(
                 tool = tool_name,
@@ -247,7 +243,10 @@ impl ApprovalGate {
         // live policy) takes effect on the very next tool call; fall back to the
         // gate's boot-time config when no live policy is installed (e.g. a CLI
         // invocation that never started a session runtime, or a unit test).
-        if !forced && !bypass_auto_approve_shortcut && self.tool_is_auto_approved(&turn_ctx, tool_name) {
+        if !forced
+            && !bypass_auto_approve_shortcut
+            && self.tool_is_auto_approved(&turn_ctx, tool_name)
+        {
             tracing::debug!(
                 tool = tool_name,
                 "[approval::gate] auto_approve allowlist hit, skipping prompt"

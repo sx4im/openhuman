@@ -10,6 +10,8 @@ mod types;
 
 pub use enforcement::validate_path_within_root;
 pub use enforcement::{ensure_openhuman_scratch_dir, openhuman_scratch_dir};
+#[cfg(any(feature = "modules", test))]
+pub(crate) use path_checks::home_credential_stores;
 #[cfg(feature = "modules")]
 pub(crate) use path_checks::{
     ALWAYS_FORBIDDEN_PREFIXES, SENSITIVE_COMPONENTS, SENSITIVE_FILES, SENSITIVE_PAIRS,
@@ -32,3 +34,7 @@ mod policy_disabled_tests;
 
 #[cfg(test)]
 mod proptest_tests;
+
+#[cfg(test)]
+#[path = "policy_media_artifact_tests.rs"]
+mod policy_media_artifact_tests;

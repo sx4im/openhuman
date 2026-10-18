@@ -325,6 +325,8 @@ pub struct OpenHumanRunContext {
     pub dispatch: Option<Arc<TurnDispatchState>>,
     /// Optional task recency restriction for integration tools.
     pub task_recency_window: Option<Duration>,
+    /// Exact child-process environment supplied by the host for this turn.
+    pub command_environment: Option<Arc<std::collections::BTreeMap<String, String>>>,
     /// Autonomous skill-run iteration cap lifted onto every sub-agent in the
     /// tree (inherited by `child()` through the clone); `None` for ordinary turns.
     pub autonomous_iter_cap: Option<usize>,
@@ -419,7 +421,8 @@ pub(crate) struct HarnessHostPolicy {
 pub(crate) use super::operation_context::tool_context_with_approval;
 pub use super::operation_context::OpenHumanRunExt;
 pub(crate) use super::operation_context::{
-    approval_for_tool, dispatch_ctx_for_tool, memory_identity_for_tool, parent_agent_id_for_tool,
+    approval_for_tool, command_environment_for_tool, dispatch_ctx_for_tool,
+    memory_identity_for_tool, memory_in_prompt_for_tool, parent_agent_id_for_tool,
     sandbox_mode_for_tool, task_recency_window_for_tool, turn_origin_for_tool,
     HostOperationContext,
 };
@@ -456,6 +459,7 @@ impl OpenHumanRunContext {
             attachment_placeholders: Arc::new(Vec::new()),
             dispatch: None,
             task_recency_window: None,
+            command_environment: None,
             autonomous_iter_cap: None,
             sandbox_mode: None,
             spawn_depth: 0,
@@ -589,6 +593,7 @@ impl OpenHumanRunContext {
         }
         self.turn_deadline = env.turn_deadline.or(self.turn_deadline);
         self.tool_call_limit = env.tool_call_limit.or(self.tool_call_limit);
+        self.command_environment = env.command_environment.clone().or(self.command_environment);
         self.memory_identity = env.memory_identity.clone().or(self.memory_identity);
         self.core = env.core.clone().or(self.core);
         self.stop_hooks
@@ -607,13 +612,8 @@ impl OpenHumanRunContext {
         self
     }
 
-    /// Builds the explicit child state for a recursive invocation.
-    ///
-    /// This inheritance rule is tested in B1 and is ready for the later live
-    /// plumbing. Cancellation, workspace, progress, policy hooks and dispatch
-    /// state are inherited. Route observation and usage accounting are isolated,
-    /// so a completed child cannot mutate facts subsequently persisted for its
-    /// parent.
+    /// Builds a child context that inherits authority, cancellation and shared
+    /// workspace policy while keeping route observation and usage isolated.
     pub fn child(&self) -> Self {
         let mut child = self.clone();
         child.spawn_depth = self.spawn_depth.saturating_add(1);
@@ -670,9 +670,7 @@ impl OpenHumanRunContext {
         }
         let cancellation = self.cancellation.clone();
         let workspace = self.workspace.clone();
-        let run_ext = OpenHumanRunExt {
-            task_recency_window: self.task_recency_window,
-        };
+        let run_ext = OpenHumanRunExt::from_run_context(&self);
         let host_operations = Arc::new(HostOperationContext {
             origin: self.origin.clone(),
             approval: self.approval.clone(),
@@ -682,6 +680,7 @@ impl OpenHumanRunContext {
                 .as_ref()
                 .map(|parent| parent.agent_definition_id.clone()),
             memory_identity: self.memory_identity.clone(),
+            memory_turn: self.memory_turn.clone(),
             core: self.core.clone(),
         });
         let context = tinyagents_harness::context::RunContext::new(config, self)

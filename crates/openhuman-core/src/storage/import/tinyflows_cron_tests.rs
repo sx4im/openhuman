@@ -1,6 +1,6 @@
 use super::*;
+use crate::cron::client::testing as cron_store;
 use crate::storage::MemoryStorage;
-use tinyflows_drivers::schedule::CronDocuments;
 
 fn copy_tree(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -38,9 +38,6 @@ fn run_with_imports_legacy_cron_jobs_whatever_the_flows_gate() {
         Outcome::Imported { written, .. } => assert!(*written > 0),
         other => panic!("expected the cron jobs to import, got {other:?}"),
     }
-    let docs = Arc::clone(backend.for_scope(&Scope::local()).unwrap().documents());
-    let jobs =
-        crate::storage::block_on_anyhow(async move { CronDocuments::new(docs).list_jobs().await })
-            .unwrap();
+    let jobs = cron_store::list_jobs(&backend, &Scope::local()).unwrap();
     assert!(!jobs.is_empty());
 }

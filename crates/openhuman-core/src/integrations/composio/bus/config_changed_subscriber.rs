@@ -5,7 +5,6 @@ use crate::core::runtime::DispatchCtx;
 use async_trait::async_trait;
 use tinybus::EventHandler;
 
-use crate::config::rpc as config_rpc;
 use crate::core::events::DomainEvent;
 use crate::integrations::composio::ops;
 use crate::integrations::composio::FetchConnectedIntegrationsStatus;

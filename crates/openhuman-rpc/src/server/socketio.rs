@@ -30,7 +30,6 @@
 //! (a "type carve-out"; see AGENTS.md). `pub mod socketio;` in `core::mod` is
 //! intentionally NOT gated for the same reason.
 
-use crate::core_host::core::runtime::DispatchCtx;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -407,7 +406,11 @@ pub fn attach_socketio() -> (socketioxide::layer::SocketIoLayer, SocketIo) {
                     if let Some(run_mode) = payload.run_mode.as_deref() {
                         match crate::core_host::agent::tinyagents::run_mode::parse_mode_label(run_mode) {
                             Some(mode) => {
-                                crate::core_host::agent::tinyagents::run_mode::set_mode(&DispatchCtx::host_default(), &thread_id, mode);
+                                crate::core_host::agent::tinyagents::run_mode::set_mode(
+                                    &crate::core_host::core::runtime::DispatchCtx::host_default(),
+                                    &thread_id,
+                                    mode,
+                                );
                             }
                             None => log::warn!(
                                 "[socketio] chat:start thread_id={thread_id} ignoring unrecognized run_mode={run_mode}"

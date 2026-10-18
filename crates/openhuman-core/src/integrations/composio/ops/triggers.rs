@@ -210,6 +210,7 @@ pub async fn composio_disable_trigger(
 }
 
 pub async fn composio_list_trigger_history(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     limit: Option<usize>,
 ) -> OpResult<Outcome<ComposioTriggerHistoryResult>> {
@@ -229,7 +230,7 @@ pub async fn composio_list_trigger_history(
         "[composio] list_trigger_history failed: trigger archive owner unavailable".to_owned()
     })?;
     let history = store
-        .read(config, Some(requested_limit))
+        .read(ctx, config, Some(requested_limit))
         .await
         .map_err(|error| format!("[composio] list_trigger_history failed: {error}"))?;
     let count = history.entries.len();

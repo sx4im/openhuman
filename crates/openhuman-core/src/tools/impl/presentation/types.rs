@@ -75,6 +75,11 @@ pub struct GeneratePresentationInput {
     /// Deck title. Surfaces on the title slide and as the artifact's
     /// human-readable name.
     pub title: String,
+    /// Optional artifact id to update. Pass an artifact id from a prior
+    /// `generate_presentation` call to save this deck as a new version
+    /// of that artifact instead of creating a brand new one.
+    #[serde(default)]
+    pub artifact_id: Option<String>,
     /// Optional author byline, surfaced on the title slide.
     #[serde(default)]
     pub author: Option<String>,

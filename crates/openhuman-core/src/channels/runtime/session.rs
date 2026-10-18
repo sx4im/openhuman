@@ -102,6 +102,7 @@ pub(crate) fn resume_channel_service() {
 }
 
 fn spawn_channel_service_with<F, Fut>(
+    dispatch: &crate::core::runtime::DispatchCtx,
     controller: ChannelSessionController,
     mut run: F,
 ) -> tokio::task::JoinHandle<()>
@@ -109,7 +110,7 @@ where
     F: FnMut(CancellationToken) -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
-    tokio::spawn(async move {
+    dispatch.spawn(async move {
         // A logout can race the service task's first poll. Do not let a
         // service created during that window start with the replacement
         // token before a credential has been installed again.
@@ -130,12 +131,15 @@ where
     })
 }
 
-pub(crate) fn spawn_current_channel_service_with<F, Fut>(run: F) -> tokio::task::JoinHandle<()>
+pub(crate) fn spawn_current_channel_service_with<F, Fut>(
+    dispatch: &crate::core::runtime::DispatchCtx,
+    run: F,
+) -> tokio::task::JoinHandle<()>
 where
     F: FnMut(CancellationToken) -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
 {
-    spawn_channel_service_with(SESSION.clone(), run)
+    spawn_channel_service_with(dispatch, SESSION.clone(), run)
 }
 
 /// Stop the host dispatch generation on logout, even with independent model auth.

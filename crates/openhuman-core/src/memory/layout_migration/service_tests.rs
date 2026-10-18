@@ -34,7 +34,13 @@ async fn scan_finds_legacy_memory_and_nothing_after_the_move() {
             shared: false
         }
     );
-    assert!(start(config.clone(), host.clone(), Trigger::Auto, never()));
+    assert!(start(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        config.clone(),
+        host.clone(),
+        Trigger::Auto,
+        never()
+    ));
     settle(&config).await;
     assert!(!scan(host.as_ref()).await.unwrap().needed);
     assert_eq!(status(&config).unwrap().state.phase, Phase::Cleaned);
@@ -53,9 +59,21 @@ async fn one_run_per_workspace_at_a_time() {
     let tmp = tempfile::tempdir().unwrap();
     let config = crate::memory::test_fixtures::config_in(&tmp);
     let host = Arc::new(FakeHost::with(200, &config).await);
-    assert!(start(config.clone(), host.clone(), Trigger::Auto, never()));
+    assert!(start(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        config.clone(),
+        host.clone(),
+        Trigger::Auto,
+        never()
+    ));
     assert!(
-        !start(config.clone(), host.clone(), Trigger::Auto, never()),
+        !start(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            config.clone(),
+            host.clone(),
+            Trigger::Auto,
+            never()
+        ),
         "a second start while one runs starts nothing"
     );
     settle(&config).await;
@@ -72,10 +90,23 @@ async fn a_stopped_run_reads_as_interrupted_and_a_tick_resumes_it() {
     state::save(&config.workspace_dir, &stopped).unwrap();
     assert!(status(&config).unwrap().interrupted);
 
-    assert!(tick(&config, host.clone(), never()));
+    assert!(tick(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        host.clone(),
+        never()
+    ));
     settle(&config).await;
     assert_eq!(status(&config).unwrap().state.phase, Phase::Cleaned);
-    assert!(!tick(&config, host, never()), "nothing left to do");
+    assert!(
+        !tick(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            host,
+            never()
+        ),
+        "nothing left to do"
+    );
 }
 
 #[tokio::test]
@@ -94,8 +125,19 @@ async fn nothing_starts_while_an_import_is_unfinished() {
     )
     .unwrap();
     assert!(crate::memory::import::in_progress(&config));
-    assert!(!start(config.clone(), host.clone(), Trigger::Auto, never()));
-    assert!(!tick(&config, host.clone(), never()));
+    assert!(!start(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        config.clone(),
+        host.clone(),
+        Trigger::Auto,
+        never()
+    ));
+    assert!(!tick(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        host.clone(),
+        never()
+    ));
     assert_eq!(count(host.tree.as_ref()).await, 0);
 
     std::fs::write(
@@ -103,7 +145,13 @@ async fn nothing_starts_while_an_import_is_unfinished() {
         r#"{"state":{"phase":"done","total":3,"imported":3}}"#,
     )
     .unwrap();
-    assert!(start(config.clone(), host.clone(), Trigger::Auto, never()));
+    assert!(start(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        config.clone(),
+        host.clone(),
+        Trigger::Auto,
+        never()
+    ));
     settle(&config).await;
     assert_eq!(count(host.tree.as_ref()).await, 3);
 }
@@ -113,7 +161,12 @@ async fn a_tick_starts_nothing_while_background_work_is_paused() {
     let tmp = tempfile::tempdir().unwrap();
     let config = crate::memory::test_fixtures::config_in(&tmp);
     let host = Arc::new(FakeHost::with(3, &config).await);
-    assert!(!tick(&config, host.clone(), Arc::new(|| true)));
+    assert!(!tick(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        host.clone(),
+        Arc::new(|| true)
+    ));
     assert_eq!(count(host.tree.as_ref()).await, 0);
 }
 
@@ -123,7 +176,13 @@ async fn retry_puts_a_lost_copy_back_in_line() {
     let config = crate::memory::test_fixtures::config_in(&tmp);
     let host = Arc::new(FakeHost::with(4, &config).await);
     host.free.store(true, Ordering::SeqCst);
-    assert!(start(config.clone(), host.clone(), Trigger::Auto, never()));
+    assert!(start(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        config.clone(),
+        host.clone(),
+        Trigger::Auto,
+        never()
+    ));
     settle(&config).await;
     assert_eq!(status(&config).unwrap().state.phase, Phase::Cleaned);
 
@@ -132,6 +191,7 @@ async fn retry_puts_a_lost_copy_back_in_line() {
     let state = retry(&config).unwrap();
     assert!(!state.caught_up && !state.cleaning);
     assert!(start(
+        &crate::core::runtime::DispatchCtx::ambient(),
         config.clone(),
         host.clone(),
         Trigger::Manual { takeover: false },
@@ -151,5 +211,51 @@ async fn a_damaged_state_file_surfaces_as_the_hosts_engine_error() {
     let error = status(&config).unwrap_err();
     assert_eq!(error.code(), "ENGINE");
     let host = Arc::new(FakeHost::with(1, &config).await);
-    assert!(!tick(&config, host, never()), "a torn state starts nothing");
+    assert!(
+        !tick(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            host,
+            never()
+        ),
+        "a torn state starts nothing"
+    );
+}
+
+/// The background run acts for the context it was handed, not for whichever
+/// context is active on the task that started it.
+#[tokio::test]
+async fn run_acts_under_the_handed_context_not_the_active_one() {
+    use crate::core::runtime::{CoreContext, DispatchCtx, DomainSet};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let config = crate::memory::test_fixtures::config_in(&tmp);
+    let host = Arc::new(FakeHost::with(3, &config).await);
+    let handed = CoreContext::for_test(DomainSet::full(), None);
+    let active = CoreContext::for_test(DomainSet::full(), None);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&seen);
+    let paused: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+        recorder.lock().unwrap().push(CoreContext::scoped());
+        false
+    });
+    let dispatch = DispatchCtx::new(Arc::clone(&handed));
+    let started = CoreContext::scope(active, async {
+        start(
+            &dispatch,
+            config.clone(),
+            host.clone(),
+            Trigger::Auto,
+            paused,
+        )
+    })
+    .await;
+    assert!(started);
+    settle(&config).await;
+    let seen = seen.lock().unwrap();
+    assert!(!seen.is_empty(), "the run consulted the pause check");
+    for context in seen.iter() {
+        let context = context.as_ref().expect("the run has a context");
+        assert!(Arc::ptr_eq(context, &handed));
+    }
 }

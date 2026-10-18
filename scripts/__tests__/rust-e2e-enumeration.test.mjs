@@ -27,6 +27,47 @@ const repoRoot = path.join(
 );
 const runner = path.join(repoRoot, "scripts", "test-rust-e2e.sh");
 
+test("Rust E2E keeps module cache paths out of a shared runner home", (t) => {
+  if (process.platform === "win32") return t.skip("runner shell test requires Unix permissions");
+
+  const source = fs.readFileSync(runner, "utf8");
+  const start = source.indexOf('CREATED_XDG_DATA_HOME=""');
+  const end = source.indexOf("\ncleanup() {", start);
+  assert.notEqual(start, -1, "runner initializes its private XDG directories");
+  assert.notEqual(end, -1, "runner XDG setup ends before cleanup");
+  const setup = source.slice(start, end);
+  const script = [
+    "set -euo pipefail",
+    setup,
+    'printf "DATA=%s\\nCACHE=%s\\nCREATED_DATA=%s\\nCREATED_CACHE=%s\\n" "${XDG_DATA_HOME:-}" "${XDG_CACHE_HOME:-}" "$CREATED_XDG_DATA_HOME" "${CREATED_XDG_CACHE_HOME:-}"',
+  ].join("\n");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "rust-e2e-shared-home-"));
+  fs.chmodSync(home, 0o755);
+  let output;
+  try {
+    output = execFileSync("bash", ["-c", script], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home, XDG_DATA_HOME: "", XDG_CACHE_HOME: "" },
+    });
+    const values = Object.fromEntries(
+      output.trim().split("\n").map((line) => line.split("=", 2)),
+    );
+    assert.ok(values.DATA, output);
+    assert.ok(values.CACHE && values.CACHE !== values.DATA, output);
+    assert.equal(values.CREATED_DATA, values.DATA, output);
+    assert.equal(values.CREATED_CACHE, values.CACHE, output);
+    assert.equal(fs.statSync(values.DATA).mode & 0o777, 0o700);
+    assert.equal(fs.statSync(values.CACHE).mode & 0o777, 0o700);
+    assert.ok(!values.DATA.startsWith(home), output);
+  } finally {
+    const createdData = output?.match(/^CREATED_DATA=(.*)$/m)?.[1];
+    const createdCache = output?.match(/^CREATED_CACHE=(.*)$/m)?.[1];
+    if (createdData) fs.rmSync(createdData, { recursive: true, force: true });
+    if (createdCache) fs.rmSync(createdCache, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 /** Extract a top-level `name() { … }` block from the runner, verbatim. */
 function extractFunction(name) {
   const source = fs.readFileSync(runner, "utf8");

@@ -40,9 +40,15 @@ async fn install_server(config: &Config, name: &str, server: Value) -> String {
     let document = json!({
         "mcpServers": servers
     });
-    openhuman_core::mcp::registry::config_ops::mcp_clients_config_set(config, document)
-        .await
-        .expect("apply mcp.json through the module");
+    let applied =
+        openhuman_core::mcp::registry::config_ops::mcp_clients_config_set(config, document).await;
+    if let Err(error) = &applied {
+        let module_status = openhuman_core::modules::ops::list(config)
+            .into_iter()
+            .find(|module| module.id == "tinymcp");
+        panic!("apply mcp.json through the module: {error}; status: {module_status:?}");
+    }
+    applied.expect("apply mcp.json through the module");
     let status = openhuman_core::mcp::registry::ops::mcp_clients_status(config)
         .await
         .expect("list the module-owned installs");

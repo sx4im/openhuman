@@ -156,14 +156,15 @@ async fn a_context_spawn_keeps_the_agent_context_and_tokio_spawn_does_not() {
     );
 
     let (scoped, bare) = CoreContext::scope(alpha, async {
-        let scoped = DispatchCtx::ambient().spawn(async {
-            (
-                current_agent_id(),
-                DispatchCtx::ambient().agent_policy().map(|p| p.autonomy),
-            )
-        })
-        .await
-        .unwrap();
+        let scoped = DispatchCtx::ambient()
+            .spawn(async {
+                (
+                    current_agent_id(),
+                    DispatchCtx::ambient().agent_policy().map(|p| p.autonomy),
+                )
+            })
+            .await
+            .unwrap();
         let bare = tokio::spawn(async { CoreContext::scoped().is_some() })
             .await
             .unwrap();

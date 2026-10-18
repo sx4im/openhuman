@@ -6,7 +6,6 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::{deserialize_params, to_json};
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 use crate::core::Outcome;
 

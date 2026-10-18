@@ -500,3 +500,13 @@ async fn get_and_delete_refuse_a_record_rooted_outside_the_files_folder() {
         "the file outside the files folder is left alone"
     );
 }
+
+#[tokio::test]
+async fn sharing_without_cloud_storage_is_refused_with_a_reason() {
+    let tmp = TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let err = ai_share_artifact(&config, "a-1", None, false)
+        .await
+        .unwrap_err();
+    assert!(err.contains("sign in"), "{err}");
+}

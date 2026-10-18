@@ -209,11 +209,11 @@ pub async fn set_credential(
         identity::clear_current_user();
         sentry_scope::clear();
         if !was_authenticated {
-            start_credential_gated_services(config).await;
+            start_credential_gated_services(ctx, config).await;
         } else {
             spawn_integrations_cache_warm(config);
         }
-        crate::cron::scheduler_gate::set_signed_out(false);
+        crate::platform::llm_gate::set_signed_out(false);
         #[cfg(feature = "channels")]
         crate::channels::session::resume_channel_service();
         tracing::info!(
@@ -271,7 +271,7 @@ pub async fn set_credential(
             operation = "set_credential",
             "{LOG_PREFIX} credential names a different user than the stored one; clearing the previous session first"
         );
-        let cleared = clear_session_credential(&ctx, config).await?;
+        let cleared = clear_session_credential(ctx, config).await?;
         logs.extend(cleared.logs);
     }
     metadata.insert("user_id".to_string(), user_id.clone());
@@ -298,9 +298,9 @@ pub async fn set_credential(
         logs.extend(activate_user_scope(ctx, &user_id)?);
         // Reload so auth-profiles.json, the encryption key and the workspace
         // resolve to the user-scoped location before the profile is written.
-        let effective = reload_config_or(&ctx, config).await?;
+        let effective = reload_config_or(ctx, config).await?;
         if resolved.kind == CredentialKind::Local {
-            match crate::config::ops::set_onboarding_completed(&ctx, false).await {
+            match crate::config::ops::set_onboarding_completed(ctx, false).await {
                 Ok(_) => {
                     logs.push("onboarding left incomplete for local session setup".to_string())
                 }
@@ -338,13 +338,13 @@ pub async fn set_credential(
             return Err(error);
         }
         logs.push("process globals rebound after credential install".to_string());
-        start_credential_gated_services(&effective_config).await;
+        start_credential_gated_services(ctx, &effective_config).await;
         logs.push("credential-gated services started".to_string());
     }
 
     // Open the scheduler gate now that a live credential is in place; workers
     // sleeping in the paused poll loop resume at their next iteration.
-    crate::cron::scheduler_gate::set_signed_out(false);
+    crate::platform::llm_gate::set_signed_out(false);
     #[cfg(feature = "channels")]
     crate::channels::session::resume_channel_service();
     // An API key wins over a session for every backend request. Keep the
@@ -414,14 +414,14 @@ pub async fn clear_credential(
         kind,
         None | Some(CredentialKind::Session) | Some(CredentialKind::Local)
     ) {
-        let outcome = clear_session_credential(&ctx, config).await?;
+        let outcome = clear_session_credential(ctx, config).await?;
         removed_session = outcome.value;
         logs.extend(outcome.logs);
 
         if removed_session {
             // Follow the same process globals the teardown just rebound to,
             // so the api-key checks below agree with `auth.get_state`.
-            effective_config = reload_config_or(&ctx, config).await?;
+            effective_config = reload_config_or(ctx, config).await?;
             if let Some(key) = source_api_key.as_deref() {
                 if matches!(
                     kind,
@@ -460,7 +460,7 @@ pub async fn clear_credential(
             logs.push("api key cleared".to_string());
         }
         if !crate::security::credentials::session_support::has_backend_credential(config) {
-            crate::cron::scheduler_gate::set_signed_out(true);
+            crate::platform::llm_gate::set_signed_out(true);
         } else if removed_api_key {
             // Clearing the preferred API key exposes the surviving session.
             // Restore the session's process identity immediately.
@@ -483,8 +483,8 @@ pub async fn clear_credential(
     // deliberately stops the gated services and closes the scheduler gate, so
     // restore the surviving key's runtime after that teardown has completed.
     if removed_session && api_key::has_api_key(config) {
-        start_credential_gated_services(config).await;
-        crate::cron::scheduler_gate::set_signed_out(false);
+        start_credential_gated_services(ctx, config).await;
+        crate::platform::llm_gate::set_signed_out(false);
         sentry_scope::clear();
         identity::clear_current_user();
         logs.push("credential-gated services restarted for api key".to_string());
@@ -513,7 +513,7 @@ async fn clear_session_credential(
     config: &Config,
 ) -> Result<Outcome<bool>, String> {
     let mut logs = Vec::new();
-    crate::cron::scheduler_gate::set_signed_out(true);
+    crate::platform::llm_gate::set_signed_out(true);
     #[cfg(feature = "web3")]
     if let Err(error) = crate::modules::web3_service::close_service(config).await {
         tracing::warn!(%error, "{LOG_PREFIX} failed to close Web3 service during sign-out");
@@ -552,7 +552,7 @@ async fn clear_session_credential(
     }
 
     deactivate_user_scope()?;
-    stop_credential_gated_services(config).await;
+    stop_credential_gated_services(ctx, config).await;
 
     // Every process-global store must follow the now-active pre-login
     // workspace, or a signed-out caller keeps reading the previous account's
@@ -586,7 +586,7 @@ pub async fn store_session(
     user: Option<Value>,
 ) -> Result<Outcome<AuthStateResponse>, String> {
     set_credential(
-        &ctx,
+        ctx,
         config,
         SetCredentialRequest {
             token: token.to_string(),
@@ -602,7 +602,7 @@ pub async fn store_session(
 /// Historical entry point: sign the session out. Same as
 /// [`clear_credential`] for the session kind.
 pub async fn clear_session(ctx: &DispatchCtx, config: &Config) -> Result<Outcome<Value>, String> {
-    clear_credential(&ctx, config, Some(CredentialKind::Session)).await
+    clear_credential(ctx, config, Some(CredentialKind::Session)).await
 }
 
 /// A process-wide credential is a single-user concept: installing one

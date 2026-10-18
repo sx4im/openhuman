@@ -110,7 +110,7 @@ pub async fn flows_discover(
     // Emit the terminal chat event so a client viewing the thread finalizes the
     // assistant bubble instead of spinning (the bridge only streams deltas).
     if let Some(target) = &stream {
-        finalize_flow_stream(&ctx, target, &outcome, FLOW_DISCOVER_PROMPT).await;
+        finalize_flow_stream(ctx, target, &outcome, FLOW_DISCOVER_PROMPT).await;
     }
 
     let suggestions = store::list_suggestions(config, Some(SuggestionStatus::New), 50)

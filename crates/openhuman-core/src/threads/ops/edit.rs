@@ -109,7 +109,7 @@ pub async fn edit_message(
         let store_owned = store.clone();
         let thread_id_owned = thread_id.clone();
         let cut_request_id_owned = cut_request_id.clone();
-        crate::core::runtime::DispatchCtx::ambient().spawn_blocking(move || {
+        ctx.spawn_blocking(move || {
             truncate_transcript_before_turn(&store_owned, &thread_id_owned, &cut_request_id_owned)
         })
         .await
@@ -181,19 +181,20 @@ pub async fn regenerate(
     let store_for_blocking = store.clone();
     let thread_id_for_blocking = thread_id.clone();
     let target_for_blocking = target_request_id.clone();
-    let (prompt, cut_request_id) = crate::core::runtime::DispatchCtx::ambient().spawn_blocking(move || {
-        truncate_transcript_for_regenerate(
-            &store_for_blocking,
-            &thread_id_for_blocking,
-            target_for_blocking.as_deref(),
-        )
-    })
-    .await
-    .map_err(|e| ThreadsError::Message(format!("truncate transcript task: {e}")))?
-    .map_err(ThreadsError::Message)?
-    .ok_or_else(|| {
-        ThreadsError::Message(format!("thread {thread_id} has no turn to regenerate"))
-    })?;
+    let (prompt, cut_request_id) = ctx
+        .spawn_blocking(move || {
+            truncate_transcript_for_regenerate(
+                &store_for_blocking,
+                &thread_id_for_blocking,
+                target_for_blocking.as_deref(),
+            )
+        })
+        .await
+        .map_err(|e| ThreadsError::Message(format!("truncate transcript task: {e}")))?
+        .map_err(ThreadsError::Message)?
+        .ok_or_else(|| {
+            ThreadsError::Message(format!("thread {thread_id} has no turn to regenerate"))
+        })?;
 
     clear_dropped_turn_states(&dir, &thread_id, &cut_request_id).await;
     super::delete_after(ctx, &thread_id, &run_reply_message_id(&cut_request_id)).await?;

@@ -74,7 +74,11 @@ struct OpenHumanTurnPrelude {
     /// Host prompt/utilisation state, shared by the runtime hooks. It is not
     /// generic conversation state and the runtime never persists it.
     context: Arc<std::sync::Mutex<crate::agent::context::ContextManager>>,
-    tool_policy: Arc<dyn tinyagents_harness::middleware::ToolCallPolicy<crate::agent::tinyagents::host::OpenHumanRunContext>>,
+    tool_policy: Arc<
+        dyn tinyagents_harness::middleware::ToolCallPolicy<
+            crate::agent::tinyagents::host::OpenHumanRunContext,
+        >,
+    >,
     tool_dispatcher: Arc<dyn tinytools_agent::dialect::ToolDialect>,
     workspace_dir: std::path::PathBuf,
     action_dir: std::path::PathBuf,
@@ -278,9 +282,7 @@ impl OpenHumanTurnPrelude {
             .filter(|spec| !withheld.contains(&spec.name))
             .filter(|spec| {
                 self.thread_id.is_some()
-                    || !crate::agent::tinyagents::tool_registration::is_thread_goal_tool(
-                        &spec.name,
-                    )
+                    || !crate::agent::tinyagents::tool_registration::is_thread_goal_tool(&spec.name)
             })
             .map(|spec| spec.as_ref().clone())
             .collect::<Vec<_>>();
@@ -530,23 +532,6 @@ impl OpenHumanTurnPrelude {
 
     async fn finalize_after_durable_commit(&self, receipt: &CommitReceipt<OpenHumanRunContext>) {
         self.memory_post_turn(receipt);
-    }
-}
-
-/// Reconcile visible delegate names without reopening a caller's explicit
-/// restriction. Revoked names disappear; a newly connected name is admitted
-/// only for the wildcard belt.
-pub(super) fn reconcile_synthesized_visibility(
-    visible: &mut std::collections::HashSet<String>,
-    previous: &std::collections::HashSet<String>,
-    next: &std::collections::HashSet<String>,
-    auto_include_new: bool,
-) {
-    for name in previous.difference(next) {
-        visible.remove(name);
-    }
-    if auto_include_new {
-        visible.extend(next.iter().cloned());
     }
 }
 
@@ -855,7 +840,7 @@ impl OpenHumanSessionHost {
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .context_window = context_window;
                         let original_user_message = user_text_with_markers(&request.input);
-                        prelude.begin_user_effects(request);
+                        prelude.begin_user_effects(request, &options.run_context.data);
                         let turn = state
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1065,7 +1050,7 @@ impl OpenHumanSessionHost {
 }
 
 #[path = "runtime_session_tool_surface.rs"]
-mod tool_surface;
+pub(super) mod tool_surface;
 
 #[cfg(test)]
 #[path = "runtime_session_juice_tests.rs"]

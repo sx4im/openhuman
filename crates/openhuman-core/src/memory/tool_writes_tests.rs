@@ -392,7 +392,9 @@ async fn an_erase_fence_clears_prior_pending_learnings_across_restart() {
         &facts(&config),
     )
     .unwrap();
-    let fence = fence_and_clear(&config).await.unwrap();
+    let fence = fence_and_clear(&crate::core::runtime::DispatchCtx::ambient(), &config)
+        .await
+        .unwrap();
     assert!(read(&config.workspace_dir).unwrap().is_empty());
     drop(fence);
     let restarted = config_in(&tmp);
@@ -424,10 +426,16 @@ async fn an_erase_fence_waits_for_only_the_current_write_and_preserves_later_enq
         &facts(&config),
     )
     .unwrap();
-    schedule(Arc::new(config.clone()), &Namespace::ROOT);
+    schedule(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        Arc::new(config.clone()),
+        &Namespace::ROOT,
+    );
     engine.entered.notified().await;
     let fence_config = config.clone();
-    let fencing = tokio::spawn(async move { fence_and_clear(&fence_config).await });
+    let fencing = tokio::spawn(async move {
+        fence_and_clear(&crate::core::runtime::DispatchCtx::ambient(), &fence_config).await
+    });
     let state = owner_state(&config);
     while !state.gate.is_fenced() {
         tokio::task::yield_now().await;
@@ -458,7 +466,11 @@ async fn an_erase_fence_waits_for_only_the_current_write_and_preserves_later_enq
         &facts(&config),
     )
     .unwrap();
-    schedule(Arc::new(config.clone()), &Namespace::ROOT);
+    schedule(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        Arc::new(config.clone()),
+        &Namespace::ROOT,
+    );
     assert_eq!(read(&config.workspace_dir).unwrap().len(), 2);
     drop(fence);
     drain(&config).await;
@@ -491,7 +503,9 @@ async fn separate_owner_roots_share_a_workspace_without_blocking_or_erasing_each
         &facts(&second),
     )
     .unwrap();
-    let fence = fence_and_clear(&first).await.unwrap();
+    let fence = fence_and_clear(&crate::core::runtime::DispatchCtx::ambient(), &first)
+        .await
+        .unwrap();
     assert_eq!(
         drain(&second).await,
         1,
@@ -524,7 +538,9 @@ async fn erasing_one_owner_fences_pending_writes_from_every_team_root() {
         &facts(&second),
     )
     .unwrap();
-    let fence = fence_and_clear(&first).await.unwrap();
+    let fence = fence_and_clear(&crate::core::runtime::DispatchCtx::ambient(), &first)
+        .await
+        .unwrap();
     assert!(read_at(&queue_path(&first, &facts(&first).reach.at))
         .unwrap()
         .is_empty());
@@ -542,7 +558,9 @@ async fn erasing_one_owner_fences_pending_writes_from_every_team_root() {
 async fn a_later_erase_clears_pending_writes_admitted_during_the_first_erase() {
     let tmp = tempfile::tempdir().unwrap();
     let config = config_in(&tmp);
-    let first = fence_and_clear(&config).await.unwrap();
+    let first = fence_and_clear(&crate::core::runtime::DispatchCtx::ambient(), &config)
+        .await
+        .unwrap();
     enqueue(
         &config,
         &json!({"action":"learn","text":"Queued after the first erase began"}),
@@ -550,7 +568,9 @@ async fn a_later_erase_clears_pending_writes_admitted_during_the_first_erase() {
     )
     .unwrap();
     drop(first);
-    let second = fence_and_clear(&config).await.unwrap();
+    let second = fence_and_clear(&crate::core::runtime::DispatchCtx::ambient(), &config)
+        .await
+        .unwrap();
     assert!(
         read(&config.workspace_dir).unwrap().is_empty(),
         "the second erase must discard a learning admitted before it started"

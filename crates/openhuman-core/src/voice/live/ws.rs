@@ -164,11 +164,16 @@ pub(crate) fn parse_start(message: &Message) -> Result<LiveStartRequest, LiveVoi
 }
 
 /// Runs one live voice WebSocket to completion.
-pub async fn handle_live_voice_ws(socket: WebSocket, config: Arc<Config>) {
+///
+/// `ctx` is the context the accepting request ran under: an upgraded socket
+/// outlives (and is spawned off) its request task, so it cannot be read back
+/// from the task.
+pub async fn handle_live_voice_ws(
+    socket: WebSocket,
+    ctx: crate::core::runtime::DispatchCtx,
+    config: Arc<Config>,
+) {
     let session_id = uuid::Uuid::new_v4().to_string();
-    // The socket is an entry point with no captured core: the session runs
-    // under the context of the task that accepted it.
-    let ctx = crate::core::runtime::DispatchCtx::ambient();
     let (mut sink, mut stream) = socket.split();
 
     let first = match tokio::time::timeout(START_TIMEOUT, stream.next()).await {

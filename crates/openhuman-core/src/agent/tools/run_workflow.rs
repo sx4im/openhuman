@@ -344,7 +344,14 @@ impl Tool for RunWorkflowTool {
         // Fire-and-forget: only the spawn backstop applies — no await, so no
         // re-entrancy/nesting slot to take.
         if wait_seconds == 0 {
-            return match spawn_workflow_run_background(workflow_id.clone(), inputs, origin).await {
+            return match spawn_workflow_run_background(
+                &dispatch,
+                workflow_id.clone(),
+                inputs,
+                origin,
+            )
+            .await
+            {
                 // Count only spawns that actually start against the backstop —
                 // unknown-workflow / bad-input rejections (the Err arm) must not
                 // burn the budget, or rejected calls accumulate and trip the
@@ -378,16 +385,18 @@ impl Tool for RunWorkflowTool {
             Err(e) => return Ok(ToolResult::error(format!("run_workflow: {e}"))),
         };
 
-        let started = match spawn_workflow_run_background(workflow_id.clone(), inputs, origin).await
-        {
-            Ok(s) => {
-                if let Err(e) = guard::account_spawn(&dispatch) {
-                    return Ok(ToolResult::error(format!("run_workflow: {e}")));
+        let started =
+            match spawn_workflow_run_background(&dispatch, workflow_id.clone(), inputs, origin)
+                .await
+            {
+                Ok(s) => {
+                    if let Err(e) = guard::account_spawn(&dispatch) {
+                        return Ok(ToolResult::error(format!("run_workflow: {e}")));
+                    }
+                    s
                 }
-                s
-            }
-            Err(e) => return Ok(ToolResult::error(format!("run_workflow: {e}"))),
-        };
+                Err(e) => return Ok(ToolResult::error(format!("run_workflow: {e}"))),
+            };
         tracing::debug!(
             workflow_id = %started.workflow_id,
             run_id = %started.run_id,

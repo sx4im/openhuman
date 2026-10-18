@@ -60,7 +60,10 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> HostResult<T> {
 async fn only_the_module_may_call_back_and_only_for_a_live_remix() {
     let dir = tempfile::tempdir().unwrap();
     let bus = bus().await;
-    let registration = callbacks::register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let registration = callbacks::register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
     let correlation = registration.correlation().to_owned();
     let deliver = json!({ "correlation": correlation, "reply": "hi", "remixed": true });
 
@@ -108,8 +111,14 @@ async fn a_direct_call_without_the_brokers_context_is_unauthenticated() {
 async fn remixes_for_different_workspaces_are_served_at_once_each_for_its_own() {
     let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     let bus = bus().await;
-    let a = callbacks::register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir_a.path()));
-    let b = callbacks::register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir_b.path()));
+    let a = callbacks::register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir_a.path()),
+    );
+    let b = callbacks::register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir_b.path()),
+    );
     assert_ne!(a.correlation(), b.correlation());
 
     // Both are live together: neither waits for the other.
@@ -140,7 +149,10 @@ async fn remixes_for_different_workspaces_are_served_at_once_each_for_its_own() 
 async fn end_retires_the_remix_and_is_harmless_when_repeated_or_unknown() {
     let dir = tempfile::tempdir().unwrap();
     let bus = bus().await;
-    let registration = callbacks::register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let registration = callbacks::register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
     let correlation = registration.correlation().to_owned();
     registration.keep_for_background();
 
@@ -175,7 +187,10 @@ async fn end_retires_the_remix_and_is_harmless_when_repeated_or_unknown() {
     }
     // A stranger cannot end somebody else's remix.
     let dir2 = tempfile::tempdir().unwrap();
-    let live = callbacks::register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir2.path()));
+    let live = callbacks::register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir2.path()),
+    );
     let refused = bus
         .call(
             &bus.intruder,
@@ -191,7 +206,10 @@ async fn end_retires_the_remix_and_is_harmless_when_repeated_or_unknown() {
 async fn an_unavailable_capability_is_reported_not_faked() {
     let dir = tempfile::tempdir().unwrap();
     let bus = bus().await;
-    let registration = callbacks::register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let registration = callbacks::register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
     let reply = bus
         .call(
             &bus.module,
@@ -212,7 +230,13 @@ async fn component_off_refuses_before_any_module_load() {
     config.components.memes = false;
     let request: RemixRequest =
         serde_json::from_str(r#"{"conversation":[],"reply":"hi"}"#).unwrap();
-    let error = remix(&crate::core::runtime::DispatchCtx::host_default(), &config, request).await.unwrap_err();
+    let error = remix(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config,
+        request,
+    )
+    .await
+    .unwrap_err();
     assert!(error.contains("component is off"), "{error}");
 }
 

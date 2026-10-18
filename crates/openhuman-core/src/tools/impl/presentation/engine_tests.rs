@@ -25,6 +25,7 @@ fn slide(title: &str) -> SlideRequest {
 fn input(slides: Vec<SlideRequest>) -> GeneratePresentationInput {
     GeneratePresentationInput {
         title: "Quarterly".to_string(),
+        artifact_id: None,
         author: Some("Alice".to_string()),
         theme: Some("plain".to_string()),
         slides,

@@ -40,9 +40,23 @@ async fn a_new_connection_fires_the_matching_sources_of_the_scope() {
         )
         .unwrap();
     }
-    fire_for_connection(&crate::core::runtime::DispatchCtx::host_default(), &config, ProviderSlug::Github, "github", "conn-1").await;
+    fire_for_connection(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config,
+        ProviderSlug::Github,
+        "github",
+        "conn-1",
+    )
+    .await;
     // A toolkit with no sources fires nothing.
-    fire_for_connection(&crate::core::runtime::DispatchCtx::host_default(), &config, ProviderSlug::Notion, "notion", "conn-1").await;
+    fire_for_connection(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config,
+        ProviderSlug::Notion,
+        "notion",
+        "conn-1",
+    )
+    .await;
     assert_eq!(store::list_sources(&config).unwrap().len(), 2);
 }
 
@@ -58,7 +72,14 @@ async fn an_unreadable_scope_is_skipped() {
         action_dir: blocked,
         ..crate::config::Config::default()
     };
-    fire_for_connection(&crate::core::runtime::DispatchCtx::host_default(), &config, ProviderSlug::Github, "github", "conn-1").await;
+    fire_for_connection(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config,
+        ProviderSlug::Github,
+        "github",
+        "conn-1",
+    )
+    .await;
 }
 
 /// Smoke test: the subscriber handles connection events through the scope's

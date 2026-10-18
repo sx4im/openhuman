@@ -25,9 +25,8 @@ pub use loader::{
     get_dashboard_settings, get_data_paths, get_data_paths_for_user, get_runtime_flags,
     load_and_get_client_config_snapshot, load_and_get_config_snapshot,
     load_config_for_workspace_with_timeout, load_config_in, load_config_with_timeout,
-    load_current_or_init, load_current_or_init_ambient, reload_config_from_paths,
-    reload_config_snapshot_with_timeout, reset_local_data, set_browser_allow_all,
-    snapshot_config_json, RuntimeFlagsOut,
+    load_current_or_init, reload_config_from_paths, reload_config_snapshot_with_timeout,
+    reset_local_data, set_browser_allow_all, snapshot_config_json, RuntimeFlagsOut,
 };
 // expose internal helpers needed by tests (ops_tests.rs uses super::*)
 #[cfg(test)]

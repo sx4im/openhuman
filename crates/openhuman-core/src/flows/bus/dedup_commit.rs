@@ -206,10 +206,7 @@ impl DedupCommitSubscriber {
         ctx: &crate::core::runtime::DispatchCtx,
         flow_id: &str,
     ) -> Vec<String> {
-        match store::get_flow(
-            &super::owner::config_for_scope(ctx, &self.config),
-            flow_id,
-        ) {
+        match store::get_flow(&super::owner::config_for_scope(ctx, &self.config), flow_id) {
             Ok(Some(flow)) => flow
                 .graph
                 .nodes

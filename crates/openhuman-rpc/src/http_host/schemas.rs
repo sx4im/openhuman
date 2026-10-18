@@ -160,10 +160,10 @@ pub fn schemas(function: &str) -> ControllerSchema {
     }
 }
 
-fn handle_start(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
+fn handle_start(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
         let params: StartHostedDirParams = parse(params)?;
-        crate::http_host::rpc::start(params)
+        crate::http_host::rpc::start(&ctx, params)
             .await?
             .into_cli_compatible_json()
     })

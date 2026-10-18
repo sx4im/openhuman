@@ -24,12 +24,19 @@ async fn persist_then_load_groups_fields_per_connection() {
     let dir = tempfile::tempdir().unwrap();
     let config = config_in(&dir);
 
-    let written = persist_provider_profile(&config, &slack_profile("conn-1"))
-        .await
-        .unwrap();
+    let written = persist_provider_profile(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        &slack_profile("conn-1"),
+    )
+    .await
+    .unwrap();
     assert_eq!(written, 4);
 
-    let identities = load_connected_identities(&config).await.unwrap();
+    let identities =
+        load_connected_identities(&crate::core::runtime::DispatchCtx::ambient(), &config)
+            .await
+            .unwrap();
     assert_eq!(identities.len(), 1);
     let identity = &identities[0];
     assert_eq!(identity.source, "slack");
@@ -43,9 +50,13 @@ async fn persist_then_load_groups_fields_per_connection() {
 async fn persist_merges_into_the_stored_identity() {
     let dir = tempfile::tempdir().unwrap();
     let config = config_in(&dir);
-    persist_provider_profile(&config, &slack_profile("conn-1"))
-        .await
-        .unwrap();
+    persist_provider_profile(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        &slack_profile("conn-1"),
+    )
+    .await
+    .unwrap();
 
     let partial = ProviderUserProfile {
         toolkit: "slack".into(),
@@ -53,9 +64,18 @@ async fn persist_merges_into_the_stored_identity() {
         display_name: Some("Ada L.".into()),
         ..ProviderUserProfile::default()
     };
-    persist_provider_profile(&config, &partial).await.unwrap();
+    persist_provider_profile(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        &partial,
+    )
+    .await
+    .unwrap();
 
-    let identities = load_connected_identities(&config).await.unwrap();
+    let identities =
+        load_connected_identities(&crate::core::runtime::DispatchCtx::ambient(), &config)
+            .await
+            .unwrap();
     assert_eq!(identities.len(), 1);
     assert_eq!(identities[0].display_name.as_deref(), Some("Ada L."));
     assert_eq!(identities[0].user_id.as_deref(), Some("U123ABC"));
@@ -69,36 +89,77 @@ async fn empty_profile_writes_nothing() {
         toolkit: "gmail".into(),
         ..ProviderUserProfile::default()
     };
-    assert_eq!(persist_provider_profile(&config, &empty).await.unwrap(), 0);
-    let stored: Vec<ConnectedIdentity> = file_store::load(&config, IDENTITIES_FILE).await.unwrap();
+    assert_eq!(
+        persist_provider_profile(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            &empty
+        )
+        .await
+        .unwrap(),
+        0
+    );
+    let stored: Vec<ConnectedIdentity> = file_store::load(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        IDENTITIES_FILE,
+    )
+    .await
+    .unwrap();
     assert!(stored.is_empty());
-    assert!(load_connected_identities(&config).await.unwrap().is_empty());
+    assert!(
+        load_connected_identities(&crate::core::runtime::DispatchCtx::ambient(), &config)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
 async fn delete_removes_only_the_named_connection() {
     let dir = tempfile::tempdir().unwrap();
     let config = config_in(&dir);
-    persist_provider_profile(&config, &slack_profile("conn-1"))
-        .await
-        .unwrap();
-    persist_provider_profile(&config, &slack_profile("conn-2"))
-        .await
-        .unwrap();
+    persist_provider_profile(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        &slack_profile("conn-1"),
+    )
+    .await
+    .unwrap();
+    persist_provider_profile(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        &slack_profile("conn-2"),
+    )
+    .await
+    .unwrap();
 
-    let deleted = delete_connected_identity_facets(&config, "SLACK", "conn-1")
-        .await
-        .unwrap();
+    let deleted = delete_connected_identity_facets(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        "SLACK",
+        "conn-1",
+    )
+    .await
+    .unwrap();
     assert_eq!(deleted, 4);
 
-    let identities = load_connected_identities(&config).await.unwrap();
+    let identities =
+        load_connected_identities(&crate::core::runtime::DispatchCtx::ambient(), &config)
+            .await
+            .unwrap();
     assert_eq!(identities.len(), 1);
     assert_eq!(identities[0].identifier, "conn-2");
 
     assert_eq!(
-        delete_connected_identity_facets(&config, "slack", "conn-1")
-            .await
-            .unwrap(),
+        delete_connected_identity_facets(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            "slack",
+            "conn-1"
+        )
+        .await
+        .unwrap(),
         0
     );
 }

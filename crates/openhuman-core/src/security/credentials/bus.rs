@@ -25,7 +25,7 @@
 
 use crate::core::events::DomainEvent;
 use crate::core::runtime::DispatchCtx;
-use crate::cron::scheduler_gate;
+use crate::platform::llm_gate;
 use async_trait::async_trait;
 use tinybus::EventHandler;
 
@@ -91,7 +91,7 @@ impl SessionExpiredSubscriber {
         //     Cheap atomic flip; safe to call repeatedly from concurrent publishers.
         //     We may override this back to `false` below if the current session
         //     turns out to be a local offline session (never truly expired).
-        scheduler_gate::set_signed_out(true);
+        llm_gate::set_signed_out(true);
 
         match ctx.load_config().await {
             Ok(config) => {
@@ -103,7 +103,7 @@ impl SessionExpiredSubscriber {
                         reason = %reason,
                         "[auth] SessionExpired ignored — runtime authenticates with an API key; re-enabling scheduler gate"
                     );
-                    scheduler_gate::set_signed_out(false);
+                    llm_gate::set_signed_out(false);
                     return;
                 }
                 let is_local_session =
@@ -122,7 +122,7 @@ impl SessionExpiredSubscriber {
                         "[auth] SessionExpired ignored for local offline session — re-enabling scheduler gate"
                     );
                     // Undo the eager flip: local sessions are never truly expired.
-                    scheduler_gate::set_signed_out(false);
+                    llm_gate::set_signed_out(false);
                     return;
                 }
 
@@ -137,7 +137,7 @@ impl SessionExpiredSubscriber {
                 //     we've at least pinned the scheduler gate so background work
                 //     can't make things worse.
                 if let Err(err) =
-                    crate::security::credentials::rpc::clear_session(&ctx, &config).await
+                    crate::security::credentials::rpc::clear_session(ctx, &config).await
                 {
                     tracing::warn!(
                         source = %source,

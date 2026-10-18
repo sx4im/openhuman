@@ -244,6 +244,7 @@ pub(super) fn scope_def(
 }
 
 pub(super) fn merge_for_turn(
+    dispatch: &crate::core::runtime::DispatchCtx,
     host: Option<&HostTools>,
     agent_id: &str,
     session_id: Option<&str>,
@@ -251,7 +252,7 @@ pub(super) fn merge_for_turn(
     visible: &mut HashSet<String>,
 ) -> Result<MergedHostTurnTools> {
     match host
-        .map(|build| build(TurnContext::new(agent_id, session_id)))
+        .map(|build| build(TurnContext::new(agent_id, session_id).with_dispatch(dispatch)))
         .map(|host_tools| host_tools.merge_into(agent_id, tools, visible))
     {
         Some(merged) => merged,
@@ -293,11 +294,22 @@ impl std::fmt::Debug for HostTurnTools {
 /// Non-exhaustive: this describes an occasion, and occasions gain detail.
 /// Construct it with [`TurnContext::new`] and read it through the accessors so
 /// a later field cannot break a host that matched on it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct TurnContext<'a> {
     agent_id: &'a str,
     session_id: Option<&'a str>,
+    dispatch: Option<&'a crate::core::runtime::DispatchCtx>,
+}
+
+impl std::fmt::Debug for TurnContext<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TurnContext")
+            .field("agent_id", &self.agent_id)
+            .field("session_id", &self.session_id)
+            .field("dispatch", &self.dispatch.is_some())
+            .finish()
+    }
 }
 
 impl<'a> TurnContext<'a> {
@@ -307,7 +319,26 @@ impl<'a> TurnContext<'a> {
         Self {
             agent_id,
             session_id,
+            dispatch: None,
         }
+    }
+
+    /// The same occasion, built under `dispatch`: the context of the session
+    /// being assembled, which a belt that reads the acting tenant takes it from.
+    #[must_use]
+    pub fn with_dispatch(mut self, dispatch: &'a crate::core::runtime::DispatchCtx) -> Self {
+        self.dispatch = Some(dispatch);
+        self
+    }
+
+    /// The context this turn is built under: the one named by
+    /// [`with_dispatch`](Self::with_dispatch), else the calling task's own (an
+    /// occasion built without one).
+    #[must_use]
+    pub fn dispatch_ctx(&self) -> crate::core::runtime::DispatchCtx {
+        self.dispatch
+            .cloned()
+            .unwrap_or_else(|| crate::core::runtime::DispatchCtx::from_weak(None))
     }
 
     /// The agent definition this turn runs as.

@@ -203,6 +203,9 @@ pub(crate) struct CoreGuard {
     /// Handlers registered with [`Runtime::on_system_job`], by job name.
     system_jobs:
         Mutex<HashMap<String, openhuman_core::cron::system_job_handlers::SystemJobRegistration>>,
+    /// Job-kind handlers registered with [`Runtime::register_job_handler`] or
+    /// [`RuntimeBuilder::cron_job_handler`]; dropping restores the defaults.
+    kind_handlers: Mutex<Vec<openhuman_core::cron::handlers::KindRegistration>>,
     /// Process-global seams this runtime installed; dropping restores the
     /// restorable ones (see [`seams`]).
     seams: Mutex<Option<seams::InstalledSeams>>,
@@ -230,6 +233,12 @@ impl Drop for CoreGuard {
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
+        // Newest first, so each registration restores what it replaced.
+        let handlers = self
+            .kind_handlers
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while handlers.pop().is_some() {}
         // Drop the core while the process slot is still claimed. Releasing it
         // first lets another builder initialize process-scoped state while
         // this runtime's keyring, bearer, event bus and subscribers are live.
@@ -425,6 +434,30 @@ impl Runtime {
         Ok(())
     }
 
+    /// Run every job of `kind` through `handler` instead of the built-in one,
+    /// for the life of this runtime (dropping the runtime restores what it
+    /// replaced). A job's kind decides which handler runs it: `shell` and
+    /// `agent` rows reach it as one attempt of the run (the core still applies
+    /// its operator limits and classifies a failure as retryable or
+    /// permanent); a `flow` row reaches it as a schedule tick. A later
+    /// registration of the same kind replaces this one.
+    pub fn register_job_handler(
+        &self,
+        kind: crate::cron::JobKind,
+        handler: std::sync::Arc<dyn crate::cron::JobKindHandler>,
+    ) {
+        log::debug!(
+            "[embed][runtime] job kind handler registered kind={}",
+            kind.as_str()
+        );
+        let registration = openhuman_core::cron::handlers::register_kind(kind, handler);
+        self.guard
+            .kind_handlers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(registration);
+    }
+
     /// Start the background services this runtime's [`ServiceSet`] selects
     /// (the cron scheduler, channel listeners, …). [`RuntimeBuilder::build`]
     /// already does this when the set asks for background work; call
@@ -607,6 +640,7 @@ impl Runtime {
                 previous_session_store,
                 host_agents: resolver,
                 system_jobs: Mutex::new(HashMap::new()),
+                kind_handlers: Mutex::new(Vec::new()),
                 seams: Mutex::new(seams),
             }),
             base_config,

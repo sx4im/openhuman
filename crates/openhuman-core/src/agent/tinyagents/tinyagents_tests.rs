@@ -6,8 +6,11 @@ use super::*;
 
 #[test]
 fn crate_native_turn_source_retains_only_role_and_config() {
-    let source =
-        TurnModelSource::new_crate_native(&crate::core::runtime::DispatchCtx::ambient(), "chat", Arc::new(crate::config::Config::default()));
+    let source = TurnModelSource::new_crate_native(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        Arc::new(crate::config::Config::default()),
+    );
 
     assert!(source.direct_model.is_none());
     assert!(source.crate_native.is_some());

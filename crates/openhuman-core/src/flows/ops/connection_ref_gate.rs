@@ -57,11 +57,12 @@ fn first_connection_ref_for_toolkit(conns: &[FlowConnection], toolkit: &str) -> 
 /// so a real connection is never false-rejected during an outage — but the
 /// toolkit-mismatch check, which needs no I/O, still runs.
 pub(crate) async fn validate_connection_refs(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     graph: &WorkflowGraph,
 ) -> Vec<String> {
     let connections: Option<Vec<FlowConnection>> =
-        match crate::integrations::composio::ops::composio_list_connections(config).await {
+        match crate::integrations::composio::ops::composio_list_connections(ctx, config).await {
             Ok(outcome) => Some(build_flow_connections(
                 outcome.value.connections,
                 Vec::new(),

@@ -8,7 +8,6 @@ use crate::agent::triage::{
     apply_decision, remote_trigger_origin, run_triage, TriageOutcome, TriggerEnvelope,
 };
 use crate::agent::turn_origin::with_origin;
-use crate::config::rpc as config_rpc;
 use crate::core::events::DomainEvent;
 use crate::integrations::composio::trigger_history;
 
@@ -110,7 +109,7 @@ impl EventHandler<DomainEvent> for ComposioTriggerSubscriber {
                             ..Default::default()
                         },
                     };
-                    if let Err(error) = store.record(&config, event).await {
+                    if let Err(error) = store.record(&ctx, &config, event).await {
                         tracing::warn!(error = %error, "[composio][history] failed to archive trigger");
                     }
                 }
@@ -196,11 +195,7 @@ impl EventHandler<DomainEvent> for ComposioTriggerSubscriber {
                     // spawned task, because `AGENT_TURN_ORIGIN` is a task-local
                     // and does not cross `tokio::spawn`.
                     let origin = remote_trigger_origin(&envelope);
-                    if let Err(e) = with_origin(
-                        origin,
-                        apply_decision(&ctx, run, &envelope),
-                    )
-                    .await
+                    if let Err(e) = with_origin(origin, apply_decision(&ctx, run, &envelope)).await
                     {
                         tracing::error!(
                             label = %envelope.display_label,

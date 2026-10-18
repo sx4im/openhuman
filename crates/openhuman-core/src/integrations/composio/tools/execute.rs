@@ -10,9 +10,10 @@ use serde_json::{json, Value};
 use super::live_config::live_composio_config;
 use super::redact::redact_composio_outcome;
 use crate::agent::tinyagents::host::run_context::{
-    sandbox_mode_for_tool, task_recency_window_for_tool,
+    dispatch_ctx_for_tool, sandbox_mode_for_tool, task_recency_window_for_tool,
 };
 use crate::config::Config;
+use crate::core::runtime::DispatchCtx;
 use tinyagents_definition::SandboxMode;
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolCategory, ToolResult, ToolRunContext};
 
@@ -101,7 +102,9 @@ impl Tool for ComposioExecuteTool {
         ToolCategory::Workflow
     }
     async fn execute(&self, args: Value) -> anyhow::Result<ToolResult> {
-        let (config, outcome) = Box::pin(self.execute_unredacted(args, None, None, None)).await;
+        let ctx = dispatch_ctx_for_tool(None);
+        let (config, outcome) =
+            Box::pin(self.execute_unredacted(&ctx, args, None, None, None)).await;
         redact_composio_outcome(&config, outcome)
     }
     async fn execute_with_context(
@@ -110,14 +113,18 @@ impl Tool for ComposioExecuteTool {
         _options: ToolCallOptions,
         context: Option<&dyn ToolRunContext>,
     ) -> anyhow::Result<ToolResult> {
-        let (config, outcome) = Box::pin(self.execute_unredacted(
-            args,
-            sandbox_mode_for_tool(context),
-            task_recency_window_for_tool(context),
-            crate::agent::tinyagents::host::run_context::approval_for_tool(context)
-                .chat
-                .as_ref(),
-        ))
+        let ctx = dispatch_ctx_for_tool(context);
+        let (config, outcome) = Box::pin(
+            self.execute_unredacted(
+                &ctx,
+                args,
+                sandbox_mode_for_tool(context),
+                task_recency_window_for_tool(context),
+                crate::agent::tinyagents::host::run_context::approval_for_tool(context)
+                    .chat
+                    .as_ref(),
+            ),
+        )
         .await;
         redact_composio_outcome(&config, outcome)
     }
@@ -130,6 +137,7 @@ impl ComposioExecuteTool {
     /// registered.
     async fn execute_unredacted(
         &self,
+        ctx: &DispatchCtx,
         args: Value,
         sandbox_mode: Option<SandboxMode>,
         task_recency_window: Option<std::time::Duration>,
@@ -215,11 +223,11 @@ impl ComposioExecuteTool {
         // hazard the composio client resolution below guards against, and
         // restructuring the reload earlier would move it ahead of the
         // sandbox/task-window setup this function does first.
-        match evaluate_tool_visibility(self.config.as_ref(), &tool).await {
+        match evaluate_tool_visibility(ctx, self.config.as_ref(), &tool).await {
             ToolDecision::Allow | ToolDecision::PassthroughCheckScope { .. } => {}
             ToolDecision::BlockedByScope { scope } => {
                 let toolkit = toolkit_from_slug(&tool).unwrap_or_default();
-                let pref = load_user_scope_pref(self.config.as_ref(), &toolkit).await;
+                let pref = load_user_scope_pref(ctx, self.config.as_ref(), &toolkit).await;
                 let msg = scope_error_message(&tool, scope, pref);
                 tracing::info!(
                     tool = %tool,

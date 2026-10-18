@@ -14,6 +14,7 @@ async fn flows_cancel_run_of_a_completed_with_warnings_run_errors() {
         .unwrap();
 
     let run = flows_run(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &created.value.id,
         json!({}),
@@ -55,6 +56,7 @@ async fn flows_cancel_run_of_an_interrupted_run_errors() {
         .unwrap();
 
     let run = flows_run(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &created.value.id,
         json!({}),
@@ -130,6 +132,7 @@ async fn parked_run_ttl_sweep_expires_stale_runs_but_spares_fresh_ones() {
 
     // A genuinely fresh parked run (just paused now) must survive the sweep.
     let fresh = flows_run(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &created.value.id,
         json!({}),
@@ -158,6 +161,7 @@ async fn parked_run_ttl_sweep_expires_stale_runs_but_spares_fresh_ones() {
 
     // The swept run is no longer resumable.
     let err = flows_resume(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         &created.value.id,
         &stale_id,
@@ -483,7 +487,9 @@ async fn flows_list_connections_aggregates_http_creds_and_tolerates_composio() {
         .upsert(&HttpCredential::bearer("stripe", "sk_live_seed_secret"))
         .unwrap();
 
-    let outcome = flows_list_connections(&config).await.unwrap();
+    let outcome = flows_list_connections(&crate::core::runtime::DispatchCtx::ambient(), &config)
+        .await
+        .unwrap();
     let refs: Vec<_> = outcome
         .value
         .iter()

@@ -26,8 +26,7 @@ async fn x402_pay_twit_sh_for_hal_finney_tweet() {
         action_dir: tmp.path().to_path_buf(),
         ..SecurityPolicy::default()
     });
-    let tool =
-        openhuman_core::tools::http_request_tool(
+    let tool = openhuman_core::tools::http_request_tool(
         &openhuman_core::core::runtime::DispatchCtx::process_default(),
         security,
         vec!["x402.twit.sh".into()],

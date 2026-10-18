@@ -5390,7 +5390,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openhuman"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "aes-gcm",
  "aho-corasick",
@@ -5413,7 +5413,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hkdf 0.12.4",
- "hmac 0.13.0",
+ "hmac 0.12.1",
  "hostname",
  "iana-time-zone",
  "libc",
@@ -5432,12 +5432,12 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "sha2 0.10.9",
- "sha2 0.11.0",
  "starship-battery",
  "sysinfo",
  "tar",
  "tempfile",
  "thiserror 2.0.20",
+ "tiny-artifacts",
  "tinyagents-definition",
  "tinyagents-graph",
  "tinyagents-harness",
@@ -5459,11 +5459,12 @@ dependencies = [
  "tinyconnectors-bus",
  "tinydocs-bus",
  "tinyflows",
+ "tinyflows-bus",
  "tinyflows-catalog",
  "tinyflows-copilot",
  "tinyflows-drivers",
  "tinyflows-import",
- "tinyflows-schedule",
+ "tinyflows-module",
  "tinyhosts-bus",
  "tinyinference-core 0.4.1",
  "tinyinference-decisions 0.4.1",
@@ -5473,7 +5474,6 @@ dependencies = [
  "tinyinference-providers",
  "tinyinference-voice",
  "tinyjuice-bus",
- "tinymcp",
  "tinymcp-bus",
  "tinymemes-bus",
  "tinymemory-api",
@@ -5515,7 +5515,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-cli"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5579,7 +5579,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-embed"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5601,7 +5601,8 @@ dependencies = [
  "tinyagents-harness",
  "tinyagents-session",
  "tinybus",
- "tinyflows-schedule",
+ "tinyflows-bus",
+ "tinyflows-module",
  "tinyinference-embeddings",
  "tinyinference-llm 0.4.1",
  "tinymcp-bus",
@@ -5619,7 +5620,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-modules-linked"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "log",
  "openhuman-rpc",
@@ -5630,6 +5631,7 @@ dependencies = [
  "tinycomputer",
  "tinyconnectors",
  "tinydocs-module",
+ "tinyflows-module",
  "tinyhosts",
  "tinyjuice-module",
  "tinymcp",
@@ -5641,7 +5643,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-rpc"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "anyhow",
  "axum",
@@ -5679,7 +5681,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-tinyhumans"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -5709,7 +5711,7 @@ dependencies = [
 
 [[package]]
 name = "openhuman-tui"
-version = "0.64.15"
+version = "0.64.18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8205,7 +8207,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.60.2",
@@ -8380,6 +8382,21 @@ checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
 dependencies = [
  "num-conv",
  "time-core",
+]
+
+[[package]]
+name = "tiny-artifacts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tinytools",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -8572,14 +8589,14 @@ dependencies = [
 
 [[package]]
 name = "tinybox-bus"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "tinybox-core"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "async-trait",
  "serde",
@@ -8589,7 +8606,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-docker"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "async-trait",
  "serde_json",
@@ -8600,7 +8617,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-drivers"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "log",
  "serde_json",
@@ -8611,7 +8628,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-host"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "async-trait",
  "cap-std",
@@ -8625,7 +8642,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-jail"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "landlock",
  "log",
@@ -8638,7 +8655,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-linux"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "async-trait",
  "tinybox-core",
@@ -8646,7 +8663,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-microvm"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "async-trait",
  "serde",
@@ -8656,7 +8673,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-module"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "log",
  "tempfile",
@@ -8679,7 +8696,7 @@ dependencies = [
 
 [[package]]
 name = "tinybox-ssh"
-version = "0.1.34"
+version = "0.1.35"
 dependencies = [
  "async-trait",
  "tinybox-core",
@@ -9030,7 +9047,7 @@ dependencies = [
 
 [[package]]
 name = "tinyflows"
-version = "0.8.21"
+version = "0.8.23"
 dependencies = [
  "async-trait",
  "futures-timer",
@@ -9046,6 +9063,15 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "tinyflows-bus"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -9110,12 +9136,33 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tinyflows",
+ "tinyflows-bus",
  "tinyflows-catalog",
  "tinyflows-drivers",
- "tinyflows-schedule",
  "tinystoragedrivers-core",
  "tinystoragedrivers-sqlite",
  "tracing",
+]
+
+[[package]]
+name = "tinyflows-module"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tinybus",
+ "tinybus-module",
+ "tinyflows",
+ "tinyflows-bus",
+ "tinyflows-drivers",
+ "tinyflows-schedule",
+ "tinystoragedrivers-core",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -9128,6 +9175,7 @@ dependencies = [
  "chrono-tz",
  "cron",
  "serde",
+ "tinyflows-bus",
  "tokio",
  "tracing",
  "uuid",
@@ -9453,13 +9501,12 @@ dependencies = [
 
 [[package]]
 name = "tinymcp"
-version = "0.18.5"
+version = "0.18.6"
 dependencies = [
  "base64 0.23.1",
  "dirs 7.0.0",
  "futures-util",
  "parking_lot",
- "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -9483,8 +9530,9 @@ dependencies = [
 
 [[package]]
 name = "tinymcp-bus"
-version = "0.18.5"
+version = "0.18.6"
 dependencies = [
+ "base64 0.23.1",
  "schemars",
  "serde",
  "serde_json",
@@ -9546,7 +9594,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.20",
  "tinymemory-api",
 ]
@@ -9615,7 +9663,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "tinystoragedrivers-core",
  "tinystoragedrivers-file",
@@ -9628,7 +9675,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-bus"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "serde",
  "serde_json",
@@ -9638,7 +9684,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-busproxy"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "async-trait",
  "serde",
@@ -9653,7 +9698,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-client"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "async-trait",
  "serde",
@@ -9667,7 +9711,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-core"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "async-trait",
  "serde",
@@ -9679,7 +9722,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-file"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "async-trait",
  "libc",
@@ -9692,7 +9734,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-mongodb"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -9707,7 +9748,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-s3"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "bytes",
  "futures-util",
@@ -9722,7 +9762,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-secrets"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "async-trait",
  "atomicwrites",
@@ -9746,7 +9785,6 @@ dependencies = [
 [[package]]
 name = "tinystoragedrivers-sqlite"
 version = "0.11.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.11.0#9eeef54aea403ac07461a612189bdf4982782823"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -11272,7 +11310,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

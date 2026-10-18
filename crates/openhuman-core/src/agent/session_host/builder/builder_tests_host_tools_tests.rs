@@ -465,3 +465,41 @@ fn permanent_metadata_without_a_source_is_rejected_before_build() {
         .to_string()
         .contains("permanent tool must have exactly one source: missing_source"));
 }
+
+/// The factory is told the context the session is built under, not the
+/// calling task's: a profile belt reads its tenant from it.
+#[test]
+fn the_factory_is_told_the_context_the_session_is_built_under() {
+    use crate::core::runtime::{CoreContext, DispatchCtx, DomainSet};
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let explicit = CoreContext::for_test(DomainSet::full(), None);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<DispatchCtx>::new()));
+
+    let host: crate::agent::HostTools = {
+        let seen = Arc::clone(&seen);
+        Arc::new(move |turn: crate::agent::TurnContext<'_>| {
+            seen.lock().unwrap().push(turn.dispatch_ctx());
+            crate::agent::HostTurnTools::advertised(vec![Box::new(Marker("oc_ctx_tool"))])
+        })
+    };
+
+    crate::agent::OpenHumanSessionHost::from_config_with_host_tools(
+        &DispatchCtx::new(explicit.clone()),
+        &config,
+        &definition(),
+        &host,
+        None,
+    )
+    .expect("build a session under an explicit context");
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    assert!(
+        seen[0]
+            .core()
+            .is_some_and(|core| Arc::ptr_eq(core, &explicit)),
+        "the factory must see the context the session was built under"
+    );
+}

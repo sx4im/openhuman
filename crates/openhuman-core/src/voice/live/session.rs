@@ -136,12 +136,8 @@ pub(crate) async fn start(
         "[voice-live] starting session"
     );
 
-    let mut host = OpenHumanSessionHost::from_config_for_agent(
-        ctx,
-        &config,
-        LIVE_AGENT_ID,
-    )
-    .map_err(|e| LiveVoiceError::internal(format!("agent build failed: {e}")))?;
+    let mut host = OpenHumanSessionHost::from_config_for_agent(ctx, &config, LIVE_AGENT_ID)
+        .map_err(|e| LiveVoiceError::internal(format!("agent build failed: {e}")))?;
     host.set_event_context(format!("voice_live_{session_id}"), "voice");
     host.set_thread_id(Some(&thread_id));
     let harness = assemble_live_tool_harness(host.live_tool_surface());

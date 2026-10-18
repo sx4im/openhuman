@@ -97,11 +97,12 @@ async fn configured_storage_url() -> anyhow::Result<Option<String>> {
     if env.as_deref().is_some_and(|url| !url.trim().is_empty()) {
         return Ok(storage_url_from(env, &Default::default()));
     }
-    let config = crate::core_host::config::rpc::load_config_with_timeout()
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!("loading the config to resolve the storage url: {error}")
-        })?;
+    // Boot-time resolution: the host's own context, no turn's.
+    let config = crate::core_host::config::ops::load_config_in(
+        &crate::core_host::core::runtime::DispatchCtx::host_default(),
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("loading the config to resolve the storage url: {error}"))?;
     Ok(storage_url_from(env, &config))
 }
 

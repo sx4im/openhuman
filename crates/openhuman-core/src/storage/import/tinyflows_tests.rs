@@ -1,4 +1,5 @@
 use super::*;
+use crate::cron::client::testing as cron_store;
 use crate::storage::{MemoryStorage, Scope};
 use serde_json::Value;
 use sha2::Digest;
@@ -6,7 +7,6 @@ use std::collections::BTreeMap;
 use tempfile::TempDir;
 use tinyflows::engine::Checkpointer;
 use tinyflows_drivers::catalog::FlowCatalogDocuments;
-use tinyflows_drivers::schedule::CronDocuments;
 use tinyflows_drivers::DriverCheckpointer;
 
 fn fixtures() -> PathBuf {
@@ -190,32 +190,27 @@ fn cron_jobs_and_runs_come_across_with_their_fields() {
     assert_eq!(written(outcome), 3 + 4);
 
     let expected = expected()["cron"].clone();
-    let cron = CronDocuments::new(documents(&backend, &Scope::local()));
-    crate::storage::block_on_anyhow(async move {
-        for legacy in expected["jobs"].as_array().unwrap() {
-            let legacy_id = legacy["id"].as_str().unwrap();
-            // A flow-schedule job is filed under an id derived from its flow.
-            let new_id = if legacy["job_type"] == "flow" {
-                format!("flow:{}", legacy["command"].as_str().unwrap())
-            } else {
-                legacy_id.to_string()
-            };
-            let job = cron.get_job(&new_id).await?;
-            let mut got = json(&job);
-            got.as_object_mut().unwrap().remove("id");
-            let mut want = legacy.clone();
-            want.as_object_mut().unwrap().remove("id");
-            assert_eq!(got, want, "job {legacy_id}");
-            let runs = cron.list_runs(&new_id, 50).await?;
-            assert_eq!(
-                runs.len(),
-                expected["runs"][legacy_id].as_array().unwrap().len(),
-                "runs of {legacy_id}"
-            );
-        }
-        Ok(())
-    })
-    .unwrap();
+    for legacy in expected["jobs"].as_array().unwrap() {
+        let legacy_id = legacy["id"].as_str().unwrap();
+        // A flow-schedule job is filed under an id derived from its flow.
+        let new_id = if legacy["job_type"] == "flow" {
+            format!("flow:{}", legacy["command"].as_str().unwrap())
+        } else {
+            legacy_id.to_string()
+        };
+        let job = cron_store::get_job(&backend, &Scope::local(), &new_id).unwrap();
+        let mut got = json(&job);
+        got.as_object_mut().unwrap().remove("id");
+        let mut want = legacy.clone();
+        want.as_object_mut().unwrap().remove("id");
+        assert_eq!(got, want, "job {legacy_id}");
+        let runs = cron_store::list_runs(&backend, &Scope::local(), &new_id).unwrap();
+        assert_eq!(
+            runs.len(),
+            expected["runs"][legacy_id].as_array().unwrap().len(),
+            "runs of {legacy_id}"
+        );
+    }
 
     assert_eq!(tree(dir.path()), before, "the legacy file was modified");
 }
@@ -252,9 +247,7 @@ fn a_job_policy_kept_in_the_side_table_lands_on_the_job() {
     let backend = backend();
     import_cron(&backend, &Scope::local(), &config, dir.path(), "").unwrap();
 
-    let cron = CronDocuments::new(documents(&backend, &Scope::local()));
-    let job =
-        crate::storage::block_on_anyhow(async move { cron.get_job(&shell_id).await }).unwrap();
+    let job = cron_store::get_job(&backend, &Scope::local(), &shell_id).unwrap();
     assert_eq!(job.policy.retries, Some(0));
     assert!(job.policy.single_flight);
 }
@@ -359,10 +352,7 @@ fn an_agents_cron_database_lands_in_that_agents_scope() {
         "{reports:?}"
     );
 
-    let count = |scope: Scope| {
-        let cron = CronDocuments::new(documents(&backend, &scope));
-        crate::storage::block_on_anyhow(async move { Ok(cron.list_jobs().await?.len()) }).unwrap()
-    };
+    let count = |scope: Scope| cron_store::list_jobs(&backend, &scope).unwrap().len();
     assert_eq!(count(Scope::local()), 3);
     assert_eq!(count(crate::storage::scope_for_agent("alpha")), 3);
     assert_eq!(count(crate::storage::scope_for_agent("beta")), 0);

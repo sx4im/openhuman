@@ -23,6 +23,7 @@ use tinyconnectors_bus::names::methods;
 /// component decides both and the two cannot disagree. A curated toolkit
 /// offers only the actions in its catalog.
 pub async fn composio_list_tools(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     toolkits: Option<Vec<String>>,
     tags: Option<Vec<String>>,
@@ -36,7 +37,7 @@ pub async fn composio_list_tools(
 
     // The module filters the listing by the stored preference; make sure a
     // preference still in the legacy file is there to be applied.
-    super::ensure_user_scopes_migrated(config).await;
+    super::ensure_user_scopes_migrated(ctx, config).await;
     let request = ComposioListToolsRequest {
         toolkits: toolkits.unwrap_or_default(),
         tags: effective_tags.unwrap_or_default(),

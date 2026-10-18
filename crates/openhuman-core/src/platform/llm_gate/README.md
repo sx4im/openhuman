@@ -1,4 +1,4 @@
-# scheduler_gate
+# llm_gate
 
 Gates background AI work (embeddings, summarisation, triage, local inference) on live host conditions so the process doesn't make the machine visibly lag: especially on battery. It exposes a single process-wide decision point: background workers consult `current_policy()` for a cheap read, or `await wait_for_capacity()` to cooperatively block until the host is ready and hold a slot in a one-permit LLM semaphore. A background sampler refreshes host signals every 30s and recomputes the policy. A separate "signed out" override trumps everything to halt LLM work the moment the app session goes away.
 
@@ -15,11 +15,11 @@ Gates background AI work (embeddings, summarisation, triage, local inference) on
 
 | File | Role |
 | --- | --- |
-| [`crates/openhuman-core/src/cron/scheduler_gate/mod.rs`](./mod.rs) | Module docstring + re-exports of the public surface. |
-| [`crates/openhuman-core/src/cron/scheduler_gate/gate.rs`](./gate.rs) | The process-wide wiring: the `SharedCore`, the signed-out override, the resume `Notify`, the single-slot LLM semaphore, `init_global(SchedulerGateConfig)`/`update_config`/`current_policy`/`wait_for_capacity`, and the per-tokio-runtime test-state scaffolding. |
-| [`crates/openhuman-core/src/cron/scheduler_gate/throttle.rs`](./throttle.rs) | The machinery: `GateCore` (config + signals + policy), the 30s `spawn_sampler` task, `wait_for_capacity` over a caller-owned semaphore, and the `LlmPermit` RAII guard. |
-| [`crates/openhuman-core/src/cron/scheduler_gate/signals.rs`](./signals.rs) | `sample(&SignalEnv)`: battery (via `starship_battery`, behind the `scheduler-gate` feature), CPU usage (via `sysinfo`, two-refresh delta), and server/container detection. |
-| [`crates/openhuman-core/src/cron/scheduler_gate/decide.rs`](./decide.rs) | Config/policy adapter: `decide(signals, cfg) -> Policy` maps `SchedulerGateConfig` to `platform::resource_admission::Limits` and maps `Admission` to `Policy`. The pure decision lives in [`platform/resource_admission`](../../platform/resource_admission/mod.rs). `Policy` / `PauseReason` live beside `SchedulerGateConfig` in `config::schema::scheduler_gate`. Evaluation order: user mode override → server mode → power-aware stand-down → hard CPU ceiling → battery/CPU headroom. |
+| [`crates/openhuman-core/src/platform/llm_gate/mod.rs`](./mod.rs) | Module docstring + re-exports of the public surface. |
+| [`crates/openhuman-core/src/platform/llm_gate/gate.rs`](./gate.rs) | The process-wide wiring: the `SharedCore`, the signed-out override, the resume `Notify`, the single-slot LLM semaphore, `init_global(SchedulerGateConfig)`/`update_config`/`current_policy`/`wait_for_capacity`, and the per-tokio-runtime test-state scaffolding. |
+| [`crates/openhuman-core/src/platform/llm_gate/throttle.rs`](./throttle.rs) | The machinery: `GateCore` (config + signals + policy), the 30s `spawn_sampler` task, `wait_for_capacity` over a caller-owned semaphore, and the `LlmPermit` RAII guard. |
+| [`crates/openhuman-core/src/platform/llm_gate/signals.rs`](./signals.rs) | `sample(&SignalEnv)`: battery (via `starship_battery`, behind the `scheduler-gate` feature), CPU usage (via `sysinfo`, two-refresh delta), and server/container detection. |
+| [`crates/openhuman-core/src/platform/llm_gate/decide.rs`](./decide.rs) | Config/policy adapter: `decide(signals, cfg) -> Policy` maps `SchedulerGateConfig` to `platform::resource_admission::Limits` and maps `Admission` to `Policy`. The pure decision lives in [`platform/resource_admission`](../resource_admission/mod.rs). `Policy` / `PauseReason` live beside `SchedulerGateConfig` in `config::schema::scheduler_gate`. Evaluation order: user mode override → server mode → power-aware stand-down → hard CPU ceiling → battery/CPU headroom. |
 | `SIGNAL_ENV` in `gate.rs` | The env-override names: `OPENHUMAN_ON_AC_POWER`, `OPENHUMAN_BATTERY_CHARGE`, `OPENHUMAN_DEPLOYMENT` (plus the Kubernetes / `/.dockerenv` heuristics). |
 
 ## Public surface
@@ -56,7 +56,7 @@ No dependency on any other `openhuman` domain or on `crate::core::*`.
 
 ## Used by
 
-Consumed in-process across the codebase (discoverable via `grep scheduler_gate`):
+Consumed in-process across the codebase (discoverable via `grep llm_gate`):
 
 - Background workers / pipelines: `autocomplete/core/engine.rs`, `task_sources/route.rs`, [`agent/triage/evaluator.rs`](../../agent/triage/evaluator.rs).
 - Inference layer: `inference/provider/openhuman_backend.rs`, [`inference/provider/factory.rs`](../../inference/provider/factory.rs), `inference/local/service/{vision_embed.rs,public_infer.rs}`, `inference/voice/postprocess.rs`.

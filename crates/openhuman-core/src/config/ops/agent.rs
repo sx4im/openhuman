@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::core::Outcome;
 
-use super::loader::{load_config_with_timeout, snapshot_config_json};
+use super::loader::snapshot_config_json;
 use super::tool_dispatcher as td;
 
 /// Partial update for the `[autonomy]` block — the agent's filesystem access

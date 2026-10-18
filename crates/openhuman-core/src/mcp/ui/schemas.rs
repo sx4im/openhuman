@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};
 use crate::security::SecurityPolicy;

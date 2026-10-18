@@ -176,7 +176,10 @@ impl OpenHumanHostBundleFactory {
             security = security.with_tool_policy(policy);
         }
         let security = Arc::new(security);
-        let models = Arc::new(OpenHumanModelResolver::new(Arc::clone(&inputs.config)).with_dispatch(turn.dispatch_ctx()));
+        let models = Arc::new(
+            OpenHumanModelResolver::new(Arc::clone(&inputs.config))
+                .with_dispatch(turn.dispatch_ctx()),
+        );
         let budget = Arc::new(
             OpenHumanBudgetGate::new(Arc::clone(&inputs.config)).with_dispatch(turn.dispatch_ctx()),
         );

@@ -148,8 +148,7 @@ impl ProfileCapabilities {
             .as_ref()
             .map(|host| host(turn))
             .unwrap_or_default();
-        // Transitional (#7801): the host-tools factory carries no context yet.
-        let dispatch = DispatchCtx::ambient();
+        let dispatch = turn.dispatch_ctx();
         supplied
             .tools
             .retain(|tool| self.admits(&dispatch, tool.name()));
@@ -265,12 +264,20 @@ impl ToolHook for ProfilePermission {
         Ok(())
     }
     async fn before_tool_decision(&self, context: &ToolHookContext) -> ToolHookDecision {
-        // The hook runs inside the turn's own task, so its tenant is the ambient one.
-        let dispatch = DispatchCtx::ambient();
+        // A caller that raised the call without a turn context: the calling
+        // task's own, as every call before the context was passed explicitly.
+        self.before_tool_decision_in(&DispatchCtx::from_weak(None), context)
+            .await
+    }
+    async fn before_tool_decision_in(
+        &self,
+        dispatch: &DispatchCtx,
+        context: &ToolHookContext,
+    ) -> ToolHookDecision {
         let tenant = dispatch.tenant().ok().and_then(|tenant| tenant.profile);
         if tenant.as_deref() != Some(self.profile.as_str())
             || self.fence.check_local(super::lease::now_ms()).is_err()
-            || !self.capabilities.admits(&dispatch, &context.tool_name)
+            || !self.capabilities.admits(dispatch, &context.tool_name)
         {
             return ToolHookDecision::Deny(
                 "tool is outside the hosted profile capability boundary".into(),
@@ -278,7 +285,7 @@ impl ToolHook for ProfilePermission {
         }
         match &self.capabilities.permission {
             Some(permission) => {
-                let binding = super::provider_settings::ProfileProviderSettings::in_ctx(&dispatch);
+                let binding = super::provider_settings::ProfileProviderSettings::in_ctx(dispatch);
                 let canonical = binding
                     .as_ref()
                     .and_then(|binding| binding.canonical_role_name(&context.tool_name));

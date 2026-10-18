@@ -268,19 +268,15 @@ pub async fn sweep_orphaned_running_runs_on_boot(config: &Config) -> usize {
             tracing::info!(target: "flows", "[flows] boot sweep: skipped, the storage backend is shared");
             0
         }
-        rm::BootSweepPlan::EveryScope => {
-            crate::storage::agents::for_each_scope(
-                &crate::core::runtime::DispatchCtx::host_default(),
-                "flows boot sweep",
-                |_| {
-                    sweep_orphaned_running_runs_in_scope(config)
-                },
-            )
-            .await
-            .into_iter()
-            .map(|(_, swept)| swept)
-            .sum()
-        }
+        rm::BootSweepPlan::EveryScope => crate::storage::agents::for_each_scope(
+            &crate::core::runtime::DispatchCtx::host_default(),
+            "flows boot sweep",
+            |_| sweep_orphaned_running_runs_in_scope(config),
+        )
+        .await
+        .into_iter()
+        .map(|(_, swept)| swept)
+        .sum(),
     }
 }
 

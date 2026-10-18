@@ -92,20 +92,17 @@ fn flow_surfaces_correlate_decisions_and_closed_instances_never_publish() {
             let park = tokio::spawn(CoreContext::scope(
                 context,
                 turn_origin::with_origin(origin("flow-live"), async move {
-                    async move {
-                        let turn = ApprovalTurnContext::default()
-                            .with_flow_run(run_context("flow-live", "run-direct"));
-                        parking_gate
-                            .intercept_audited_for_call(
-                                &turn,
-                                "shell",
-                                "flow action",
-                                serde_json::json!({"command": "redacted"}),
-                                Some("flow-call"),
-                            )
-                            .await
-                    }
-                    .await
+                    let turn = ApprovalTurnContext::default()
+                        .with_flow_run(run_context("flow-live", "run-direct"));
+                    parking_gate
+                        .intercept_audited_for_call(
+                            &turn,
+                            "shell",
+                            "flow action",
+                            serde_json::json!({"command": "redacted"}),
+                            Some("flow-call"),
+                        )
+                        .await
                 }),
             ));
             let request_id = tokio::time::timeout(Duration::from_secs(5), async {

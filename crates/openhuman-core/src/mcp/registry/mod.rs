@@ -92,7 +92,9 @@ pub mod connections {
     ///
     /// Sorted by qualified name, so a prompt built from this does not reshuffle
     /// between turns and cost its cached prefix.
-    pub async fn connected_overview(ctx: &crate::core::runtime::DispatchCtx) -> Vec<ConnectedServerOverview> {
+    pub async fn connected_overview(
+        ctx: &crate::core::runtime::DispatchCtx,
+    ) -> Vec<ConnectedServerOverview> {
         let Some(config) = host::ambient_config(ctx) else {
             return Vec::new();
         };

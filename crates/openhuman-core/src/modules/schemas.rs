@@ -15,7 +15,6 @@ use std::sync::Arc;
 use tinycomputer_bus::browser::SessionOptions;
 
 use super::ops;
-use crate::config::rpc as config_rpc;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};
 

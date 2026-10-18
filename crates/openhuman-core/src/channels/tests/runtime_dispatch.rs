@@ -363,7 +363,7 @@ fn watch_for_channel_processed(message_id: &str) -> tokio::task::JoinHandle<Doma
         .expect("event bus should be initialized")
         .receiver();
     let message_id = message_id.to_string();
-    tokio::spawn(async move {
+    crate::core::runtime::DispatchCtx::ambient().spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             let event = tokio::time::timeout_at(deadline, events.recv())

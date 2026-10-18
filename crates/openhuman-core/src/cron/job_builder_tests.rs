@@ -88,7 +88,12 @@ fn origin_delivery_or_current_target_without_an_origin_is_an_error() {
     let tmp = TempDir::new().unwrap();
     let cfg = config(&tmp);
     let mut i = input();
-    i.delivery = Some(validation::default_delivery(Some(&web())));
+    i.delivery = Some(
+        crate::cron::client::blocking(&Config::default(), |config| async move {
+            crate::cron::client::default_delivery(&config, Some(&web())).await
+        })
+        .unwrap(),
+    );
     assert!(create_agent_job(&cfg, i, None)
         .unwrap_err()
         .contains("origin"));

@@ -455,6 +455,10 @@ mod source;
 mod tests;
 
 #[cfg(test)]
+#[path = "provider_context_tests.rs"]
+mod context_tests;
+
+#[cfg(test)]
 #[path = "provider_history_tests.rs"]
 mod history_tests;
 

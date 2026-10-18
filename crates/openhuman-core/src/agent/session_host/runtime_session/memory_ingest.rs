@@ -167,6 +167,10 @@ impl OpenHumanTurnPrelude {
             identity,
             thread_id,
             pack,
+            in_prompt_from: Arc::new(crate::memory::lifecycle::window::InPromptFrom::new(
+                in_prompt_from,
+                user_index,
+            )),
             core: self.host_env.core.clone(),
         }))
     }
@@ -234,7 +238,8 @@ impl OpenHumanTurnPrelude {
             )
             .await;
         };
-        crate::core::runtime::DispatchCtx::ambient().spawn(deferred_memory_work(profile_context, work));
+        self.dispatch_ctx()
+            .spawn(deferred_memory_work(profile_context, work));
     }
 }
 

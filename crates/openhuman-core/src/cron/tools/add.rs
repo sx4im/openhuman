@@ -8,8 +8,9 @@ use serde_json::json;
 use std::sync::Arc;
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolExposure, ToolResult};
 use {
-    crate::cron, tinyflows_schedule::types::DeliveryConfig, tinyflows_schedule::types::JobType,
-    tinyflows_schedule::types::Schedule, tinyflows_schedule::types::SessionTarget,
+    crate::cron, tinyflows_bus::schedule::types::DeliveryConfig,
+    tinyflows_bus::schedule::types::JobType, tinyflows_bus::schedule::types::Schedule,
+    tinyflows_bus::schedule::types::SessionTarget,
 };
 
 pub struct CronAddTool {

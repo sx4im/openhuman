@@ -78,18 +78,55 @@ pub(super) fn python_utf8_env(
 /// The host environment a Docker container receives: the sandbox allowlist from
 /// the parent plus the Python encoding defaults. `None` when a value is not UTF-8.
 #[cfg(feature = "modules")]
-pub(super) fn container_environment() -> Option<std::collections::BTreeMap<String, String>> {
+pub(super) fn container_environment(
+    explicit: Option<&std::collections::BTreeMap<String, String>>,
+) -> Option<std::collections::BTreeMap<String, String>> {
     let mut env = std::collections::BTreeMap::new();
-    let inherited = crate::sandbox::ops::SANDBOX_ENV_PASSTHROUGH
-        .iter()
-        .filter_map(|name| {
-            tinytools_std::timeout::CommandEnvironment::var_os(name).map(|value| (*name, value))
-        })
-        .chain(python_utf8_env(
-            tinytools_std::timeout::CommandEnvironment::var_os,
-        ));
+    if let Some(explicit) = explicit {
+        env.extend(
+            explicit
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+    }
+    let inherited = if explicit.is_none() {
+        crate::sandbox::ops::SANDBOX_ENV_PASSTHROUGH
+            .iter()
+            .filter_map(|name| {
+                tinytools_std::timeout::CommandEnvironment::var_os(name).map(|value| (*name, value))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    }
+    .into_iter()
+    .chain(python_utf8_env(|name| {
+        explicit
+            .and_then(|overrides| overrides.get(name).map(std::ffi::OsString::from))
+            .or_else(|| {
+                explicit
+                    .is_none()
+                    .then(|| tinytools_std::timeout::CommandEnvironment::var_os(name))
+                    .flatten()
+            })
+    }));
     for (name, value) in inherited {
         env.insert(name.to_owned(), value.into_string().ok()?);
     }
     Some(env)
+}
+
+/// Add the explicit turn environment to a sandbox command request.
+pub(super) fn extend_explicit_environment(
+    environment: &mut std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
+    explicit: Option<&std::collections::BTreeMap<String, String>>,
+) {
+    if let Some(explicit) = explicit {
+        environment.extend(explicit.iter().map(|(name, value)| {
+            (
+                std::ffi::OsString::from(name),
+                std::ffi::OsString::from(value),
+            )
+        }));
+    }
 }

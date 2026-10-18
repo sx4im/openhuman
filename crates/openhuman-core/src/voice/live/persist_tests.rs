@@ -1,7 +1,13 @@
 use super::*;
 
 fn persister(dir: &std::path::Path) -> TranscriptPersister {
-    TranscriptPersister::new(DispatchCtx::ambient(), dir.to_path_buf(), "t1".into(), "s1".into(), "sarvam".into())
+    TranscriptPersister::new(
+        DispatchCtx::ambient(),
+        dir.to_path_buf(),
+        "t1".into(),
+        "s1".into(),
+        "sarvam".into(),
+    )
 }
 
 #[test]

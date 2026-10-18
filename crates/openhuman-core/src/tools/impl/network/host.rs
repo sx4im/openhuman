@@ -315,10 +315,15 @@ mod x402 {
                     thread_id: context.thread_id.clone(),
                     client_id: context.client_id.clone(),
                 });
-            let (service, payment) =
-                x402_service::prepare_payment(&self.ctx, &config, url.to_owned(), challenge.to_owned(), owner)
-                    .await
-                    .map_err(|error| format!("x402 payment failed: {error}"))?;
+            let (service, payment) = x402_service::prepare_payment(
+                &self.ctx,
+                &config,
+                url.to_owned(),
+                challenge.to_owned(),
+                owner,
+            )
+            .await
+            .map_err(|error| format!("x402 payment failed: {error}"))?;
 
             log::debug!(
                 "[tool.http_request] retrying with x402 payment header amount={} asset={}",

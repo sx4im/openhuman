@@ -29,16 +29,17 @@ async fn relayed_thread_and_external_authority_survive_scoped_spawn() {
             async {
                 crate::agent::turn_origin::with_origin(origin, async {
                     let (child_thread, child_agent, child_origin) =
-                        crate::core::runtime::DispatchCtx::ambient().spawn(async {
-                            (
-                                CoreContext::current_channel_thread(),
-                                CoreContext::scoped()
-                                    .and_then(|ctx| ctx.session_agent().map(str::to_owned)),
-                                crate::agent::turn_origin::current(),
-                            )
-                        })
-                        .await
-                        .unwrap();
+                        crate::core::runtime::DispatchCtx::ambient()
+                            .spawn(async {
+                                (
+                                    CoreContext::current_channel_thread(),
+                                    CoreContext::scoped()
+                                        .and_then(|ctx| ctx.session_agent().map(str::to_owned)),
+                                    crate::agent::turn_origin::current(),
+                                )
+                            })
+                            .await
+                            .unwrap();
                     assert_eq!(child_thread.as_deref(), Some(thread.as_str()));
                     assert_eq!(child_agent.as_deref(), Some("relay-agent"));
                     assert!(matches!(

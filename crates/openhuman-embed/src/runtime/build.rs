@@ -348,6 +348,9 @@ impl RuntimeBuilder {
             storage_info,
             storage_backend,
         );
+        for (kind, handler) in self.cron_job_handlers {
+            runtime.register_job_handler(kind, handler);
+        }
         if starts_services_on_build(services, self.defer_services) {
             log::debug!("[embed][runtime] starting background services {services:?}");
             runtime.start_services().await;

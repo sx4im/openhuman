@@ -74,9 +74,17 @@ fi
     path.join(bin, "curl"),
     `#!/usr/bin/env bash
 ${record("curl")}
-if [[ "$1" == *"/__admin/health" ]]; then
+url="$2"
+if [[ "$url" == *"/__admin/health" ]]; then
   for _ in {1..100}; do
     grep -q 'mock-api-server.mjs' "${log}" && exit 0
+    sleep 0.01
+  done
+  exit 1
+fi
+if [[ "$url" == *"/health" ]]; then
+  for _ in {1..100}; do
+    [[ -f "$OPENHUMAN_WORKSPACE/core.started" ]] && exit 0
     sleep 0.01
   done
   exit 1
@@ -116,11 +124,13 @@ fi
  * neighbouring one and keeps running, so the session reads the address it
  * logs rather than trusting an HTTP probe.
  */
-function stubCore(tree, boundPort) {
+function stubCore(tree, boundPort, startupDelayMs = 0) {
   const bin = path.join(tree.root, "target", "debug", "openhuman-core");
   writeExecutable(
     bin,
     `#!/usr/bin/env bash
+sleep ${startupDelayMs / 1000}
+touch "$OPENHUMAN_WORKSPACE/core.started"
 ${boundPort == null ? "" : `echo "[core] OpenHuman core is ready \u2014 listening on http://127.0.0.1:${boundPort} (version test)"`}
 sleep 30
 `,
@@ -515,7 +525,7 @@ test("a core that fell back to another port fails the session", async () => {
   try {
     const base = await freeBase();
     markBundle(tree, { mockPort: base, corePort: base + 1 });
-    stubCore(tree, base + 7);
+    stubCore(tree, base + 7, 3_000);
 
     const res = run(tree, "e2e-web-session.sh", { E2E_PORT_BASE: String(base) });
 

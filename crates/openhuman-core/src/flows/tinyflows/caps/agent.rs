@@ -68,6 +68,8 @@ use crate::inference::provider::{is_raw_passthrough_model, role_for_model_tier};
 /// caller's task), so HITL gating still applies to every fanned-out turn.
 pub struct OpenHumanAgentRunner {
     pub config: Arc<Config>,
+    /// The context the run acts under, handed over by whoever started it.
+    pub ctx: crate::core::runtime::DispatchCtx,
     /// The run's approval context (flow run correlation), handed to the gate
     /// with every acting dispatch.
     pub approval: crate::security::approval::ApprovalTurnContext,
@@ -175,8 +177,8 @@ impl AgentRunner for OpenHumanAgentRunner {
         request: Value,
         conn: Option<&str>,
     ) -> Result<Value> {
-        // Entry point of a flow agent node: bind the calling task's context once.
-        let dispatch = crate::core::runtime::DispatchCtx::ambient();
+        // Entry point of a flow agent node: the run's own context.
+        let dispatch = self.ctx.clone();
         // The harness definition registry must be initialised before we can
         // build a named agent. Idempotent: a booted core already did this at
         // startup; a bare flow run (tests, standalone) has not. A failure here
@@ -266,7 +268,7 @@ impl AgentRunner for OpenHumanAgentRunner {
                             entry_model.as_deref(),
                             None,
                         )
-                            .await
+                        .await
                     }
                     AgentRoute::RegistryFallback => {
                         tracing::info!(
@@ -385,11 +387,9 @@ impl OpenHumanAgentRunner {
 
         let built = match &host {
             Some(host) => host.session_host(effective.as_ref(), None),
-            None => OpenHumanSessionHost::from_config_for_agent(
-                dispatch,
-                effective.as_ref(),
-                agent_ref,
-            ),
+            None => {
+                OpenHumanSessionHost::from_config_for_agent(dispatch, effective.as_ref(), agent_ref)
+            }
         };
         let mut agent = built.map_err(|e| {
             EngineError::Capability(format!(
@@ -451,9 +451,7 @@ impl OpenHumanAgentRunner {
         // Cancellation: the run_registry token aborts the engine future, and the
         // inner turn drops with it (task-local scope unwinds cleanly).
         use crate::agent::turn_origin;
-        let escalated_origin = escalated_origin_for_nested_harness(
-            crate::core::runtime::DispatchCtx::ambient_turn().turn_origin(),
-        );
+        let escalated_origin = escalated_origin_for_nested_harness(self.ctx.turn_origin());
         if let Some(ref escalated) = escalated_origin {
             tracing::debug!(
                 target: "flows",
@@ -526,18 +524,15 @@ impl OpenHumanAgentRunner {
         conn: Option<&str>,
     ) -> Result<Value> {
         // Resolve + validate the requested agent kind against the registry.
-        let entry = crate::agent::registry::get_agent(
-            dispatch,
-            agent_ref,
-        )
-        .await
-        .map_err(EngineError::Capability)?
-        .ok_or_else(|| {
-            EngineError::Capability(format!(
+        let entry = crate::agent::registry::get_agent(dispatch, agent_ref)
+            .await
+            .map_err(EngineError::Capability)?
+            .ok_or_else(|| {
+                EngineError::Capability(format!(
                 "agent node: unknown agent_ref '{agent_ref}' (neither a harness definition nor \
                      a custom agent registry entry)"
             ))
-        })?;
+            })?;
         if !entry.enabled {
             return Err(EngineError::Capability(format!(
                 "agent node: agent_ref '{agent_ref}' is disabled"
@@ -570,6 +565,7 @@ impl OpenHumanAgentRunner {
         }
 
         OpenHumanLlm {
+            ctx: self.ctx.clone(),
             config: self.config.clone(),
         }
         .complete(request, conn)

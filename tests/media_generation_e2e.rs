@@ -217,7 +217,12 @@ async fn media_tools_deliver_images_and_videos_through_the_backend_proxy() {
     assert_eq!(image_artifacts.len(), 1, "one filed image: {result:?}");
     let image_id = image_artifacts[0]["artifact_id"]
         .as_str()
-        .expect("image filed as artifact")
+        .unwrap_or_else(|| {
+            panic!(
+                "image was not filed as an artifact: {:?}",
+                image_artifacts[0]
+            )
+        })
         .to_owned();
 
     // ── video: must poll through `completed` with no outputs ─────────────
@@ -242,7 +247,12 @@ async fn media_tools_deliver_images_and_videos_through_the_backend_proxy() {
     assert_eq!(video_artifacts.len(), 1, "one filed video: {result:?}");
     let video_id = video_artifacts[0]["artifact_id"]
         .as_str()
-        .expect("video filed as artifact")
+        .unwrap_or_else(|| {
+            panic!(
+                "video was not filed as an artifact: {:?}",
+                video_artifacts[0]
+            )
+        })
         .to_owned();
     assert!(
         backend.polls.load(Ordering::SeqCst) >= 4,
@@ -250,12 +260,9 @@ async fn media_tools_deliver_images_and_videos_through_the_backend_proxy() {
     );
 
     // ── artifacts are persisted and their visible files resolve ──────────
-    assert_eq!(
-        std::fs::read_dir(action_dir.join("generated-media"))
-            .expect("generated-media staging directory")
-            .count(),
-        0,
-        "filed media must leave the staging directory"
+    assert!(
+        !action_dir.join("generated-media").exists(),
+        "blob-backed generation must not leave a filesystem staging directory"
     );
     for (id, kind) in [(&image_id, "image"), (&video_id, "video")] {
         let record = openhuman_core::agent::artifacts::ops::ai_get_artifact(&config, id)

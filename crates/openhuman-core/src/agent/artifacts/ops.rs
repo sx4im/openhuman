@@ -276,3 +276,74 @@ async fn regenerate_presentation(
 #[cfg(test)]
 #[path = "ops_tests.rs"]
 mod tests;
+
+/// Save the user's edit of a versioned artifact as a new operator version
+/// (the preview panel's autosave). See
+/// [`super::tiny_store::save_operator_version`].
+pub async fn ai_save_artifact_version(
+    config: &Config,
+    artifact_id: &str,
+    body: &str,
+) -> Result<Outcome<Value>, String> {
+    let saved = super::tiny_store::save_operator_version(
+        &config.workspace_dir,
+        super::files::FileRoots::from_config(config),
+        artifact_id,
+        body,
+    )
+    .await?;
+    log::debug!(
+        "[artifacts] ai_save_artifact_version id={artifact_id} version={} saved={}",
+        saved.version,
+        saved.saved
+    );
+    Ok(Outcome::new(
+        json!({ "artifact_id": artifact_id, "version": saved.version, "saved": saved.saved }),
+        vec![],
+    ))
+}
+
+/// Share a version of an artifact through cloud file storage (the preview
+/// panel's Share button): uploads it and returns its link, which is also
+/// recorded on the version. A version that already has a live link of the same
+/// kind returns it without uploading again.
+pub async fn ai_share_artifact(
+    config: &Config,
+    artifact_id: &str,
+    version: Option<u32>,
+    public: bool,
+) -> Result<Outcome<Value>, String> {
+    let publisher = crate::integrations::file_storage::artifact_publisher(config)
+        .ok_or_else(|| "sign in to share artifacts".to_string())?;
+    let artifacts = super::tiny_store::artifacts_service(
+        &config.workspace_dir,
+        super::files::FileRoots::from_config(config),
+        None,
+        None,
+    )
+    .with_publisher(publisher);
+    let options = tiny_artifacts::PublishOptions {
+        public,
+        ..tiny_artifacts::PublishOptions::default()
+    };
+    let shared = artifacts
+        .publish(artifact_id, version, &options)
+        .await
+        .map_err(|e| e.to_string())?;
+    log::debug!(
+        "[artifacts] ai_share_artifact id={artifact_id} version={} public={public} reused={}",
+        shared.version,
+        shared.reused
+    );
+    Ok(Outcome::new(
+        json!({
+            "artifact_id": artifact_id,
+            "version": shared.version,
+            "url": shared.link.url,
+            "public": shared.link.public,
+            "expires_at_millis": shared.link.expires_at_millis,
+            "reused": shared.reused,
+        }),
+        vec![],
+    ))
+}

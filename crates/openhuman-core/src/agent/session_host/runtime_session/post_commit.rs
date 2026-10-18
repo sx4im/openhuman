@@ -61,6 +61,7 @@ pub(super) fn turn_iterations(sidecar_model_calls: usize, history: &[Message]) -
 /// return its handle. The caller can fence later work on the handle. Returns
 /// whether the completion was delivered.
 pub(super) async fn complete_then_defer<P, T>(
+    dispatch: &crate::core::runtime::DispatchCtx,
     publish: P,
     tail: T,
 ) -> (bool, tokio::task::JoinHandle<()>)
@@ -75,7 +76,7 @@ where
         elapsed_ms = elapsed_ms(started),
         "[session-runtime] post-commit: turn completion published"
     );
-    let handle = crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+    let handle = dispatch.spawn(async move {
         let started = Instant::now();
         tail.await;
         tracing::debug!(
@@ -213,6 +214,7 @@ pub(super) async fn finalize_committed_turn(
         }
     };
     let (_, pending) = complete_then_defer(
+        &receipt.options.context.dispatch_ctx(),
         super::progress::send_receipt_progress(&receipt, &input, &output, iterations),
         goal_accounting,
     )

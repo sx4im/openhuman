@@ -29,6 +29,8 @@ use tinyinference_llm::{
 };
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
+use checkpoint::absolute_checkpoint_dir;
+
 use super::{
     SubagentRunError, SubagentRunOptions, SubagentRunOutcome, SubagentRunStatus, SubagentUsage,
 };
@@ -210,18 +212,6 @@ pub(super) fn host_in_flight(ctx: &crate::core::runtime::DispatchCtx) -> Arc<Hos
     crate::core::runtime::slot_for(ctx)
 }
 
-fn absolute_checkpoint_dir(path: PathBuf) -> PathBuf {
-    std::fs::canonicalize(&path).unwrap_or_else(|_| {
-        if path.is_absolute() {
-            path
-        } else {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(&path))
-                .unwrap_or(path)
-        }
-    })
-}
-
 impl OpenHumanSubagentHost {
     pub fn new(
         definition: crate::agent::harness::host_definition::AgentDefinition,
@@ -294,8 +284,9 @@ impl OpenHumanSubagentHost {
             checkpoint_dir: checkpoint_dir.clone(),
             task_key: task_key.clone(),
         };
+        let dispatch_ctx = parent.data.dispatch_ctx();
         let (entry, is_leader) = {
-            let mut entries = host_in_flight(&parent.data.dispatch_ctx()).lock_owned().await;
+            let mut entries = host_in_flight(&dispatch_ctx).lock_owned().await;
             match entries.get(&lifecycle_key) {
                 Some(entry) => (entry.clone(), false),
                 None => {
@@ -333,7 +324,7 @@ impl OpenHumanSubagentHost {
         ))
         .await;
         entry.complete(result.as_ref().ok().cloned()).await;
-        let mut entries = host_in_flight(&parent.data.dispatch_ctx()).lock_owned().await;
+        let mut entries = host_in_flight(&dispatch_ctx).lock_owned().await;
         if entries
             .get(&lifecycle_key)
             .is_some_and(|current| Arc::ptr_eq(current, &entry))
@@ -1239,3 +1230,6 @@ fn cost_source_of(charged: Option<&ChargedAmount>) -> tinyagents_harness::cost::
         None => tinyagents_harness::cost::CostSource::Unknown,
     }
 }
+
+#[path = "lifecycle_checkpoint.rs"]
+mod checkpoint;

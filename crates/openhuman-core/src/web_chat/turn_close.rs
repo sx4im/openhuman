@@ -284,15 +284,18 @@ async fn model_reply(
 /// read, and a stalled store must not pin the runtime thread. The scoped spawn
 /// carries the caller's tenant, which selects the store.
 async fn read_snapshot(
+    ctx: &crate::core::runtime::DispatchCtx,
     workspace: std::path::PathBuf,
     thread_id: &str,
     request_id: &str,
 ) -> Option<TurnState> {
     let (thread_id, request_id) = (thread_id.to_string(), request_id.to_string());
-    let read = crate::core::runtime::DispatchCtx::ambient().spawn_blocking(move || {
-        crate::agent::session_store::turn_states_for(&workspace).get_turn(&thread_id, &request_id)
-    })
-    .await;
+    let read = ctx
+        .spawn_blocking(move || {
+            crate::agent::session_store::turn_states_for(&workspace)
+                .get_turn(&thread_id, &request_id)
+        })
+        .await;
     match read {
         Ok(Ok(snapshot)) => snapshot,
         Ok(Err(error)) => {
@@ -324,6 +327,7 @@ pub(crate) async fn close_reply(turn: StoppedTurn<'_>) -> Option<WebChatTaskResu
         return None;
     };
     let snapshot = read_snapshot(
+        &turn.ctx,
         config.workspace_dir.clone(),
         turn.thread_id,
         turn.request_id,

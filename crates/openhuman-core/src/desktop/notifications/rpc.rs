@@ -17,7 +17,6 @@ use crate::agent::triage::{
     apply_decision, local_trigger_origin, run_triage, TriageOutcome, TriggerEnvelope, TriggerSource,
 };
 use crate::agent::turn_origin::with_origin;
-use crate::config::rpc as config_rpc;
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
 use crate::core::Outcome;

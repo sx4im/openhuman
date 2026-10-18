@@ -207,12 +207,17 @@ async fn answer(session: &Session, member: &str, payload: Value) -> Result<Value
 }
 
 async fn complete(session: &Session, request: CompleteRequest) -> HostResult<String> {
-    inference::complete(&session.dispatch_ctx(), &session.config, &request.system, &request.user)
-        .await
-        .map_err(|error| {
-            log::warn!("[tinymemes] complete callback failed: {error}");
-            HostFailure::Backend
-        })
+    inference::complete(
+        &session.dispatch_ctx(),
+        &session.config,
+        &request.system,
+        &request.user,
+    )
+    .await
+    .map_err(|error| {
+        log::warn!("[tinymemes] complete callback failed: {error}");
+        HostFailure::Backend
+    })
 }
 
 async fn evaluate(session: &Session, envelope: EvaluateEnvelope) -> HostResult<EvaluateEnvelope> {
@@ -241,7 +246,9 @@ async fn search(
     session: &Session,
     request: SearchRequest,
 ) -> HostResult<Vec<tinymemes_bus::SearchResult>> {
-    let Some(backend) = search::OpenHumanSearch::available(&session.dispatch_ctx(), &session.config) else {
+    let Some(backend) =
+        search::OpenHumanSearch::available(&session.dispatch_ctx(), &session.config)
+    else {
         return Err(HostFailure::Unsupported);
     };
     backend
@@ -257,7 +264,11 @@ async fn search(
 async fn load_index(session: &Session, request: LoadIndexRequest) -> HostResult<Option<String>> {
     let config = session.config.clone();
     let kind: IndexKind = request.kind;
-    match tokio::task::spawn_blocking(move || docs::load(&config, kind)).await {
+    match session
+        .dispatch_ctx()
+        .spawn_blocking(move || docs::load(&config, kind))
+        .await
+    {
         Ok(Ok(document)) => Ok(document),
         Ok(Err(error)) => {
             log::warn!("[tinymemes] cannot read index: {error}");
@@ -272,10 +283,10 @@ async fn load_index(session: &Session, request: LoadIndexRequest) -> HostResult<
 
 async fn save_index(session: &Session, request: SaveIndexRequest) -> HostResult<()> {
     let config = session.config.clone();
-    match tokio::task::spawn_blocking(move || {
-        docs::save(&config, request.kind, request.json)
-    })
-    .await
+    match session
+        .dispatch_ctx()
+        .spawn_blocking(move || docs::save(&config, request.kind, request.json))
+        .await
     {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => {

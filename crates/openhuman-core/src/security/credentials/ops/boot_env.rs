@@ -65,7 +65,7 @@ pub async fn seed_session_from_env(ctx: &DispatchCtx, config: &Config) {
         user: None,
         issuing_backend: None,
     };
-    match set_credential(&ctx, config, request).await {
+    match set_credential(ctx, config, request).await {
         Ok(outcome) => log::info!(
             "[auth][boot] session installed from {BACKEND_SESSION_TOKEN_ENV} (user_id={})",
             outcome.value.user_id.as_deref().unwrap_or("?")

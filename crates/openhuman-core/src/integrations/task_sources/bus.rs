@@ -10,7 +10,6 @@ use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 
-use crate::config::rpc as config_rpc;
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
 use tinybus::EventHandler;
@@ -127,8 +126,9 @@ async fn fire_for_connection(
         let ctx = ctx.clone();
         // Scoped: the fetch keeps the scope's agent context.
         ctx.clone().spawn(async move {
-            let _ = pipeline::run_source_once(&ctx, &config, &source, FetchReason::ConnectionCreated)
-                .await;
+            let _ =
+                pipeline::run_source_once(&ctx, &config, &source, FetchReason::ConnectionCreated)
+                    .await;
         });
     }
 }

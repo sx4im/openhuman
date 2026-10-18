@@ -452,6 +452,22 @@ fn task_recency_window_reaches_tools_as_a_host_extension_not_a_task_local() {
 }
 
 #[test]
+fn explicit_command_environment_reaches_tools_as_a_host_extension() {
+    let mut host = OpenHumanRunContext::new();
+    host.command_environment = Some(Arc::new(std::collections::BTreeMap::from([(
+        "TURN_OWNER".to_owned(),
+        "isolated".to_owned(),
+    )])));
+    let run = host.into_tinyagents(tinyagents_harness::context::RunConfig::new("run-env"));
+    assert_eq!(
+        run.host::<OpenHumanRunExt>()
+            .and_then(|ext| ext.command_environment.clone())
+            .and_then(|environment| environment.get("TURN_OWNER").cloned()),
+        Some("isolated".to_owned())
+    );
+}
+
+#[test]
 fn a_response_shape_belongs_to_the_root_turn_and_is_not_inherited() {
     use tinyagents_harness::middleware::{ResponseShape, ResponseShapeScope};
     let mut root = OpenHumanRunContext::new();
@@ -684,4 +700,45 @@ fn a_run_kept_past_its_turn_does_not_pin_the_tenant() {
     // Only the handle in this test holds the context: sessions and runs that
     // outlive a turn reference it weakly.
     assert!(!core.tenant_in_use());
+}
+
+#[test]
+fn the_turns_still_in_the_prompt_reach_the_runs_tools() {
+    let config = crate::config::Config::default();
+    let mut host = OpenHumanRunContext::new();
+    host.memory_turn = Some(std::sync::Arc::new(
+        crate::memory::lifecycle::hooks::MemoryTurn {
+            identity: crate::memory::scope::MemoryIdentity::agent("a").resolve(&config),
+            config: std::sync::Arc::new(config),
+            thread_id: "thread-long".into(),
+            pack: None,
+            in_prompt_from: std::sync::Arc::new(
+                crate::memory::lifecycle::window::InPromptFrom::new(12, 20),
+            ),
+            core: None,
+        },
+    ));
+    let run = host.into_tinyagents(tinyagents_harness::context::RunConfig::new("memory-window"));
+    let call = tinyagents_harness::tool::ToolExecutionContext::from_run_context(
+        &run,
+        tinyagents_harness::ids::CallId::new("memory-window-call"),
+    );
+    assert_eq!(
+        memory_in_prompt_for_tool(Some(&call)),
+        Some(tinymemory_api::ThreadWindow {
+            thread_id: "thread-long".into(),
+            from_turn: 12,
+        })
+    );
+
+    // A run without the turn's memory (a sub-agent's, a direct dispatch)
+    // knows no window.
+    let bare = OpenHumanRunContext::new()
+        .into_tinyagents(tinyagents_harness::context::RunConfig::new("no-memory"));
+    let call = tinyagents_harness::tool::ToolExecutionContext::from_run_context(
+        &bare,
+        tinyagents_harness::ids::CallId::new("no-memory-call"),
+    );
+    assert_eq!(memory_in_prompt_for_tool(Some(&call)), None);
+    assert_eq!(memory_in_prompt_for_tool(None), None);
 }

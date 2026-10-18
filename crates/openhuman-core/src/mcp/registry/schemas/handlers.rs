@@ -4,7 +4,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 
 use super::params::{

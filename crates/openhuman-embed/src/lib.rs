@@ -177,8 +177,8 @@ pub use channels::{ChannelError, ChannelListener, Channels, StreamMode, Telegram
 pub use config::{Config, RuntimeFlags};
 pub use core_agent::CoreAgent;
 pub use cron::{
-    Cron, CronError, JobRun, JobRunRecord, JobSchedule, JobSpec, JobTarget, ScheduledJob,
-    SystemJobContext,
+    Cron, CronError, JobKind, JobKindHandler, JobOutcome, JobRun, JobRunContext, JobRunRecord,
+    JobSchedule, JobSpec, JobTarget, ScheduledJob, SystemJobContext,
 };
 pub use error::CoreError;
 pub use harness::{

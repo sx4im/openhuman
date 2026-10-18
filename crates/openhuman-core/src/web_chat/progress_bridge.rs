@@ -10,8 +10,8 @@ use crate::web_chat::{SubagentProgressDetail, WebChannelEvent};
 use tinyagents_session::{port::TurnStates, turn_state::TurnStateMirror};
 
 use super::event_bus::publish_web_channel_event_in;
-use crate::core::runtime::DispatchCtx;
 use super::types::ChatRequestMetadata;
+use crate::core::runtime::DispatchCtx;
 
 #[path = "progress_bridge_subagent_events.rs"]
 mod subagent_events;
@@ -281,7 +281,8 @@ pub(crate) fn spawn_progress_bridge(
     request_id: String,
     turn_state_store: std::sync::Arc<dyn TurnStates>,
     metadata: ChatRequestMetadata,
-    config: crate::config::Config, dispatch_ctx: crate::core::runtime::DispatchCtx,
+    config: crate::config::Config,
+    dispatch_ctx: crate::core::runtime::DispatchCtx,
 ) -> ProgressBridgeHandle {
     use crate::agent::progress::AgentProgress;
     use std::collections::HashMap;
@@ -350,6 +351,8 @@ pub(crate) fn spawn_progress_bridge(
         // real beat lands one full interval after the turn begins.
         heartbeat.tick().await;
         let mut turn_active = false;
+        let bridge_ctx =
+            BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
 
         loop {
             let event = tokio::select! {
@@ -684,9 +687,8 @@ pub(crate) fn spawn_progress_bridge(
                     parent_call_id,
                     ..
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_spawned(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         &mut subagent_parent_call_ids,
                         round,
@@ -713,9 +715,8 @@ pub(crate) fn spawn_progress_bridge(
                     dirty_status,
                     ..
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_completed(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         &mut subagent_parent_call_ids,
                         &child_tool_counts,
@@ -737,9 +738,8 @@ pub(crate) fn spawn_progress_bridge(
                     task_id,
                     error,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_failed(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         &mut subagent_parent_call_ids,
                         &child_tool_counts,
@@ -756,9 +756,8 @@ pub(crate) fn spawn_progress_bridge(
                     worker_thread_id,
                     checkpoint_path,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_awaiting_user(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         &subagent_parent_call_ids,
                         round,
@@ -776,9 +775,8 @@ pub(crate) fn spawn_progress_bridge(
                     max_iterations,
                     extended_policy,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_iteration_started(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         round,
                         agent_id,
@@ -798,9 +796,8 @@ pub(crate) fn spawn_progress_bridge(
                     display_label,
                     display_detail,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_tool_call_started(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         &mut child_tool_counts,
                         round,
@@ -830,9 +827,8 @@ pub(crate) fn spawn_progress_bridge(
                     display_detail,
                     structured,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_tool_call_completed(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         round,
                         agent_id,
@@ -857,9 +853,8 @@ pub(crate) fn spawn_progress_bridge(
                     delta,
                     iteration,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_text_delta(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         round,
                         agent_id,
@@ -874,9 +869,8 @@ pub(crate) fn spawn_progress_bridge(
                     delta,
                     iteration,
                 } => {
-                    let ctx = BridgeCtx::new(&client_id, &thread_id, &request_id, &config, &dispatch_ctx);
                     subagent_events::on_subagent_thinking_delta(
-                        &ctx,
+                        &bridge_ctx,
                         &mut emit_seq,
                         round,
                         agent_id,
@@ -1131,7 +1125,11 @@ pub(crate) fn spawn_progress_bridge(
             let live_spans = collector.spans().to_vec();
             let journal_export = if let Some(trace_ctx) = journal_trace_ctx.take() {
                 super::journal_shadow::shadow_compare_journal_projection(
-                    &dispatch_ctx, &request_id, trace_ctx.clone(), parent_max_iterations, &live_spans,
+                    &dispatch_ctx,
+                    &request_id,
+                    trace_ctx.clone(),
+                    parent_max_iterations,
+                    &live_spans,
                 )
                 .await
                 .map(|observations| (trace_ctx, observations))

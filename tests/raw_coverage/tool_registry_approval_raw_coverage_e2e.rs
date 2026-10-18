@@ -397,7 +397,7 @@ enabled = true
 
 #[tokio::test(flavor = "current_thread")]
 async fn tool_registry_entries_fall_back_on_current_thread_runtime() {
-    let entries = registry_entries();
+    let entries = registry_entries(&openhuman_core::core::runtime::DispatchCtx::host_default());
     assert!(entries
         .iter()
         .any(|entry| entry.tool_id == "tools.web_search"));

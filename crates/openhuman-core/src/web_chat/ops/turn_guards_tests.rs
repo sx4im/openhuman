@@ -44,10 +44,15 @@ fn guarded_turn_env_shares_its_cancellation_with_the_stop_handle() {
 #[tokio::test(start_paused = true)]
 async fn backstop_firing_yields_a_classified_turn_timeout_error() {
     let err = drive_turn_with_deadline(
-        &crate::core::runtime::DispatchCtx::host_default(),Some(Duration::from_secs(900)), None, None, |_| async {
-        std::future::pending::<()>().await;
-        Ok(result("never"))
-    })
+        &crate::core::runtime::DispatchCtx::host_default(),
+        Some(Duration::from_secs(900)),
+        None,
+        None,
+        |_| async {
+            std::future::pending::<()>().await;
+            Ok(result("never"))
+        },
+    )
     .await
     .expect_err("backstop fires");
     assert!(super::super::super::web_errors::is_outer_backstop_timeout(
@@ -74,13 +79,18 @@ const CEILING: Option<Duration> = Some(Duration::from_secs(3_600));
 #[tokio::test(start_paused = true)]
 async fn a_turn_that_keeps_progressing_outlives_the_idle_window() {
     let res = drive_turn_with_deadline(
-        &crate::core::runtime::DispatchCtx::host_default(),CEILING, IDLE, None, |activity| async move {
-        for _ in 0..90 {
-            tokio::time::sleep(Duration::from_secs(17)).await;
-            activity.observe(&text_delta());
-        }
-        Ok(result("done after 25 minutes"))
-    })
+        &crate::core::runtime::DispatchCtx::host_default(),
+        CEILING,
+        IDLE,
+        None,
+        |activity| async move {
+            for _ in 0..90 {
+                tokio::time::sleep(Duration::from_secs(17)).await;
+                activity.observe(&text_delta());
+            }
+            Ok(result("done after 25 minutes"))
+        },
+    )
     .await
     .expect("idle guard must not fire on a progressing turn");
     assert_eq!(res.full_response, "done after 25 minutes");
@@ -92,10 +102,15 @@ async fn a_turn_that_keeps_progressing_outlives_the_idle_window() {
 async fn a_silent_turn_ends_after_the_idle_window() {
     let started = tokio::time::Instant::now();
     let err = drive_turn_with_deadline(
-        &crate::core::runtime::DispatchCtx::host_default(),CEILING, IDLE, None, |_| async {
-        std::future::pending::<()>().await;
-        Ok(result("never"))
-    })
+        &crate::core::runtime::DispatchCtx::host_default(),
+        CEILING,
+        IDLE,
+        None,
+        |_| async {
+            std::future::pending::<()>().await;
+            Ok(result("never"))
+        },
+    )
     .await
     .expect_err("idle guard fires");
     let waited = started.elapsed();
@@ -112,12 +127,17 @@ async fn a_silent_turn_ends_after_the_idle_window() {
 #[tokio::test(start_paused = true)]
 async fn a_turn_busy_past_the_ceiling_hits_the_backstop() {
     let err = drive_turn_with_deadline(
-        &crate::core::runtime::DispatchCtx::host_default(),CEILING, IDLE, None, |activity| async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            activity.observe(&text_delta());
-        }
-    })
+        &crate::core::runtime::DispatchCtx::host_default(),
+        CEILING,
+        IDLE,
+        None,
+        |activity| async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                activity.observe(&text_delta());
+            }
+        },
+    )
     .await
     .expect_err("backstop fires");
     assert!(err.contains("3600s wall-clock budget"), "{err}");

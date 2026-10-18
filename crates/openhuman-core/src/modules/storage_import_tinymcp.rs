@@ -35,6 +35,7 @@ use sha2::Digest;
 use tinystoragedrivers::secrets::{DocumentSecrets, SecretStore};
 use tinystoragedrivers::{CollectionSpec, DocumentStore, ErrorKind, Precondition, ScopedStorage};
 
+use crate::core::runtime::DispatchCtx;
 use crate::storage::rusqlite::{self, Connection, OpenFlags};
 
 const LOG_PREFIX: &str = "[mcp-import]";
@@ -69,11 +70,11 @@ pub(crate) enum Outcome {
 
 /// Imports the legacy files under `data_dir` into the module's scope of the
 /// installed backend.
-pub(crate) async fn import_legacy(data_dir: &Path) -> Result<Outcome> {
+pub(crate) async fn import_legacy(ctx: &DispatchCtx, data_dir: &Path) -> Result<Outcome> {
     let Some(backend) = crate::storage::installed() else {
         return Ok(Outcome::NoBackend);
     };
-    let scope = super::storage_host::current_module_scope(&crate::core::runtime::DispatchCtx::ambient(), MODULE_ID)
+    let scope = super::storage_host::current_module_scope(ctx, MODULE_ID)
         .map_err(|error| anyhow!("resolve the module scope: {:?}", error.kind()))?;
     let scoped = backend
         .for_scope(&scope)
@@ -81,10 +82,11 @@ pub(crate) async fn import_legacy(data_dir: &Path) -> Result<Outcome> {
     let keys = crate::storage::secrets::keys()
         .map_err(|error| anyhow!("no key provider for module secrets: {:?}", error.kind()))?;
     let secrets = DocumentSecrets::new(&scoped, keys);
-    import_into(&scoped, &secrets, data_dir).await
+    import_into(ctx, &scoped, &secrets, data_dir).await
 }
 
 async fn import_into(
+    ctx: &DispatchCtx,
     scoped: &ScopedStorage,
     secrets: &dyn SecretStore,
     data_dir: &Path,
@@ -109,8 +111,8 @@ async fn import_into(
     }
 
     // The files are read on a blocking thread, from copies.
-    let (legacy_servers, legacy_audit) =
-        tokio::task::spawn_blocking(move || -> Result<_> {
+    let (legacy_servers, legacy_audit) = ctx
+        .spawn_blocking(move || -> Result<_> {
             let servers = if clients.exists() {
                 read_servers(&clients)?
             } else {

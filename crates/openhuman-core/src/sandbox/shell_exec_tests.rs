@@ -116,8 +116,15 @@ async fn a_disabled_module_never_falls_back_to_a_host_shell_for_a_jailed_run() {
         allow_subprocess: true,
         enforcement: contract::JailEnforcement::Enforced,
         require_process_isolation: true,
+        deny_read: Vec::new(),
     });
-    assert!(run(&config, shell).await.is_err());
+    assert!(run(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config,
+        shell
+    )
+    .await
+    .is_err());
     assert!(!marker.exists());
 }
 
@@ -129,6 +136,7 @@ async fn run_host_feeds_the_callers_meter() {
     let dir = tempfile::tempdir().unwrap();
     let meter = crate::sandbox::shell_progress::ShellOutputMeter::default();
     let output = run_host(
+        &crate::core::runtime::DispatchCtx::host_default(),
         &Config::default(),
         "printf 'line one\\nline two\\n'",
         dir.path(),

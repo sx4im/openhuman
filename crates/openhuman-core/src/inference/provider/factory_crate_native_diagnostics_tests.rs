@@ -86,7 +86,7 @@ async fn from_string_external_provider_emits_egress_realpath() {
 #[tokio::test]
 async fn caller_owned_models_build_without_openhuman_session() {
     let _guard = crate::inference::inference_test_guard_async().await;
-    let _signed_out = crate::cron::scheduler_gate::SignedOutTestGuard::set(true);
+    let _signed_out = crate::platform::llm_gate::SignedOutTestGuard::set(true);
     let dir = tempfile::tempdir().unwrap();
     let config = Config {
         config_path: dir.path().join("config.toml"),
@@ -131,7 +131,7 @@ async fn caller_owned_models_build_without_openhuman_session() {
 #[tokio::test]
 async fn local_aliases_build_without_a_session_and_preserve_model_ids() {
     let _guard = crate::inference::inference_test_guard_async().await;
-    let _signed_out = crate::cron::scheduler_gate::SignedOutTestGuard::set(true);
+    let _signed_out = crate::platform::llm_gate::SignedOutTestGuard::set(true);
     let config = Config::default();
     for (prefix, canonical) in [
         ("OLLAMA", "ollama"),

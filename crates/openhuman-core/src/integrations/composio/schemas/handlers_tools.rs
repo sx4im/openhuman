@@ -3,7 +3,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 use crate::integrations::composio::ops;
 
@@ -14,7 +13,7 @@ pub(super) fn handle_list_tools(ctx: DispatchCtx, params: Map<String, Value>) ->
         let config = ctx.load_config().await?;
         let toolkits = read_optional::<Vec<String>>(&params, "toolkits")?;
         let tags = read_optional::<Vec<String>>(&params, "tags")?;
-        to_json(ops::composio_list_tools(&config, toolkits, tags).await?)
+        to_json(ops::composio_list_tools(&ctx, &config, toolkits, tags).await?)
     })
 }
 

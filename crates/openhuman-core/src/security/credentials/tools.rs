@@ -30,8 +30,7 @@ async fn invoke_hosted(
     method: &str,
     params: serde_json::Map<String, Value>,
 ) -> anyhow::Result<Value> {
-    match crate::core::all::try_invoke_registered_rpc(ctx, method, params).await
-    {
+    match crate::core::all::try_invoke_registered_rpc(ctx, method, params).await {
         Some(Ok(value)) => Ok(strip_log_envelope(value)),
         Some(Err(err)) => Err(anyhow::anyhow!("{err}")),
         None => {
@@ -240,9 +239,13 @@ impl Tool for OAuthListTool {
     ) -> anyhow::Result<ToolResult> {
         let ctx = crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool(context);
         log::debug!("[tool][credentials] oauth_list invoked");
-        let value = invoke_hosted(ctx, "openhuman.auth_oauth_list_integrations", Default::default())
-            .await
-            .map_err(|e| anyhow::anyhow!("oauth_list: {e}"))?;
+        let value = invoke_hosted(
+            ctx,
+            "openhuman.auth_oauth_list_integrations",
+            Default::default(),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("oauth_list: {e}"))?;
         Ok(ToolResult::success(serde_json::to_string(&value)?))
     }
     fn is_concurrency_safe(&self, _args: &serde_json::Value) -> bool {

@@ -124,6 +124,7 @@ async fn composio_ops_mode_is_local_and_trigger_history_reads_the_module_archive
     assert!(mode.pointer("/result/api_key_set").is_some());
 
     let history = openhuman_core::integrations::composio::ops::composio_list_trigger_history(
+        &openhuman_core::core::runtime::DispatchCtx::host_default(),
         &config,
         Some(0),
     )

@@ -154,7 +154,12 @@ pub(crate) async fn run_relay_turn(
         SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir, &config.action_dir)
             .with_privacy_mode(config.privacy.mode),
     );
-    let parts = match build_channel_turn_parts(&dispatch_ctx, &config, &security, PromptToolDescs::Registered) {
+    let parts = match build_channel_turn_parts(
+        &dispatch_ctx,
+        &config,
+        &security,
+        PromptToolDescs::Registered,
+    ) {
         Ok(parts) => parts,
         Err(error) => {
             tracing::error!(

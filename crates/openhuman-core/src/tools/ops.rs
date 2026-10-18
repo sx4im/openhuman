@@ -163,13 +163,16 @@ pub fn all_tools_with_runtime(
     tools.append(&mut vec![
         // Task & productivity tools (issue: agent-tool expansion).
         // Read/observe + bounded-write tools are registered here; the
-        // destructive/overextending siblings (artifact_delete,
+        // destructive/overextending siblings (delete_artifact,
         // task_source_add/update/remove) are registered too but ship
         // default-OFF via `tools::user_filter` (their toggle IDs default off
         // in onboarding). The per-call permission ladder still gates them.
     ]);
-    tools.extend(crate::agent::artifacts::tools::registered_tools(
-        config.clone(),
+    tools.extend(crate::agent::artifacts::tiny_store::registered_tools(
+        &config.workspace_dir,
+        crate::agent::artifacts::FileRoots::from_config(&config),
+        action_dir,
+        crate::integrations::file_storage::artifact_publisher(&config),
     ));
     tools.extend(crate::integrations::task_sources::tools::registered_tools(
         config.clone(),
@@ -405,10 +408,18 @@ pub fn all_tools_with_runtime(
     // Gated by the `media` compile-time feature (#4804); absent from slim
     // builds. Runtime `DomainSet::media` (#4796) still gates it when compiled.
     #[cfg(feature = "media")]
-    tools.extend(crate::media::generation::build_media_tools(
-        root_config,
-        action_dir,
-    ));
+    {
+        *security
+            .media_files_roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(crate::agent::artifacts::FileRoots::from_config(root_config));
+        tools.extend(crate::media::generation::build_media_tools_with_allowlist(
+            root_config,
+            action_dir,
+            Arc::clone(&security.media_artifact_paths),
+        ));
+    }
 
     // Managed cloud file storage (S3 via the backend). Skipped when no
     // integration client is configured; downloads land under `action_dir`.

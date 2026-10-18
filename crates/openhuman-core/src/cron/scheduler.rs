@@ -1,23 +1,29 @@
 //! The host side of the cron scheduler.
 //!
-//! The runtime — poll pass, bounded concurrency, process-wide run claims,
-//! retry with backoff, rescheduling and single-flight skips — is
-//! `tinyflows_schedule::runtime::Scheduler`. This module builds it from config
-//! and supplies the ports (see [`host`]): the document store, the shell/agent
-//! executor with its failure classification ([`executor`]), delivery and the
-//! flow trigger sink ([`run_delivery`]). It owns the loop that drives one
-//! scheduler for the operator and one for every live embedded agent, and the
-//! health signals the loop emits.
+//! The runtime (poll pass, bounded concurrency, process-wide run claims, retry
+//! with backoff, rescheduling and single-flight skips) is the `tinyflows`
+//! module's, reached over `tinyflows_bus::schedule` (`StartScheduler`,
+//! `TickScheduler`, `DrainScheduler`, `StopScheduler`, `ExecuteJob`). This
+//! module owns what the module cannot: the poll cadence and the health signals
+//! it emits, one scheduler per scope (the operator, and every live embedded
+//! agent), and the callbacks the module runs jobs through
+//! ([`crate::cron::bus_host`]): the job-kind registry ([`executor`],
+//! [`builtin`]), delivery and the flow trigger ([`run_delivery`]).
+//!
+//! The host drives its schedulers with manual ticks rather than letting the
+//! module run its own loop: it keeps the poll interval, the transition-only
+//! `HealthChanged` signals and the live-agent reconcile in one place, and a
+//! test or an embedding host can run one deterministic pass
+//! ([`run_live_agent_pass`]) without sleeping.
 
 mod agent_run;
+pub(crate) mod builtin;
 mod delivery;
-mod executor;
+pub(crate) mod executor;
 mod failure_classification;
-mod host;
 mod origin_context;
 mod origin_delivery;
-mod run_delivery;
-mod run_record;
+pub(crate) mod run_delivery;
 pub(crate) mod shell_job;
 
 #[cfg(test)]
@@ -26,7 +32,6 @@ mod tests;
 
 #[allow(unused_imports)]
 use crate::core::runtime::DispatchCtx;
-use agent_run::*;
 #[allow(unused_imports)]
 use delivery::*;
 #[allow(unused_imports)]
@@ -34,37 +39,97 @@ use executor::*;
 #[allow(unused_imports)]
 use failure_classification::*;
 #[allow(unused_imports)]
-use run_record::*;
-#[allow(unused_imports)]
 use shell_job::*;
 
 pub use delivery::deliver_job;
-pub(crate) use host::{try_acquire_run, JobDispatcher};
 
 use crate::config::Config;
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
+use crate::cron::bus_host::{self, Binding, HostRegistration, CLAIM_SCOPE};
+use crate::cron::documents_port::DocScope;
+use crate::modules::tinyflows as module;
 use crate::security::SecurityPolicy;
-use anyhow::Result;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tinyflows_schedule::runtime::{execute_with_retry, SchedulerSlot};
-use tinyflows_schedule::types::CronJob;
+use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
+use tinyflows_bus::schedule::types::CronJob;
+use tinyflows_bus::schedule::{members, Attempt, StartScheduler, StoreBackend, StoreConfig};
 use tokio::time::{self, Duration};
 
 const MIN_POLL_SECONDS: u64 = 5;
 
+/// What the module answers when another run of the job holds its claim.
+pub(crate) const ALREADY_RUNNING: &str = "job is already running";
+
+/// Whether the host's cron poll loop is running in this process.
+static LOOP_RUNNING: AtomicBool = AtomicBool::new(false);
+
 /// The poll-loop slot: one loop per process, or two would each see the same
-/// due rows.
-const LOOP_SCOPE: &str = "openhuman:cron-loop";
+/// due rows. Released when dropped.
+struct LoopSlot;
+
+impl LoopSlot {
+    fn acquire() -> Option<Self> {
+        LOOP_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for LoopSlot {
+    fn drop(&mut self) {
+        LOOP_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Whether a cron poll loop is running in this process.
 pub fn is_running() -> bool {
-    SchedulerSlot::is_running(LOOP_SCOPE)
+    LOOP_RUNNING.load(Ordering::SeqCst)
 }
 
-pub async fn run(config: Config) -> Result<()> {
-    let Some(_slot) = SchedulerSlot::acquire(LOOP_SCOPE) else {
+/// Job ids a manual run (Run Now, the run tool) holds in this process.
+static MANUAL_RUNS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
+
+/// A held manual run. Released on drop, including on panic or future
+/// cancellation, so an aborted task can never lock a job id.
+pub(crate) struct RunGuard(String);
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        MANUAL_RUNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.0);
+    }
+}
+
+/// Claims `job_id` for a manual run, or `None` when another manual run holds
+/// it. A scheduled run of the same job is refused later, by the module's own
+/// claim (`ExecuteJob` answers [`ALREADY_RUNNING`]).
+pub(crate) fn try_acquire_run(job_id: &str) -> Option<RunGuard> {
+    MANUAL_RUNS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(job_id.to_string())
+        .then(|| RunGuard(job_id.to_string()))
+}
+
+/// The module's retry settings from the operator's reliability config.
+pub(crate) fn scheduler_config(config: &Config) -> Value {
+    json!({
+        "poll_secs": config.reliability.scheduler_poll_secs,
+        "max_concurrent": config.scheduler.max_concurrent,
+        "retries": config.reliability.scheduler_retries,
+        "backoff_ms": config.reliability.provider_backoff_ms,
+    })
+}
+
+pub async fn run(ctx: &crate::core::runtime::DispatchCtx, config: Config) -> Result<()> {
+    let Some(_slot) = LoopSlot::acquire() else {
         tracing::warn!(
             "[cron:scheduler] a scheduler loop is already running; not starting another"
         );
@@ -93,7 +158,7 @@ pub async fn run(config: Config) -> Result<()> {
     // interval, forever. `None` means "nothing emitted yet for this run",
     // so the first successful tick is treated as a transition and emits.
     let mut last_emitted_health: Option<bool> = None;
-    let mut dispatcher = JobDispatcher::new(&config, &security);
+    let mut dispatcher = JobDispatcher::new(ctx, &config, &security);
     let mut agents = LiveAgentSchedulers::default();
 
     loop {
@@ -138,7 +203,7 @@ impl LiveAgentSchedulers {
                 };
                 let dispatcher = scheduler
                     .entry(agent_id.clone())
-                    .or_insert_with(|| JobDispatcher::new(&config, &security));
+                    .or_insert_with(|| JobDispatcher::new(&dispatch, &config, &security));
                 match dispatcher.tick(&config).await {
                     Ok(0) => {}
                     Ok(count) => {
@@ -173,19 +238,62 @@ pub async fn run_live_agent_pass(max_concurrent: usize) {
 
 /// Run `job` now under the caller's `run_id` (also the id its delivery and
 /// run record use), with the same executor, retry budget and failure
-/// classification as a scheduled run. The caller holds the job's run claim.
-pub async fn execute_job_now(config: &Config, job: &CronJob, run_id: &str) -> (bool, String) {
+/// classification as a scheduled run: the module's `ExecuteJob` runs the
+/// retry loop and calls back into a host object bound to `ctx`. The caller
+/// holds the job's manual-run guard; the module holds the cross-scheduler
+/// claim and answers [`ALREADY_RUNNING`] when a scheduled run has the job.
+pub async fn execute_job_now(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: &Config,
+    job: &CronJob,
+    run_id: &str,
+) -> (bool, String) {
+    match execute_via_bus(ctx, config, job, run_id).await {
+        Ok(attempt) => (attempt.success, attempt.output),
+        Err(error) => {
+            tracing::debug!(job_id = %job.id, %run_id, %error, "[cron:scheduler] ExecuteJob failed");
+            (false, error.to_string())
+        }
+    }
+}
+
+async fn execute_via_bus(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: &Config,
+    job: &CronJob,
+    run_id: &str,
+) -> Result<Attempt> {
     let security = Arc::new(SecurityPolicy::from_config(
         &config.autonomy,
         &config.workspace_dir,
         &config.action_dir,
     ));
-    let binding = host::Binding::current(config, security);
-    let ports = host::ports(&binding);
-    match execute_with_retry(&ports, &host::scheduler_config(config), job, run_id).await {
-        Ok(attempt) => (attempt.success, attempt.output),
-        Err(error) => (false, error.to_string()),
-    }
+    let binding = Binding::new(ctx, config, security);
+    let host = bus_host::register(binding).await.map_err(|e| anyhow!(e))?;
+    let proxy = module::run_proxy(config).await.map_err(|e| anyhow!(e))?;
+    tracing::debug!(job_id = %job.id, %run_id, "[cron:scheduler] ExecuteJob");
+    let attempt: Attempt = proxy
+        .call(
+            members::EXECUTE_JOB,
+            (
+                CLAIM_SCOPE,
+                host.address(),
+                scheduler_config(config),
+                job,
+                run_id,
+            ),
+        )
+        .await
+        .map_err(|error| {
+            let message = error.wire_message();
+            if message.contains(ALREADY_RUNNING) {
+                anyhow!("cron job '{}' is already running", job.id)
+            } else {
+                anyhow!(message)
+            }
+        })?;
+    drop(host);
+    Ok(attempt)
 }
 
 /// Single poll cycle of the scheduler loop, extracted so tests can drive
@@ -250,5 +358,148 @@ pub(crate) async fn tick_once(
         // the bus, without touching this tracker. Reset so the next
         // successful tick is again a transition and re-emits `healthy: true`.
         *last_emitted_health = None;
+    }
+}
+
+/// One scope's scheduler: a manual-tick scheduler in the module, polled by the
+/// host, dispatching under its context. Stopped when dropped.
+pub(crate) struct JobDispatcher {
+    binding: Binding,
+    started: Option<Started>,
+}
+
+/// A scheduler running in the module, and the host object it calls back.
+struct Started {
+    handle: String,
+    host: HostRegistration,
+}
+
+impl JobDispatcher {
+    /// A dispatcher for the context `ctx` carries. Nothing is started until the
+    /// first tick.
+    pub(crate) fn new(
+        ctx: &crate::core::runtime::DispatchCtx,
+        config: &Config,
+        security: &Arc<SecurityPolicy>,
+    ) -> Self {
+        Self {
+            binding: Binding::new(ctx, config, Arc::clone(security)),
+            started: None,
+        }
+    }
+
+    /// Restrict the dispatcher to agent jobs (the hosted-profile sweep).
+    #[must_use]
+    pub(crate) fn agent_only(mut self) -> Self {
+        self.binding = self.binding.clone().agent_only();
+        self
+    }
+
+    /// The dispatch context the scheduler's callbacks act under.
+    #[cfg(test)]
+    pub(crate) fn dispatch_ctx(&self) -> crate::core::runtime::DispatchCtx {
+        self.binding.dispatch_ctx()
+    }
+
+    async fn start(&self, config: &Config) -> Result<Started> {
+        let host = bus_host::register(self.binding.clone())
+            .await
+            .map_err(|e| anyhow!(e))?;
+        // The documents of the scope this dispatcher acts in: resolved under
+        // its context, because the call below is made from a task that may
+        // not carry it.
+        let scope = self
+            .binding
+            .within(async { DocScope::current(config) })
+            .await?;
+        let storage = StoreConfig {
+            backend: StoreBackend::Documents {
+                callback: crate::cron::documents_port::address(&scope).await?,
+            },
+            max_run_history: config.cron.max_run_history,
+            max_tasks: config.scheduler.max_tasks,
+        };
+        let request = StartScheduler {
+            scope: CLAIM_SCOPE.to_string(),
+            callback: host.address(),
+            config: scheduler_config(config),
+            manual_ticks: true,
+            storage: Some(storage),
+        };
+        let proxy = module::proxy(config).await.map_err(|e| anyhow!(e))?;
+        let handle: String = proxy
+            .call(members::START_SCHEDULER, (request,))
+            .await
+            .map_err(|error| anyhow!(error.wire_message()))?;
+        tracing::debug!("[cron:scheduler] scheduler started in the tinyflows module");
+        Ok(Started { handle, host })
+    }
+
+    async fn call<R: serde::de::DeserializeOwned>(
+        &mut self,
+        config: &Config,
+        member: &'static str,
+    ) -> Result<R> {
+        if self.started.is_none() {
+            self.started = Some(self.start(config).await?);
+        }
+        let handle = self
+            .started
+            .as_ref()
+            .map(|started| started.handle.clone())
+            .ok_or_else(|| anyhow!("scheduler not started"))?;
+        let proxy = module::run_proxy(config).await.map_err(|e| anyhow!(e))?;
+        proxy
+            .call(member, (handle,))
+            .await
+            .map_err(|error| anyhow!(error.wire_message()))
+    }
+
+    /// Read the due jobs and dispatch them; the count dispatched. Errors when
+    /// the store cannot be read.
+    pub(crate) async fn tick(&mut self, config: &Config) -> Result<usize> {
+        self.binding.set_config(config);
+        let dispatched: usize = self.call(config, members::TICK_SCHEDULER).await?;
+        tracing::trace!(dispatched, "[cron:scheduler] TickScheduler");
+        Ok(dispatched)
+    }
+
+    /// Wait for every dispatched job to finish.
+    pub(crate) async fn drain(&mut self) {
+        let config = self.binding.config();
+        if self.started.is_none() {
+            return;
+        }
+        if let Err(error) = self.call::<()>(&config, members::DRAIN_SCHEDULER).await {
+            tracing::warn!(%error, "[cron:dispatch] a dispatched job failed");
+        }
+    }
+}
+
+impl Drop for JobDispatcher {
+    fn drop(&mut self) {
+        let Some(started) = self.started.take() else {
+            return;
+        };
+        let config = self.binding.config();
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        // Stop the module's scheduler (releasing its claims) before the
+        // callback object it would call goes away.
+        runtime.spawn(async move {
+            match module::proxy(&config).await {
+                Ok(proxy) => {
+                    let stopped = proxy
+                        .call::<()>(members::STOP_SCHEDULER, (started.handle.clone(),))
+                        .await;
+                    if let Err(error) = stopped {
+                        tracing::debug!(error = %error.wire_message(), "[cron:scheduler] StopScheduler failed");
+                    }
+                }
+                Err(error) => tracing::debug!(%error, "[cron:scheduler] StopScheduler skipped"),
+            }
+            drop(started.host);
+        });
     }
 }

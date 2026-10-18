@@ -35,7 +35,7 @@ pub async fn keyring_consent_decide(
 
     // Persist to disk first. If this fails we return an error without
     // updating the cache, so cache and disk stay consistent.
-    persist_consent(&ctx, &pref).await?;
+    persist_consent(ctx, &pref).await?;
 
     // Only update the in-memory cache after a successful persist.
     policy::apply_consent(&pref);
@@ -60,7 +60,7 @@ async fn persist_consent(ctx: &DispatchCtx, pref: &ConsentPreference) -> Result<
         keyring_consent: Some(Some(pref.clone())),
         ..Default::default()
     };
-    crate::desktop::app_state::update_local_state(&ctx, patch).await?;
+    crate::desktop::app_state::update_local_state(ctx, patch).await?;
     log::debug!("{LOG_PREFIX} consent persisted to app state");
     Ok(())
 }

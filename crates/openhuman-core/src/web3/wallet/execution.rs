@@ -2,7 +2,6 @@
 //! This host supplies configuration, custody, transport and approvals; wallet
 //! algorithms and user-scoped service state remain in the compiled module.
 
-use crate::config::rpc as config_rpc;
 use crate::core::runtime::DispatchCtx;
 use crate::core::Outcome;
 use crate::modules::{wallet as wallet_module, wallet_service};

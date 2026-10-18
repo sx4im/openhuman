@@ -5,7 +5,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::config::rpc as config_rpc;
 use crate::core::all::ControllerFuture;
 use crate::integrations::composio::{contract, ops};
 
@@ -18,7 +17,7 @@ pub(super) fn handle_get_user_profile(
     Box::pin(async move {
         let config = ctx.load_config().await?;
         let connection_id = read_required_non_empty(&params, "connection_id")?;
-        to_json(ops::composio_get_user_profile(&config, &connection_id).await?)
+        to_json(ops::composio_get_user_profile(&ctx, &config, &connection_id).await?)
     })
 }
 
@@ -28,7 +27,7 @@ pub(super) fn handle_refresh_all_identities(
 ) -> ControllerFuture {
     Box::pin(async move {
         let config = ctx.load_config().await?;
-        to_json(ops::composio_refresh_all_identities(&config).await?)
+        to_json(ops::composio_refresh_all_identities(&ctx, &config).await?)
     })
 }
 
@@ -64,7 +63,7 @@ pub(super) fn handle_get_user_scopes(
         // unreadable" into an RPC error would make the scopes panel fail where
         // it used to render the defaults.
         let pref = match ctx.load_config().await {
-            Ok(config) => ops::load_user_scope_pref(&config, &toolkit).await,
+            Ok(config) => ops::load_user_scope_pref(&ctx, &config, &toolkit).await,
             Err(error) => {
                 tracing::warn!(
                     method = "composio.get_user_scopes",
@@ -121,7 +120,7 @@ pub(super) fn handle_set_user_scopes(
         // done, and `ops::user_scopes::save` refuses on the same three
         // grounds (no driver, no `Graph` family, backend write failure).
         let config = ctx.load_config().await?;
-        if let Err(e) = ops::save_user_scope_pref(&config, &toolkit, pref).await {
+        if let Err(e) = ops::save_user_scope_pref(&ctx, &config, &toolkit, pref).await {
             tracing::error!(
                 method = "composio.set_user_scopes",
                 toolkit = %toolkit,

@@ -105,7 +105,7 @@ pub(super) fn forget(ctx: DispatchCtx, params: Map<String, Value>) -> Controller
 pub(super) fn erase_all(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move {
         let params = parse::<EraseAllParams>(params)?;
-        finish(ops::erase_all(&load(&ctx).await?, params).await)
+        finish(ops::erase_all(&ctx, &load(&ctx).await?, params).await)
     })
 }
 
@@ -266,7 +266,8 @@ pub(super) fn sources_sync(ctx: DispatchCtx, params: Map<String, Value>) -> Cont
     Box::pin(async move {
         let params = parse::<SourcesSyncParams>(params)?;
         let config = load(&ctx).await?;
-        let started = sources::start_sync(&config, params.id.as_deref()).map_err(String::from)?;
+        let started =
+            sources::start_sync(&ctx, &config, params.id.as_deref()).map_err(String::from)?;
         to_json(SourcesSyncView { started })
     })
 }
@@ -283,7 +284,7 @@ pub(super) fn import_start(ctx: DispatchCtx, params: Map<String, Value>) -> Cont
         let params = parse::<ImportStartParams>(params)?;
         let config = load(&ctx).await?;
         finish(
-            import::start(&config, params.consent)
+            import::start(&ctx, &config, params.consent)
                 .await
                 .map(|state| ImportStateView { state }),
         )
@@ -308,7 +309,7 @@ pub(super) fn import_retry_failed(
         parse::<EmptyParams>(params)?;
         let config = load(&ctx).await?;
         finish(
-            import::retry_failed(&config)
+            import::retry_failed(&ctx, &config)
                 .await
                 .map(|state| ImportStateView { state }),
         )
@@ -327,6 +328,7 @@ pub(super) fn migration_start(ctx: DispatchCtx, params: Map<String, Value>) -> C
         let params = parse::<layout_migration::StartParams>(params)?;
         let config = load(&ctx).await?;
         let started = layout_migration::start(
+            &ctx,
             config.clone(),
             std::sync::Arc::new(layout_migration::AppHost::new(config.clone())),
             layout_migration::Trigger::Manual {

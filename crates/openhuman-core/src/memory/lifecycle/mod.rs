@@ -22,6 +22,7 @@ pub mod jobs;
 pub(crate) mod prefetch;
 pub mod sender;
 pub mod views;
+pub mod window;
 
 use std::sync::Arc;
 

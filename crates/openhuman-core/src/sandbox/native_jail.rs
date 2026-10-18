@@ -91,6 +91,7 @@ pub(crate) async fn require_backend(_config: &Config, _expected: &str) -> anyhow
 
 /// Run a command inside TinyBox's native jail and keep its resource lifecycle module-owned.
 pub(crate) async fn execute(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     policy: &SandboxPolicy,
     command: &str,
@@ -102,6 +103,7 @@ pub(crate) async fn execute(
 ) -> anyhow::Result<SandboxExecResult> {
     #[cfg(feature = "modules")]
     {
+        let ctx = ctx.clone();
         let config = config.clone();
         let policy = policy.clone();
         let command = command.to_owned();
@@ -110,6 +112,7 @@ pub(crate) async fn execute(
         // The worker owns cancellation and resource cleanup if the caller drops its wait.
         tokio::spawn(async move {
             execute_owned(
+                &ctx,
                 &config,
                 &policy,
                 &command,
@@ -127,6 +130,7 @@ pub(crate) async fn execute(
     #[cfg(not(feature = "modules"))]
     {
         let _ = (
+            ctx,
             config,
             policy,
             command,
@@ -142,6 +146,7 @@ pub(crate) async fn execute(
 
 #[cfg(feature = "modules")]
 async fn execute_owned(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     policy: &SandboxPolicy,
     command: &str,
@@ -182,8 +187,8 @@ async fn execute_owned(
     run.meter = meter;
     // TinyBox adds its own per-call scratch directory to the writable grants and
     // points TMPDIR, TMP and TEMP at it unless the caller overrides them.
-    run.jail = Some(jail_request(policy, isolation)?);
-    super::shell_exec::run(config, run).await
+    run.jail = Some(jail_request(config, policy, isolation)?);
+    super::shell_exec::run(ctx, config, run).await
 }
 
 /// The caller's environment overrides, which must be UTF-8 to cross the bus.
@@ -207,6 +212,7 @@ fn approved_environment(
 
 #[cfg(feature = "modules")]
 fn jail_request(
+    config: &Config,
     policy: &SandboxPolicy,
     isolation: SandboxIsolation,
 ) -> anyhow::Result<contract::NativeJailConfig> {
@@ -232,7 +238,69 @@ fn jail_request(
             contract::JailEnforcement::Declared
         },
         require_process_isolation: isolated,
+        // Landlock denies every path it is not granted; Seatbelt reads
+        // allow-default, so folder confinement names the credential stores:
+        // the user's, and OpenHuman's own credential files.
+        deny_read: if isolated {
+            Vec::new()
+        } else {
+            let home =
+                super::local_grants::grant_home(crate::core::runtime::is_saas(), dirs::home_dir);
+            let stores = home
+                .as_deref()
+                .map(crate::security::policy::home_credential_stores)
+                .unwrap_or_default()
+                .into_iter()
+                .chain(crate::security::credentials::credential_files(config))
+                .collect();
+            credential_denials(stores, &policy.workspace_root, &policy.read_write_mounts)?
+        },
     })
+}
+
+/// The credential `stores` a folder-confined jail must not read, as existing
+/// canonical paths (TinyBox drops absent ones anyway).
+///
+/// # Errors
+///
+/// Refuses the jail when its root or a writable grant sits inside a store:
+/// TinyBox cannot deny a store that holds the command's workspace, and running
+/// without that denial would leave the rest of the store readable. A store
+/// inside a grant is fine; Seatbelt carves it out.
+#[cfg(any(feature = "modules", test))]
+fn credential_denials(
+    stores: Vec<std::path::PathBuf>,
+    root: &Path,
+    read_write: &[std::path::PathBuf],
+) -> anyhow::Result<Vec<String>> {
+    let granted: Vec<std::path::PathBuf> = std::iter::once(root)
+        .chain(read_write.iter().map(std::path::PathBuf::as_path))
+        .filter_map(|path| path.canonicalize().ok())
+        .collect();
+    let mut denied = Vec::new();
+    for store in stores {
+        let Ok(real) = store.canonicalize() else {
+            continue;
+        };
+        if granted.iter().any(|path| path.starts_with(&real)) {
+            // The store's name only: the full path carries the user's login.
+            let name = store
+                .file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            tracing::warn!(
+                store = %name,
+                "[sandbox:local] refusing the folder-confined jail: its workspace or a writable grant is inside a credential store"
+            );
+            anyhow::bail!(
+                "the sandbox workspace or a writable folder is inside the credential store `{name}`; \
+                 choose a working folder outside it"
+            );
+        }
+        if let Some(real) = real.to_str() {
+            denied.push(real.to_owned());
+        }
+    }
+    Ok(denied)
 }
 
 #[cfg(feature = "modules")]

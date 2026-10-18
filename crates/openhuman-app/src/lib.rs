@@ -66,8 +66,8 @@ const _: () = assert!(
 const _: &str = openhuman_rpc::embed::modules::browser::MODULE_ID;
 
 mod app_update;
-// Artifact export command (#2779) — cross-platform Downloads copy. The `rfd`
-// Save-As dialog that used to sit in front of it was removed with the crate.
+// Artifact export commands (#2779): the OS save dialog (`save_artifact_as`)
+// and the cross-platform Downloads copy.
 mod artifact_commands;
 mod claude_code;
 mod core_process;
@@ -3302,9 +3302,10 @@ pub fn run() {
             process_diagnostics_list_owned,
             // Artifact export — cross-platform. Previously macOS/Linux-gated,
             // but the `directories` + `tokio::fs::copy` flow compiles on Windows
-            // too (CodeRabbit on #4127). The Save-As dialog that used to sit in
-            // front of this went with the shell's `rfd` dependency.
+            // too (CodeRabbit on #4127). `save_artifact_as` puts the OS save
+            // dialog in front of the copy.
             artifact_commands::download_artifact_to_downloads,
+            artifact_commands::save_artifact_as,
             // Native directory chooser for the folder memory-source (#5831).
             // Unlike the Save-As dialog above it, this one has no renderer-side
             // substitute: a `webkitdirectory` input cannot report where the

@@ -67,13 +67,21 @@ async fn wait_done(config: &Config) -> BackfillView {
 async fn refuses_without_consent_and_with_memory_off() {
     let tmp = tempfile::tempdir().unwrap();
     let config = config_in(&tmp);
-    let error = start(&DispatchCtx::ambient(), &config, BackfillStartParams { consent: false })
-        .await
-        .unwrap_err();
+    let error = start(
+        &DispatchCtx::ambient(),
+        &config,
+        BackfillStartParams { consent: false },
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.code(), INVALID_REQUEST);
-    let error = start(&DispatchCtx::ambient(), &config, BackfillStartParams { consent: true })
-        .await
-        .unwrap_err();
+    let error = start(
+        &DispatchCtx::ambient(),
+        &config,
+        BackfillStartParams { consent: true },
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.code(), MEMORY_OFF);
 }
 
@@ -128,9 +136,13 @@ async fn stores_past_chats_once_and_skips_what_live_logging_took() {
     assert_eq!(before.state.phase, ImportPhase::Idle);
     assert_eq!((before.pending_threads, before.pending_turns), (2, 3));
 
-    let started = start(&DispatchCtx::ambient(), &config, BackfillStartParams { consent: true })
-        .await
-        .unwrap();
+    let started = start(
+        &DispatchCtx::ambient(),
+        &config,
+        BackfillStartParams { consent: true },
+    )
+    .await
+    .unwrap();
     assert_eq!(started.state.threads_total, 2);
     let done = wait_done(&config).await;
     assert_eq!(done.state.phase, ImportPhase::Done, "{:?}", done.state);
@@ -152,10 +164,135 @@ async fn stores_past_chats_once_and_skips_what_live_logging_took() {
     );
 
     // A second run has nothing to send.
-    start(&DispatchCtx::ambient(), &config, BackfillStartParams { consent: true })
-        .await
-        .unwrap();
+    start(
+        &DispatchCtx::ambient(),
+        &config,
+        BackfillStartParams { consent: true },
+    )
+    .await
+    .unwrap();
     let again = wait_done(&config).await;
     assert_eq!(again.state.items_stored, 0);
     assert_eq!(stored(&engine, filter).await.len(), 6);
+}
+
+/// The reference engine, recording how long each bulk store asked to wait.
+struct WaitRecorder {
+    inner: tinymemory_api::conformance::ReferenceEngine,
+    waits: std::sync::Mutex<Vec<tinymemory_api::WaitFor>>,
+}
+
+#[async_trait::async_trait]
+impl tinymemory_api::MemoryEngine for WaitRecorder {
+    fn descriptor(&self) -> &tinymemory_api::EngineDescriptor {
+        self.inner.descriptor()
+    }
+    async fn health(&self) -> tinymemory_api::EngineHealth {
+        self.inner.health().await
+    }
+    async fn recall(
+        &self,
+        req: tinymemory_api::RecallRequest,
+    ) -> tinymemory_api::Result<tinymemory_api::RecallAnswer> {
+        self.inner.recall(req).await
+    }
+    async fn fetch(
+        &self,
+        req: tinymemory_api::FetchRequest,
+    ) -> tinymemory_api::Result<tinymemory_api::FetchPage> {
+        self.inner.fetch(req).await
+    }
+    async fn store(
+        &self,
+        item: tinymemory_api::StoreItem,
+    ) -> tinymemory_api::Result<tinymemory_api::StoreReceipt> {
+        self.inner.store(item).await
+    }
+    async fn store_many_with(
+        &self,
+        items: Vec<tinymemory_api::StoreItem>,
+        options: tinymemory_api::WriteOptions,
+    ) -> tinymemory_api::Result<Vec<tinymemory_api::StoreReceipt>> {
+        self.waits.lock().unwrap().push(options.wait);
+        self.inner.store_many_with(items, options).await
+    }
+    async fn forget(
+        &self,
+        target: tinymemory_api::ForgetTarget,
+    ) -> tinymemory_api::Result<tinymemory_api::ForgetReport> {
+        self.inner.forget(target).await
+    }
+    async fn list(
+        &self,
+        req: tinymemory_api::ListRequest,
+    ) -> tinymemory_api::Result<tinymemory_api::ListPage> {
+        self.inner.list(req).await
+    }
+}
+
+#[tokio::test]
+async fn batches_are_stored_accepted_and_the_last_one_visible() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = config_in(&tmp);
+    let engine = std::sync::Arc::new(WaitRecorder {
+        inner: tinymemory_api::conformance::ReferenceEngine::new(),
+        waits: std::sync::Mutex::new(Vec::new()),
+    });
+    crate::memory::engine::install_test_engine(&config.workspace_dir, engine.clone());
+    seed_thread(
+        &config.workspace_dir,
+        "old-thread",
+        &[
+            ("user", "What is ownership?"),
+            ("agent", "Values have one owner."),
+            ("user", "And borrowing?"),
+            ("agent", "References without ownership."),
+        ],
+    )
+    .await;
+    seed_thread(
+        &config.workspace_dir,
+        "older-thread",
+        &[
+            ("user", "What is a lifetime?"),
+            ("agent", "How long a reference is valid."),
+        ],
+    )
+    .await;
+
+    start(
+        &DispatchCtx::ambient(),
+        &config,
+        BackfillStartParams { consent: true },
+    )
+    .await
+    .unwrap();
+    let done = wait_done(&config).await;
+    assert_eq!(done.state.phase, ImportPhase::Done, "{:?}", done.state);
+    assert_eq!(done.state.items_stored, 6);
+
+    let waits = engine.waits.lock().unwrap().clone();
+    assert_eq!(waits.len(), 2, "one batch per thread: {waits:?}");
+    let (last, earlier) = waits.split_last().expect("the backfill stores in bulk");
+    assert!(
+        earlier
+            .iter()
+            .all(|wait| *wait == tinymemory_api::WaitFor::Accepted),
+        "every batch but the last is stored accepted: {waits:?}"
+    );
+    assert_eq!(
+        *last,
+        tinymemory_api::WaitFor::Visible,
+        "the last batch waits until it is visible, so a done run is searchable"
+    );
+    let filter = MetaFilter {
+        kinds: vec![ItemKind::Conversation],
+        tags_any: vec![BACKFILL_TAG.to_string()],
+        ..MetaFilter::default()
+    };
+    assert_eq!(
+        stored(&engine.inner, filter).await.len(),
+        6,
+        "an engine without accepted writes still stores everything"
+    );
 }

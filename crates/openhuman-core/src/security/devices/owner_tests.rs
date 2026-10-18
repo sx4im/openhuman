@@ -49,7 +49,8 @@ async fn a_remembered_owner_that_lost_the_device_is_forgotten() {
         scoped_config(tmp.path()),
     );
     remember("owner-test-stale", None);
-    let owner = crate::core::runtime::CoreContext::scope(context.clone(),
+    let owner = crate::core::runtime::CoreContext::scope(
+        context.clone(),
         owner_of(&DispatchCtx::new(context.clone()), "owner-test-stale", None),
     )
     .await;
@@ -68,8 +69,13 @@ async fn a_revoked_device_is_not_its_agents_any_more() {
         crate::core::runtime::DomainSet::full(),
         config,
     );
-    let owner = crate::core::runtime::CoreContext::scope(context.clone(),
-        owner_of(&DispatchCtx::new(context.clone()), "owner-test-revoked", None),
+    let owner = crate::core::runtime::CoreContext::scope(
+        context.clone(),
+        owner_of(
+            &DispatchCtx::new(context.clone()),
+            "owner-test-revoked",
+            None,
+        ),
     )
     .await;
     assert_eq!(owner, Ok(None));
@@ -105,7 +111,8 @@ async fn a_device_found_in_the_local_scope_belongs_to_local_and_is_remembered() 
         crate::core::runtime::DomainSet::full(),
         config,
     );
-    let owner = crate::core::runtime::CoreContext::scope(context.clone(),
+    let owner = crate::core::runtime::CoreContext::scope(
+        context.clone(),
         owner_of(&DispatchCtx::new(context.clone()), "owner-test-found", None),
     )
     .await;
@@ -120,8 +127,13 @@ async fn a_channel_no_scope_knows_is_local_and_not_remembered() {
         crate::core::runtime::DomainSet::full(),
         scoped_config(tmp.path()),
     );
-    let owner = crate::core::runtime::CoreContext::scope(context.clone(),
-        owner_of(&DispatchCtx::new(context.clone()), "owner-test-missing", None),
+    let owner = crate::core::runtime::CoreContext::scope(
+        context.clone(),
+        owner_of(
+            &DispatchCtx::new(context.clone()),
+            "owner-test-missing",
+            None,
+        ),
     )
     .await;
     assert_eq!(owner, Ok(None));
@@ -171,8 +183,13 @@ async fn a_revoked_device_with_a_live_cipher_is_dropped() {
             super::super::crypto::TunnelCipher::new(&[7u8; 32]),
         )),
     );
-    let owner = crate::core::runtime::CoreContext::scope(context.clone(),
-        owner_of(&DispatchCtx::new(context.clone()), "owner-test-cipher", None),
+    let owner = crate::core::runtime::CoreContext::scope(
+        context.clone(),
+        owner_of(
+            &DispatchCtx::new(context.clone()),
+            "owner-test-cipher",
+            None,
+        ),
     )
     .await;
     super::super::rpc::ACTIVE_CIPHERS
@@ -226,7 +243,8 @@ async fn a_leftover_pairing_session_does_not_outlive_a_revocation() {
     super::super::store::insert_device(&config, "owner-test-leftover", "label", "pk", "hash")
         .unwrap();
     super::super::store::revoke_device(&config, "owner-test-leftover").unwrap();
-    let owner = crate::core::runtime::CoreContext::scope(context.clone(),
+    let owner = crate::core::runtime::CoreContext::scope(
+        context.clone(),
         owner_of(
             &DispatchCtx::new(context.clone()),
             "owner-test-leftover",

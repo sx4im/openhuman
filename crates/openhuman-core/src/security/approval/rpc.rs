@@ -295,7 +295,7 @@ pub async fn approval_decide(
             row.tool_name
         ));
     } else if decision == ApprovalDecision::ApproveAlwaysForTool {
-        match crate::config::ops::add_auto_approve_tool(&ctx, &row.tool_name).await {
+        match crate::config::ops::add_auto_approve_tool(ctx, &row.tool_name).await {
             Ok(()) => {
                 tracing::info!(
                     tool = row.tool_name.as_str(),

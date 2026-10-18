@@ -16,11 +16,14 @@ use tinystoragedrivers::{CollectionSpec, DocumentStore, ErrorKind, Precondition,
 
 /// The module's scope of the installed backend, or `None` when the process
 /// runs without a storage backend (the module is then not using this storage).
-pub(super) fn module_scope(module_id: &str) -> Result<Option<ScopedStorage>> {
+pub(super) fn module_scope(
+    ctx: &crate::core::runtime::DispatchCtx,
+    module_id: &str,
+) -> Result<Option<ScopedStorage>> {
     let Some(backend) = crate::storage::installed() else {
         return Ok(None);
     };
-    let scope = super::storage_host::current_module_scope(&crate::core::runtime::DispatchCtx::ambient(), module_id)
+    let scope = super::storage_host::current_module_scope(ctx, module_id)
         .map_err(|error| anyhow!("resolve the module scope: {:?}", error.kind()))?;
     let scoped = backend
         .for_scope(&scope)

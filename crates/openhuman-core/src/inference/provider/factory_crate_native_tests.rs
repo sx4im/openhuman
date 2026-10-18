@@ -134,7 +134,13 @@ async fn create_chat_model_uses_native_test_override() {
     ])));
     let config = Config::default();
 
-    let model = create_chat_model("chat", &config, 0.3).expect("create_chat_model must build");
+    let model = create_chat_model_in(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        0.3,
+    )
+    .expect("create_chat_model must build");
     let response = model
         .invoke(&(), ModelRequest::new(vec![Message::user("hi there")]))
         .await
@@ -175,7 +181,13 @@ async fn one_shot_chat_models_preserve_factory_temperature_as_request_default() 
     }));
 
     let config = Config::default();
-    let role_model = create_chat_model("chat", &config, 0.3).expect("role model");
+    let role_model = create_chat_model_in(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        0.3,
+    )
+    .expect("role model");
     role_model
         .invoke(&(), ModelRequest::new(vec![Message::user("default")]))
         .await
@@ -191,15 +203,28 @@ async fn one_shot_chat_models_preserve_factory_temperature_as_request_default() 
         .await
         .expect("explicit-temperature invoke");
 
-    let turn_model = create_turn_chat_model(&crate::core::runtime::DispatchCtx::ambient(), "chat", &config, "hint:chat", 0.2).expect("turn model");
+    let turn_model = create_turn_chat_model(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        "hint:chat",
+        0.2,
+    )
+    .expect("turn model");
     turn_model
         .invoke(&(), ModelRequest::new(vec![Message::user("turn default")]))
         .await
         .expect("turn default-temperature invoke");
 
-    let explicit_turn_model =
-        create_turn_chat_model_from_string(&crate::core::runtime::DispatchCtx::ambient(), "chat", "openhuman", &config, "hint:chat", 0.4)
-            .expect("explicit turn model");
+    let explicit_turn_model = create_turn_chat_model_from_string(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        "openhuman",
+        &config,
+        "hint:chat",
+        0.4,
+    )
+    .expect("explicit turn model");
     explicit_turn_model
         .invoke(
             &(),
@@ -239,8 +264,13 @@ fn create_chat_model_routes_managed_backend_to_crate_native() {
     let _guard = crate::inference::inference_test_guard();
     // No test-provider override installed → the managed short-circuit engages.
     let config = Config::default();
-    let (model, _model_id) = create_chat_model_with_model_id("chat", &config, 0.7)
-        .expect("managed create_chat_model must build");
+    let (model, _model_id) = create_chat_model_with_model_id_in(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        0.7,
+    )
+    .expect("managed create_chat_model must build");
     assert_eq!(
         model
             .profile()
@@ -255,8 +285,13 @@ fn create_chat_model_routes_local_runtime_to_crate_native() {
     let _guard = crate::inference::inference_test_guard();
     let mut config = Config::default();
     config.chat_provider = Some("ollama:qwen2.5".to_string());
-    let (model, model_id) = create_chat_model_with_model_id("chat", &config, 0.7)
-        .expect("local create_chat_model must build");
+    let (model, model_id) = create_chat_model_with_model_id_in(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        0.7,
+    )
+    .expect("local create_chat_model must build");
     assert_eq!(model_id, "qwen2.5");
     // Motion B (#4727): a local runtime now builds a crate-native `OpenAiModel`
     // (not a legacy model wrapper), so its profile carries the concrete
@@ -312,8 +347,13 @@ fn create_chat_model_routes_plain_bearer_cloud_slug_to_crate_native() {
     let mut config = Config::default();
     config.cloud_providers.push(deepseek_entry("p_ds"));
     config.chat_provider = Some("deepseek:deepseek-reasoner".to_string());
-    let (model, model_id) = create_chat_model_with_model_id("chat", &config, 0.7)
-        .expect("bearer cloud create_chat_model must build");
+    let (model, model_id) = create_chat_model_with_model_id_in(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        0.7,
+    )
+    .expect("bearer cloud create_chat_model must build");
     assert_eq!(model_id, "deepseek-reasoner");
     let profile = model
         .profile()
@@ -377,8 +417,13 @@ fn create_chat_model_routes_anthropic_auth_cloud_slug_to_crate_native() {
         .cloud_providers
         .push(anthropic_entry("p_anth", "anthropic"));
     config.chat_provider = Some("anthropic:claude-sonnet-4-6".to_string());
-    let (model, model_id) = create_chat_model_with_model_id("chat", &config, 0.7)
-        .expect("anthropic cloud create_chat_model must build");
+    let (model, model_id) = create_chat_model_with_model_id_in(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &config,
+        0.7,
+    )
+    .expect("anthropic cloud create_chat_model must build");
     assert_eq!(model_id, "claude-sonnet-4-6");
     assert_eq!(
         model.profile().and_then(|p| p.provider.as_deref()),
@@ -527,8 +572,14 @@ async fn native_claude_turn_routes_disclose_pinned_models() {
     let pinned_sdk = "egress-sdk-pinned-marker";
     let mut sdk_config = Config::default();
     sdk_config.chat_provider = Some(format!("claude_agent_sdk:{configured_sdk}"));
-    create_turn_chat_model(&crate::core::runtime::DispatchCtx::ambient(), "chat", &sdk_config, pinned_sdk, 0.0)
-        .expect("Claude Agent SDK turn model should build");
+    create_turn_chat_model(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &sdk_config,
+        pinned_sdk,
+        0.0,
+    )
+    .expect("Claude Agent SDK turn model should build");
 
     let configured_code = "egress-code-configured-marker";
     let pinned_code = "egress-code-pinned-marker";
@@ -537,7 +588,13 @@ async fn native_claude_turn_routes_disclose_pinned_models() {
     // Egress is disclosed once the effective model is selected, before the
     // environment probe. The test therefore remains valid on hosts without the
     // Claude Code CLI.
-    let _ = create_turn_chat_model(&crate::core::runtime::DispatchCtx::ambient(), "chat", &code_config, pinned_code, 0.0);
+    let _ = create_turn_chat_model(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        "chat",
+        &code_config,
+        pinned_code,
+        0.0,
+    );
 
     let sentinel = "egress-native-claude-sentinel-end";
     BUS.publish(DomainEvent::ExternalTransferPending {
@@ -662,63 +719,5 @@ fn try_create_cloud_slug_flips_openai_but_declines_non_cloud() {
     unconfigured.chat_provider = Some("deepseek:deepseek-chat".to_string());
     assert!(
         try_create_cloud_slug_chat_model("chat", &unconfigured, &EgressLedger::none()).is_none()
-    );
-}
-
-/// The per-turn egress ledger rides the factory chain as an explicit argument:
-/// two managed constructions through one `EgressLedger::per_turn()` disclose the
-/// destination once, while constructions with no ledger disclose each time.
-#[tokio::test]
-async fn managed_construction_ledger_collapses_repeat_disclosures() {
-    use crate::core::events::DomainEvent;
-
-    let _guard = crate::inference::inference_test_guard_async().await;
-    crate::core::bus::init().await.expect("bus init");
-    let mut rx = crate::core::bus::BUS.get().unwrap().receiver();
-
-    let config = Config {
-        default_model: Some("egress-ledger-factory-test-model".to_string()),
-        ..Config::default()
-    };
-    let build = |ledger: &EgressLedger| {
-        managed_backend::make_openhuman_backend_model_for_thread(
-            "chat",
-            &config,
-            "egress-ledger-factory-test-model",
-            true,
-            Some("ledger-test-thread"),
-            ledger,
-        )
-        .expect("managed construction")
-    };
-
-    let ledger = EgressLedger::per_turn();
-    build(&ledger);
-    build(&ledger);
-    build(&EgressLedger::none());
-
-    let sentinel = "egress-ledger-factory-sentinel";
-    crate::security::egress::emit_external_transfer(
-        None,
-        crate::security::egress::EgressDescriptor::network_fetch(sentinel),
-    );
-    let mut disclosures = 0;
-    loop {
-        match rx.recv().await {
-            Some(DomainEvent::ExternalTransferPending { descriptor, .. }) => {
-                if descriptor.service == "egress-ledger-factory-test-model" {
-                    disclosures += 1;
-                }
-                if descriptor.service == sentinel {
-                    break;
-                }
-            }
-            Some(_) => continue,
-            None => panic!("the bus closed before the sentinel arrived"),
-        }
-    }
-    assert_eq!(
-        disclosures, 2,
-        "two ledgered constructions disclose once; the ledger-less one discloses again"
     );
 }

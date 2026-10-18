@@ -220,7 +220,7 @@ pub(crate) async fn track_parallel_turn_for_test(
     cancel: tokio_util::sync::CancellationToken,
 ) {
     let watched = cancel.clone();
-    let handle = tokio::spawn(async move { watched.cancelled().await });
+    let handle = ctx.spawn(async move { watched.cancelled().await });
     parallel_in_flight(ctx).lock_owned().await.insert(
         key_for(ctx, request_id),
         ParallelEntry {

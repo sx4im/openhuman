@@ -16,7 +16,10 @@ fn decode<T: DeserializeOwned>(value: Value) -> HostResult<T> {
 #[tokio::test]
 async fn an_index_saved_through_the_host_loads_back_per_kind() {
     let dir = tempfile::tempdir().unwrap();
-    let session = Session::new(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let session = Session::new(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
 
     let missing = dispatch(
         &session,
@@ -60,7 +63,10 @@ async fn an_index_saved_through_the_host_loads_back_per_kind() {
 #[tokio::test]
 async fn without_managed_jev_evaluate_is_unsupported() {
     let dir = tempfile::tempdir().unwrap();
-    let session = Session::new(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let session = Session::new(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
     let request = json!([{ "body": { "questions": {}, "messages": [] } }]);
     let result = dispatch(&session, host_methods::EVALUATE, request)
         .await
@@ -93,7 +99,10 @@ async fn search_switched_off_is_unsupported() {
 #[tokio::test]
 async fn deliver_is_acknowledged_and_unknown_members_are_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let session = Session::new(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let session = Session::new(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
     let delivered = dispatch(
         &session,
         host_methods::DELIVER,
@@ -129,7 +138,10 @@ fn registrations_are_independent_and_forgotten_on_drop() {
 #[test]
 fn a_kept_registration_lives_until_the_module_reports_the_end() {
     let dir = tempfile::tempdir().unwrap();
-    let registration = register(&crate::core::runtime::DispatchCtx::host_default(), &config_in(dir.path()));
+    let registration = register(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config_in(dir.path()),
+    );
     let id = registration.correlation().to_owned();
     registration.keep_for_background();
     assert!(
@@ -165,7 +177,10 @@ async fn a_remix_session_answers_under_the_context_that_registered_it() {
     let dir = tempfile::tempdir().unwrap();
     let caller = CoreContext::for_test(DomainSet::full(), None);
     let other = CoreContext::for_test(DomainSet::full(), None);
-    let session = Session::new(&DispatchCtx::new(Arc::clone(&caller)), &config_in(dir.path()));
+    let session = Session::new(
+        &DispatchCtx::new(Arc::clone(&caller)),
+        &config_in(dir.path()),
+    );
     // A callback arrives on the module bus while some other context is active.
     let seen = CoreContext::scope(Arc::clone(&other), async { session.dispatch_ctx() }).await;
     assert!(Arc::ptr_eq(seen.core().expect("bound"), &caller));

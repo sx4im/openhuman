@@ -376,13 +376,15 @@ async fn queued_work_keeps_the_callers_core_context() {
         enqueue(
             cache.clone(),
             key.clone(),
-            Box::pin(crate::core::runtime::DispatchCtx::ambient().enter(async move {
-                assert!(Arc::ptr_eq(
-                    &crate::core::runtime::CoreContext::scoped().unwrap(),
-                    &expected
-                ));
-                Some(pack("scoped"))
-            })),
+            Box::pin(
+                crate::core::runtime::DispatchCtx::ambient().enter(async move {
+                    assert!(Arc::ptr_eq(
+                        &crate::core::runtime::CoreContext::scoped().unwrap(),
+                        &expected
+                    ));
+                    Some(pack("scoped"))
+                }),
+            ),
         );
         drain(&cache, &key).await;
         assert_eq!(completed(&cache, &key).unwrap().markdown, "scoped");
@@ -453,9 +455,12 @@ async fn an_erase_retires_queued_automatic_work_and_allows_later_work() {
     );
     // The current-thread executor has not polled the earlier job. Erasure
     // advances the owner fence synchronously before its first suspension.
-    let fence = crate::memory::tool_writes::fence_and_clear(&config)
-        .await
-        .unwrap();
+    let fence = crate::memory::tool_writes::fence_and_clear(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+    )
+    .await
+    .unwrap();
     let new_count = later.clone();
     enqueue(
         cache.clone(),
@@ -503,10 +508,13 @@ async fn erase_waits_for_current_automatic_work_before_returning_its_barrier() {
     );
     started.notified().await;
     let erase_config = config.clone();
-    let mut fencing =
-        tokio::spawn(
-            async move { crate::memory::tool_writes::fence_and_clear(&erase_config).await },
-        );
+    let mut fencing = tokio::spawn(async move {
+        crate::memory::tool_writes::fence_and_clear(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &erase_config,
+        )
+        .await
+    });
     assert!(
         tokio::time::timeout(Duration::from_secs(1), &mut fencing)
             .await

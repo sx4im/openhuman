@@ -63,10 +63,14 @@ crate-type = ["rlib"]
 # Optional: exclusive to the default-ON `flows` feature (#4797). A slim build
 # without `flows` drops this crate and its `jaq-*` JSON-query stack entirely.
 tinyflows = { version = "0.8", features = ["mock"], optional = true }
-# Schedule model + pure next-run logic for the `cron::` domain (cron expressions,
-# time zones, active hours, cadence floor). Unconditional: the cron scheduler is
-# not behind the `flows` gate. Runtime, store and config stay in `cron::`.
-tinyflows-schedule = { path = "../../vendor/tinyflows/crates/tinyflows-schedule" }
+# The tinyflows module's bus contract (`tinyflows_bus::schedule`): the job,
+# run, schedule and delivery records of the `cron::` domain, the member names
+# and the callback vocabulary. Unconditional: the cron scheduler is not behind
+# the `flows` gate. The scheduler runtime, job store and schedule maths run in
+# the `tinyflows` module; core links only this contract (never
+# `tinyflows-schedule` or `tinyflows-drivers`' `schedule` store). It depends on
+# serde/chrono alone, like every `*-bus` crate.
+tinyflows-bus = { path = "../../vendor/tinyflows/crates/tinyflows-bus" }
 # The saved-flow catalog, split out of this crate's `flows::` domain so a second
 # host storing workflows does not have to reinvent it. `tinyflows-catalog` is
 # the model (flows, revisions, runs, drafts, suggestions, the n8n importer, the
@@ -78,11 +82,12 @@ tinyflows-schedule = { path = "../../vendor/tinyflows/crates/tinyflows-schedule"
 # `WorkflowGraph` type. Optional and exclusive to `flows` for the same reason
 # the engine is.
 tinyflows-catalog = { path = "../../vendor/tinyflows/crates/tinyflows-catalog", optional = true }
-# tinyflows' stores on the storage ports: the only persistence for cron jobs,
-# the flow catalog, flow state and checkpoints (`storage`). The cron half
-# (`schedule`) is unconditional like cron itself; the catalog, flow state and
-# checkpointer (`catalog`, which needs the engine) ride the `flows` gate.
-tinyflows-drivers = { path = "../../vendor/tinyflows/crates/tinyflows-drivers", default-features = false, features = ["schedule"] }
+# tinyflows' stores on the storage ports: the flow catalog, flow state and
+# checkpoints (`catalog`, which needs the engine), so they ride the `flows`
+# gate. The cron job/run store is no longer linked: the `tinyflows` module owns
+# it behind `tinyflows_bus::schedule` and reaches the scope's documents through
+# the host's document port (`cron::documents_port`).
+tinyflows-drivers = { path = "../../vendor/tinyflows/crates/tinyflows-drivers", default-features = false, optional = true }
 # The authoring copilot's words: the `workflow_builder` / `flow_discovery`
 # standing archetypes and the turn brief that opens a builder turn. Harness-free
 # by construction — it names no tool trait and no model client — so this host
@@ -93,9 +98,11 @@ tinyflows-copilot = { path = "../../vendor/tinyflows/crates/tinyflows-copilot", 
 # (`flows.db`, `jobs.db`, `checkpoints.db`, drafts) and copies them into the
 # port-backed stores, read-only (`storage::import`). It needs the engine and the
 # catalog, so those importers ride the `flows` gate (`tinyflows-import/engine`,
-# `store`, `catalog`); the `schedule` importer is always on, so a build without
-# `flows` still imports legacy cron jobs.
-tinyflows-import = { path = "../../vendor/tinyflows/crates/tinyflows-import", default-features = false, features = ["schedule"] }
+# `store`, `catalog`); the `schedule-read` reader is always on, so a build
+# without `flows` still imports legacy cron jobs: it decodes `jobs.db` into bus
+# records that the host replays through the module's `import_job`/`import_run`
+# store operations (it does not link the scheduler implementation).
+tinyflows-import = { path = "../../vendor/tinyflows/crates/tinyflows-import", default-features = false, features = ["schedule-read"] }
 # TinyAgents — Rust LLM orchestration framework (LangGraph/LangChain-style):
 # durable state graphs, agent-loop harness, model/tool registries, REPL +
 # `.rag` workflow language. openhuman's agent engine + orchestration run on this
@@ -140,6 +147,7 @@ tinyagents-harness = { path = "../../vendor/tinyagents/crates/tinyagents-harness
     "builtin-tools",
 ] }
 tinybox-bus = { path = "../../vendor/tinybox/crates/tinybox-bus" }
+tiny-artifacts = { path = "../../vendor/tiny-artifacts/crates/tiny-artifacts" }
 tinyagents-definition = { path = "../../vendor/tinyagents/crates/tinyagents-definition" }
 # Live (realtime voice) agent sessions: `tinyagents-live` runs a
 # `tinyliveagents` provider session (Gemini Live direct/relayed, ElevenLabs
@@ -222,9 +230,8 @@ tinyconnectors-bus = { path = "../../vendor/tinyconnectors/crates/tinyconnectors
 
 
 
-# tinymcp: pure tool-UI rules only (`tinymcp::ui`). The MCP runtime itself runs
-# as a module behind `tinymcp-bus`.
-tinymcp = { path = "../../vendor/tinymcp/crates/tinymcp", default-features = false, features = ["ui"] }
+# tinymcp's contract, including the pure tool-UI rules (`tinymcp_bus::ui`). The
+# MCP runtime itself runs as a module behind it.
 tinymcp-bus = { path = "../../vendor/tinymcp/crates/tinymcp-bus", features = ["schemars"] }
 # The transport-free channel vocabulary: inbound envelopes, outbound intents,
 # the config schema, controller metadata and relay frames. UNCONDITIONAL — `DomainEvent` embeds
@@ -333,8 +340,7 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 hkdf = "0.12"
 hex = "0.4"
 # The host-owned SaaS gateway signature uses HMAC with SHA-256.
-hmac = "0.13"
-sha2_011 = { package = "sha2", version = "0.11" }
+hmac = "0.12"
 tokio-util = { version = "0.7", features = ["rt", "io"] }
 # tokio-tungstenite is declared per-target below so the TLS backend
 # (native-tls on Windows, rustls on macOS / Linux) matches the reqwest
@@ -376,7 +382,7 @@ sentry = { version = "0.47.0", default-features = false, optional = true, featur
 url = "2"
 tempfile = "3"
 fs2 = "0.4"
-# The scheduler gate's battery/AC probe (`cron::scheduler_gate::signals`),
+# The scheduler gate's battery/AC probe (`platform::llm_gate::signals`),
 # behind the `scheduler-gate` feature. CPU sampling uses `sysinfo` above.
 starship-battery = { version = "0.12", optional = true }
 
@@ -515,7 +521,11 @@ tinybox-core = { path = "../../vendor/tinybox/crates/tinybox-core" }
 tinymemory-api = { path = "../../vendor/tinymemory/crates/tinymemory-api", features = ["conformance"] }
 # The document catalog's `*_for_test` fixtures, which the flows store forwards
 # in test builds.
-tinyflows-drivers = { path = "../../vendor/tinyflows/crates/tinyflows-drivers", default-features = false, features = ["schedule", "test-fixtures"] }
+tinyflows-drivers = { path = "../../vendor/tinyflows/crates/tinyflows-drivers", default-features = false, features = ["test-fixtures"] }
+# The real tinyflows module, linked into the test binary (never the product) as
+# the fixture behind `modules::tinyflows::fixture`: the scheduler runtime, job
+# store and schedule maths that `cron::` reaches over the bus.
+tinyflows-module = { path = "../../vendor/tinyflows/crates/tinyflows-module", features = ["static-link"] }
 # Test fixtures derive a known account from the BIP-39 vector phrase. Production
 # does not derive at all — see the note on the main `tinywallet` entry. Cargo
 # does not link dev-dependency features into the shipped binary, so enabling
@@ -751,7 +761,7 @@ media = ["tinyagents-harness/media"]
 # runtime `DomainSet::flows` flag (#4796): the feature narrows the compile-time
 # surface, `DomainSet` gates it at runtime.
 # NOTE: this gate does NOT drop `tinyagents` itself — 26+ domains consume it.
-flows = ["modules", "dep:tinyflows", "dep:tinyflows-catalog", "dep:tinyflows-copilot", "tinyflows-import/engine", "tinyflows-import/store", "tinyflows-import/catalog", "tinyflows-drivers/catalog"]
+flows = ["modules", "dep:tinyflows", "dep:tinyflows-catalog", "dep:tinyflows-copilot", "dep:tinyflows-drivers", "tinyflows-import/engine", "tinyflows-import/store", "tinyflows-import/catalog", "tinyflows-drivers/catalog"]
 # Skills domains: `openhuman::skills` (metadata/discovery/install),
 # `openhuman::skill_runtime` (SKILL.md execution + the skill_executor agent),
 # and `openhuman::skill_registry` (remote catalogs + the skill_setup agent).

@@ -35,7 +35,9 @@ fn ensure_configured() {
     CONFIGURE.call_once(|| {
         let secs = module::resolve_effective(module::DEFAULT_TIMEOUT_SECS, read_env().as_deref());
         module::configure(module::TimeoutSettings::with_inherited_secs(secs));
-        module::set_task_wrapper(|fut| Box::pin(crate::core::runtime::DispatchCtx::ambient().enter(fut)));
+        module::set_task_wrapper(|fut| {
+            Box::pin(crate::core::runtime::DispatchCtx::ambient().enter(fut))
+        });
         log::debug!("[tool_timeout] configured module settings inherited={secs}s");
     });
 }

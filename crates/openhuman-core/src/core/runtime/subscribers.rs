@@ -165,7 +165,7 @@ pub(super) fn register_domain_subscribers(
         // so they observe a real policy on their first iteration (otherwise they
         // fall back to `Policy::Normal` and miss the initial throttle decision on
         // battery-powered hosts).
-        crate::cron::scheduler_gate::init_global(config.scheduler_gate.clone());
+        crate::platform::llm_gate::init_global(config.scheduler_gate.clone());
 
         // A headless host (Docker / VPS / CI) has no interactive login; it
         // hands the core a credential through the environment instead. The
@@ -188,11 +188,11 @@ pub(super) fn register_domain_subscribers(
         // 401.
         if crate::security::credentials::api_key::has_api_key(&config) {
             log::info!("[auth] api-key credential present at startup — scheduler gate signed in");
-            crate::cron::scheduler_gate::set_signed_out(false);
+            crate::platform::llm_gate::set_signed_out(false);
         } else {
             match crate::security::credentials::jwt::get_session_token(&config) {
                 Ok(Some(_)) => {
-                    crate::cron::scheduler_gate::set_signed_out(false);
+                    crate::platform::llm_gate::set_signed_out(false);
                 }
                 Ok(None) => {
                     log::info!(
@@ -201,7 +201,7 @@ pub(super) fn register_domain_subscribers(
                         config.config_path.display(),
                         crate::security::secret_storage::backend_name(),
                     );
-                    crate::cron::scheduler_gate::set_signed_out(true);
+                    crate::platform::llm_gate::set_signed_out(true);
                 }
                 Err(err) => {
                     log::warn!(
@@ -210,7 +210,7 @@ pub(super) fn register_domain_subscribers(
                         config.config_path.display(),
                         crate::security::secret_storage::backend_name(),
                     );
-                    crate::cron::scheduler_gate::set_signed_out(true);
+                    crate::platform::llm_gate::set_signed_out(true);
                 }
             }
         }

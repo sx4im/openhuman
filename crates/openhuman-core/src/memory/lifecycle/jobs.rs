@@ -121,8 +121,8 @@ pub async fn run(config: &Config, selection: Selection) -> MemoryResult<Vec<JobR
 
 /// The cron entry point: runs due jobs unless background work is paused.
 pub async fn run_due(config: &Config) {
-    if let crate::cron::scheduler_gate::Policy::Paused { reason } =
-        crate::cron::scheduler_gate::current_policy()
+    if let crate::platform::llm_gate::Policy::Paused { reason } =
+        crate::platform::llm_gate::current_policy()
     {
         tracing::debug!(
             ?reason,

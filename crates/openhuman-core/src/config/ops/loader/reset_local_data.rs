@@ -7,7 +7,6 @@ use std::path::Path;
 
 use serde_json::json;
 
-use super::load::load_config_with_timeout;
 use super::paths::{active_workspace_marker_path, config_openhuman_dir, default_openhuman_dir};
 use crate::core::Outcome;
 

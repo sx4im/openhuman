@@ -117,7 +117,12 @@ pub(crate) async fn list_artifacts(
         workspace_dir
     );
     let docs = documents(workspace_dir).await?;
-    let all = on_docs(docs, |docs| docs.list_meta()).await?;
+    let owned = thread_id.map(str::to_string);
+    let all = on_docs(docs, move |docs| match owned {
+        Some(thread_id) => docs.list_meta_for_thread(&thread_id),
+        None => docs.list_meta(),
+    })
+    .await?;
     Ok(page_of(all, offset, limit, thread_id))
 }
 
@@ -453,7 +458,11 @@ pub async fn create_artifact_regenerating(
         created_at,
         error: None,
         thread_id,
-        tool_call_id: tool_call_id.map(str::to_string),
+        // A regenerate keeps the tool call that made the artifact: dropping it
+        // would detach the card from that call's bubble.
+        tool_call_id: tool_call_id
+            .map(str::to_string)
+            .or_else(|| previous.as_ref().and_then(|prev| prev.tool_call_id.clone())),
     };
     save_artifact_meta(workspace_dir, &meta).await?;
 
@@ -580,7 +589,9 @@ pub async fn fail_artifact(
 /// non-chat callers (CLI, cron, sub-agent runners) so artifact emit hooks
 /// degrade gracefully: the event is still published but the web subscriber
 /// drops it for lack of a routing target.
-fn chat_route(chat: Option<&ApprovalChatContext>) -> (Option<String>, Option<String>, Option<String>) {
+fn chat_route(
+    chat: Option<&ApprovalChatContext>,
+) -> (Option<String>, Option<String>, Option<String>) {
     match chat {
         Some(ctx) => (
             Some(ctx.thread_id.clone()),

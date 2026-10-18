@@ -13,7 +13,6 @@ import {
   areasFromEnv,
   buildPlan,
   hostedMatrix,
-  rustWrapperFor,
   selectLanes,
   validatePlan,
 } from "../ci/self-hosted/lanes-plan.mjs";
@@ -22,10 +21,6 @@ import {
   processTable,
   treeRssMiB,
   sccacheSummary,
-  tinymoldSummary,
-  tinymoldOnPath,
-  runTinymold,
-  finishTinymold,
   Runner,
   defaultHeavySlots,
   foldLine,
@@ -55,45 +50,50 @@ test("EX63 installs script dependencies only after changed areas are detected", 
   const install = ciLanes.indexOf(
     "- name: Install jq for release-script tests",
   );
+  const python = ciLanes.indexOf("- name: Setup Python for lanes");
+  const start = ciLanes.indexOf("- name: Start lanes");
   assert.ok(
-    detect >= 0 && install > detect,
-    "filter outputs must exist before they gate jq installation",
+    detect >= 0 && install > detect && python > detect && start > python,
+    "area detection and Python setup must precede lane startup",
   );
   const nextStep = ciLanes.indexOf("\n      - name:", install + 1);
   const installBlock = ciLanes.slice(
     install,
     nextStep < 0 ? undefined : nextStep,
   );
-  assert.match(
+  assert.doesNotMatch(
     installBlock,
-    /import tomllib/,
-    "Python 3.11+ already provides TOML parsing",
+    /\bsudo\b|apt-get/,
+    "the pinned jq download does not require package installation",
+  );
+  assert.match(installBlock, /JQ_SHA256/);
+  assert.match(installBlock, /sha256sum -c/);
+
+  const pythonBlock = ciLanes.slice(
+    python,
+    ciLanes.indexOf("\n      - name:", python + 1),
+  );
+  assert.match(pythonBlock, /python-version: "3\.12"/);
+  assert.match(pythonBlock, /update-environment: false/);
+  const startBlock = ciLanes.slice(
+    start,
+    ciLanes.indexOf("\n      - name:", start + 1),
   );
   assert.match(
-    installBlock,
-    /command -v sudo/,
-    "non-root runners may not have sudo",
-  );
-  assert.match(
-    installBlock,
-    /cannot install packages/,
-    "the EX63 image may not grant package installation",
+    startBlock,
+    /OPENHUMAN_CI_PYTHON: \$\{\{ steps\.python\.outputs\.python-path \}\}/,
+    "the pinned Python interpreter is passed to the lanes without exporting its PATH",
   );
 });
 
 test("EX63 provides jq without root and before the lanes start", () => {
-  const install = ciLanes.indexOf(
-    "- name: Install jq for release-script tests",
-  );
+  const install = ciLanes.indexOf("- name: Install jq for release-script tests");
   const end = ciLanes.indexOf("\n      - name:", install + 1);
   const step = ciLanes.slice(install, end);
   assert.doesNotMatch(step, /\bsudo\b|apt-get/);
   assert.match(step, /sha256sum -c/);
   assert.match(step, /GITHUB_PATH/);
-  assert.ok(
-    install < ciLanes.indexOf("- name: Start lanes"),
-    "jq must be on PATH before the lanes spawn",
-  );
+  assert.ok(install < ciLanes.indexOf("- name: Start lanes"), "jq must be on PATH before the lanes spawn");
 });
 
 const plans = () => [
@@ -246,6 +246,7 @@ test("the lane plan retains the shared CI checks", () => {
   const shared = [
     "cargo fmt --manifest-path Cargo.toml --package openhuman --package openhuman-cli --package openhuman-embed --package openhuman-modules-linked --package openhuman-rpc --package openhuman-tinyhumans --package openhuman-tui -- --check",
     "node scripts/ci/check-openhuman-rust-layout.mjs",
+    "node scripts/ci/check-storage-owner.mjs",
     "pnpm agent:runtime-boundary",
     "pnpm rust:ignored-tests",
     "bash scripts/check-linux-tls-dependencies.sh",
@@ -315,6 +316,7 @@ test("the storage area arms only the storage-drivers lane, with the sqlite and f
       [
         "storage-drivers:storage-e2e",
         "storage-drivers:storage-lib-tests",
+        "storage-drivers:cron-module-tests",
         "storage-drivers:storage-session-store-tests",
       ],
       profile,
@@ -417,7 +419,7 @@ test("ex63 needs a scratch dir and gives every Rust lane its own target dir unde
   );
 });
 
-test("instrumented coverage uses the compile cache on ex63 and no wrapper on hosted", () => {
+test("instrumented coverage uses sccache on ex63 and no wrapper on hosted", () => {
   for (const plan of plans()) {
     const ex63 = plan.profile === "ex63";
     const cov = plan.lanes.find((l) => l.name === "rust-cov");
@@ -433,206 +435,6 @@ test("instrumented coverage uses the compile cache on ex63 and no wrapper on hos
     );
     assert.match(tauriCov.run, /--no-rustc-wrapper/);
   }
-});
-
-const TINYMOLD_ENV = {
-  ...EX63_ENV,
-  TINYMOLD_REMOTE_URL: "grpc://172.31.0.1:9092",
-};
-const rustLaneEnvs = (plan) =>
-  plan.lanes
-    .filter((l) => l.targetDir || l.name === "rust-cov" || l.name === "tauri")
-    .flatMap((l) => [
-      l.env,
-      ...l.checks
-        .filter((c) => c.env?.RUSTC_WRAPPER !== undefined)
-        .map((c) => ({ ...l.env, ...c.env })),
-    ]);
-
-test("ex63 compiles through tinymold when the binary and the shared remote are both there", () => {
-  assert.equal(
-    rustWrapperFor({
-      profile: "ex63",
-      env: TINYMOLD_ENV,
-      tinymoldOnPath: true,
-    }),
-    "tinymold",
-  );
-  const plan = buildPlan({
-    profile: "ex63",
-    areas: ALL,
-    env: TINYMOLD_ENV,
-    tinymoldOnPath: true,
-  });
-  assert.equal(plan.rustWrapper, "tinymold");
-  assert.equal(plan.tinymoldLog, "/scratch/tinymold.log");
-  const envs = rustLaneEnvs(plan);
-  assert.ok(envs.length > 0);
-  for (const env of envs) {
-    if (env.RUSTC_WRAPPER === undefined) continue; // tauri's lane env
-    assert.equal(env.RUSTC_WRAPPER, "tinymold");
-    assert.equal(env.TINYMOLD_LOG, "/scratch/tinymold.log");
-  }
-  // Every compiling lane is covered, coverage included.
-  for (const name of [
-    "rust-cov",
-    "rust-lint",
-    "rust-gates-off",
-    "storage-drivers",
-  ])
-    assert.equal(
-      plan.lanes.find((l) => l.name === name).env.RUSTC_WRAPPER,
-      "tinymold",
-      name,
-    );
-  const tauri = plan.lanes.find((l) => l.name === "tauri").checks;
-  for (const c of tauri) assert.equal(c.env.RUSTC_WRAPPER, "tinymold", c.name);
-  assert.ok(allRuns(plan).every((r) => !/sccache/.test(r)));
-});
-
-test("ex63 falls back to sccache without the tinymold binary or the shared remote", () => {
-  const cases = [
-    { env: EX63_ENV, tinymoldOnPath: true }, // remote unreachable: vars absent
-    { env: { ...EX63_ENV, TINYMOLD_REMOTE_URL: "" }, tinymoldOnPath: true },
-    { env: TINYMOLD_ENV, tinymoldOnPath: false }, // guest not upgraded yet
-    { env: TINYMOLD_ENV }, // not probed
-  ];
-  for (const c of cases) {
-    assert.equal(rustWrapperFor({ profile: "ex63", ...c }), "sccache");
-    const plan = buildPlan({ profile: "ex63", areas: ALL, ...c });
-    assert.equal(plan.rustWrapper, "sccache");
-    assert.equal(plan.tinymoldLog, null);
-    // Byte-for-byte the plan from before tinymold.
-    assert.deepEqual(
-      plan,
-      buildPlan({ profile: "ex63", areas: ALL, env: EX63_ENV }),
-    );
-    for (const env of rustLaneEnvs(plan)) {
-      if (env.RUSTC_WRAPPER === undefined) continue;
-      assert.equal(env.RUSTC_WRAPPER, "sccache");
-      assert.equal(env.TINYMOLD_LOG, undefined);
-    }
-  }
-});
-
-test("hosted never gets a compile-cache wrapper, tinymold or not", () => {
-  assert.equal(
-    rustWrapperFor({
-      profile: "hosted",
-      env: TINYMOLD_ENV,
-      tinymoldOnPath: true,
-    }),
-    null,
-  );
-  const plan = buildPlan({
-    profile: "hosted",
-    areas: ALL,
-    env: { TINYMOLD_REMOTE_URL: "grpc://172.31.0.1:9092" },
-    tinymoldOnPath: true,
-  });
-  assert.equal(plan.rustWrapper, null);
-  assert.equal(plan.tinymoldLog, null);
-  assert.deepEqual(plan, buildPlan({ profile: "hosted", areas: ALL }));
-  for (const lane of plan.lanes) {
-    assert.equal(lane.env?.RUSTC_WRAPPER, undefined, lane.name);
-    for (const c of lane.checks)
-      assert.equal(c.env?.RUSTC_WRAPPER, undefined, `${lane.name}:${c.name}`);
-  }
-});
-
-test("tinymold is detected only when its binary runs", () => {
-  const calls = [];
-  const ok = (cmd, args) => {
-    calls.push([cmd, ...args]);
-    return { status: 0 };
-  };
-  assert.equal(tinymoldOnPath(ok), true);
-  assert.deepEqual(calls, [["tinymold", "--version"]]);
-  assert.equal(
-    tinymoldOnPath(() => ({ status: null, error: new Error("ENOENT") })),
-    false,
-  );
-  assert.equal(
-    tinymoldOnPath(() => ({ status: 1 })),
-    false,
-  );
-});
-
-test("tinymold pushes since the job start and a failed push is reported, not thrown", () => {
-  const calls = [];
-  const run = (cmd, args, opts) => {
-    calls.push({ cmd, args, timeout: opts.timeout });
-    if (args[0] === "remote")
-      return { status: 1, stdout: "", stderr: "error: connection refused\n" };
-    return {
-      status: 0,
-      stdout:
-        "75.0% hit rate: 3 of 4 cacheable compiles served from cache\nhits 3 (remote 2), misses 1 (0 not stored), not cacheable 5, errors 0\ntime on hits 0.10s, on misses 9.00s\n",
-      stderr: "",
-    };
-  };
-  const result = finishTinymold({
-    log: "/scratch/tinymold.log",
-    since: 1700000000,
-    run,
-  });
-  assert.deepEqual(
-    calls.map((c) => [c.cmd, ...c.args]),
-    [
-      ["tinymold", "remote", "push", "--since", "1700000000"],
-      ["tinymold", "stats", "--log", "/scratch/tinymold.log"],
-    ],
-  );
-  assert.ok(calls[0].timeout > 0, "the push is time-bounded");
-  assert.equal(result.push.ok, false);
-  assert.equal(result.push.status, 1);
-  assert.equal(result.push.output, "error: connection refused");
-  assert.match(result.stats, /^75\.0% hit rate/);
-  // A binary that cannot even start is a failed run, not an exception.
-  const broken = runTinymold(["stats"], {
-    run: () => ({
-      status: null,
-      error: new Error("spawnSync tinymold ENOENT"),
-    }),
-  });
-  assert.deepEqual(broken, {
-    ok: false,
-    status: null,
-    output: "spawnSync tinymold ENOENT",
-  });
-});
-
-test("tinymold summary reports the hit rate and the push outcome", () => {
-  assert.equal(tinymoldSummary(null), null);
-  const stats =
-    "75.0% hit rate: 3 of 4 cacheable compiles served from cache\nhits 3 (remote 2), misses 1 (0 not stored), not cacheable 5, errors 0\ntime on hits 0.10s, on misses 9.00s";
-  assert.equal(
-    tinymoldSummary({
-      stats,
-      push: {
-        ok: true,
-        status: 0,
-        output: "remote: pushed 1 action, 3 objects",
-      },
-    }),
-    "tinymold (shared remote): 75.0% hit rate: 3 of 4 cacheable compiles served from cache (hits 3 (remote 2), misses 1 (0 not stored), not cacheable 5, errors 0).\n" +
-      "tinymold push: remote: pushed 1 action, 3 objects.",
-  );
-  assert.equal(
-    tinymoldSummary({
-      stats: null,
-      push: { ok: false, status: 1, output: "" },
-    }),
-    "tinymold (shared remote): no stats (`tinymold stats` failed).\n" +
-      "tinymold push failed (warning only): exit 1.",
-  );
-  const summary = renderSummary({
-    lanes: [],
-    sccache: null,
-    tinymold: { stats, push: { ok: true, status: 0, output: "" } },
-  });
-  assert.match(summary, /tinymold \(shared remote\): 75\.0% hit rate/);
-  assert.doesNotMatch(summary, /sccache/);
 });
 
 test("sccache summary reports hit rate and the store in use", () => {

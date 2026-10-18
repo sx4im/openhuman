@@ -9,7 +9,6 @@ use serde_json::{Map, Value};
 
 use super::ops;
 use super::types::LiveSettingsPatch;
-use crate::config::rpc as config_rpc;
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};
 

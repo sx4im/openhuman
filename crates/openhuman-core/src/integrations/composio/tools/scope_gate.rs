@@ -77,14 +77,18 @@ pub(crate) fn action_mutates_external_state(slug: &str) -> bool {
 /// preference and the catalog are read from the module that enforces them.
 /// A module that cannot be reached answers as the default preference would,
 /// which is what the host did before the preference moved.
-pub(super) async fn evaluate_tool_visibility(config: &Config, slug: &str) -> ToolDecision {
+pub(super) async fn evaluate_tool_visibility(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: &Config,
+    slug: &str,
+) -> ToolDecision {
     let Some(toolkit) = toolkit_from_slug(slug) else {
         // Unparseable slug — let the backend return its own error.
         return ToolDecision::Allow;
     };
     // Rows still in the legacy workspace file must be in the module before it
     // is asked, or its default (`write` on) would outrank a stored `write=false`.
-    super::super::ops::ensure_user_scopes_migrated(config).await;
+    super::super::ops::ensure_user_scopes_migrated(ctx, config).await;
     let request = VisibleToolsRequest {
         toolkit: toolkit.clone(),
         preference: None,

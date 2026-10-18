@@ -196,7 +196,13 @@ async fn manual_fetch_still_returns_the_explanatory_error() {
     std::fs::create_dir_all(&config.workspace_dir).expect("workspace");
 
     let s = source("ts-manual-path-xyz", 1800);
-    let outcome = pipeline::run_source_once(&crate::core::runtime::DispatchCtx::host_default(), &config, &s, FetchReason::Manual).await;
+    let outcome = pipeline::run_source_once(
+        &crate::core::runtime::DispatchCtx::host_default(),
+        &config,
+        &s,
+        FetchReason::Manual,
+    )
+    .await;
 
     let error = outcome
         .error

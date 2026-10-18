@@ -22,7 +22,6 @@ mod common;
 use common::{chat_completion, offline_config, runtime};
 use openhuman_embed::{Access, Harness, Provider, Workspace};
 use serde_json::json;
-use tinyagents_session::transcript::TranscriptLocator;
 use wiremock::matchers::{any, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

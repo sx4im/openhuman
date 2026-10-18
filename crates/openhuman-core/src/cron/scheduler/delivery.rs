@@ -10,9 +10,9 @@ use crate::core::events::DomainEvent;
 use anyhow::Result;
 use chrono::Utc;
 use {
-    tinyflows_schedule::types::delivery_mode, tinyflows_schedule::types::CronJob,
-    tinyflows_schedule::types::DeliveryConfig, tinyflows_schedule::types::DeliveryStatus,
-    tinyflows_schedule::types::JobType,
+    tinyflows_bus::schedule::types::delivery_mode, tinyflows_bus::schedule::types::CronJob,
+    tinyflows_bus::schedule::types::DeliveryConfig, tinyflows_bus::schedule::types::DeliveryStatus,
+    tinyflows_bus::schedule::types::JobType,
 };
 
 pub(super) const MORNING_BRIEFING_AGENT_ID: &str = "morning_briefing";

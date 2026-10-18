@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@assistant-ui/react-lexical@0.2.10':
-    hash: d57b1feffe8c1dbf9359c98eaa00a72f6fd7f92cc4686f1517e1e7b5b03f0054
+    hash: 006331c5bcacf7a003ec83e5083d53a38094c3474842bb7812a025819bcaab8f
     path: app/patches/@assistant-ui__react-lexical@0.2.10.patch
   mdast-util-gfm-autolink-literal@2.0.1:
     hash: 9710fb84b470cf502f9292ed2b12e64dbe6d3570126481308ca3d32fced73a3f
@@ -46,7 +46,7 @@ importers:
         version: 0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5))
       '@assistant-ui/react-lexical':
         specifier: ^0.2.10
-        version: 0.2.10(patch_hash=d57b1feffe8c1dbf9359c98eaa00a72f6fd7f92cc4686f1517e1e7b5b03f0054)(@assistant-ui/core@0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(assistant-cloud@0.2.2)(react@19.2.5))(@assistant-ui/react@0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5)))(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(typescript@5.8.3)(yjs@13.6.32)
+        version: 0.2.10(patch_hash=006331c5bcacf7a003ec83e5083d53a38094c3474842bb7812a025819bcaab8f)(@assistant-ui/core@0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(assistant-cloud@0.2.2)(react@19.2.5))(@assistant-ui/react@0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5)))(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(typescript@5.8.3)(yjs@13.6.32)
       '@assistant-ui/react-markdown':
         specifier: ^0.14.12
         version: 0.14.12(@assistant-ui/react@0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5)))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -7164,7 +7164,7 @@ snapshots:
       - ioredis
       - redis
 
-  '@assistant-ui/react-lexical@0.2.10(patch_hash=d57b1feffe8c1dbf9359c98eaa00a72f6fd7f92cc4686f1517e1e7b5b03f0054)(@assistant-ui/core@0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(assistant-cloud@0.2.2)(react@19.2.5))(@assistant-ui/react@0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5)))(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(typescript@5.8.3)(yjs@13.6.32)':
+  '@assistant-ui/react-lexical@0.2.10(patch_hash=006331c5bcacf7a003ec83e5083d53a38094c3474842bb7812a025819bcaab8f)(@assistant-ui/core@0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(assistant-cloud@0.2.2)(react@19.2.5))(@assistant-ui/react@0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5)))(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(typescript@5.8.3)(yjs@13.6.32)':
     dependencies:
       '@assistant-ui/core': 0.3.20(@assistant-ui/store@0.3.14(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(react@19.2.5))(@assistant-ui/tap@0.9.18(@types/react@19.2.14)(react@19.2.5))(@types/react@19.2.14)(assistant-cloud@0.2.2)(react@19.2.5)
       '@assistant-ui/react': 0.15.21(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(immer@11.1.4)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(use-sync-external-store@1.6.0(react@19.2.5))

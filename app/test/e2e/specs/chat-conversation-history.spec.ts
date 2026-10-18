@@ -11,13 +11,13 @@
  *   3. Send second message in same thread: "What was the secret word?"
  *   4. Verify LLM's second call includes prior messages in context
  *   5. Final answer renders with XYZZY canary
- *   6. Thread file on disk contains both exchanges
+ *   6. Durable thread messages contain both exchanges
  *
  * Tests:
  *   H1.1 — first message and response rendered
  *   H1.2 — second LLM call includes ≥ 3 messages (user + assistant + user)
  *   H1.3 — second response with XYZZY canary renders
- *   H1.4 — thread file on disk contains both exchanges
+ *   H1.4 — durable thread messages contain both exchanges
  */
 import { waitForApp } from '../helpers/app-helpers';
 import {
@@ -25,7 +25,6 @@ import {
   clickByTitle,
   clickSend,
   getSelectedThreadId,
-  hexEncodeThreadId,
   typeIntoComposer,
   waitForSocketConnected,
 } from '../helpers/chat-harness';
@@ -243,32 +242,33 @@ describe('Chat conversation history', () => {
     console.log(`${LOG_PREFIX} H1.3: passed — "${CANARY_SECOND}" visible`);
   });
 
-  it('H1.4 — thread file on disk contains both exchanges', async () => {
-    console.log(`${LOG_PREFIX} H1.4: reading workspace thread file`);
-    const relPath = `memory/conversations/threads/${hexEncodeThreadId(threadId)}.jsonl`;
-
+  it('H1.4 — durable thread messages contain both exchanges', async () => {
+    console.log(`${LOG_PREFIX} H1.4: reading durable thread messages`);
     let content = '';
+    let messageCount = 0;
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
-      const read = await callOpenhumanRpc<{ result: { content_utf8: string } }>(
-        'openhuman.test_support_read_workspace_file',
-        { rel_path: relPath, max_bytes: 131_072 }
+      const read = await callOpenhumanRpc<{ data?: { messages?: Array<{ content?: string }> } }>(
+        'openhuman.threads_messages_list',
+        { thread_id: threadId }
       );
-      if (read.ok && read.result?.result?.content_utf8) {
-        content = read.result.result.content_utf8;
-        // Both user messages and the canary must be present.
+      if (read.ok) {
+        const messages = read.result?.data?.messages ?? [];
+        messageCount = messages.length;
+        content = messages.map(message => message.content ?? '').join('\n');
         if (
           content.includes(FIRST_PROMPT) &&
           content.includes(SECOND_PROMPT) &&
           content.includes(CANARY_SECOND)
-        ) {
+        )
           break;
-        }
       }
       await browser.pause(400);
     }
 
-    console.log(`${LOG_PREFIX} H1.4: thread file length: ${content.length}`);
+    console.log(
+      `${LOG_PREFIX} H1.4: persisted thread has ${messageCount} message(s), ${content.length} characters`
+    );
     expect(content).toContain(FIRST_PROMPT);
     expect(content).toContain(SECOND_PROMPT);
     expect(content).toContain(CANARY_SECOND);

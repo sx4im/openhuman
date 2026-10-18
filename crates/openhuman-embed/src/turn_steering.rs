@@ -78,9 +78,10 @@ impl TurnSteering {
     /// Add `text` to the turn as a user message.
     ///
     /// Before `send()`, the message is applied ahead of the first model call.
-    /// While the turn runs, it is applied at the loop's next safe checkpoint
-    /// (see the [module docs](self)). It does not interrupt a model call or
-    /// a tool that is already running.
+    /// While the turn runs, it is applied at the loop's next safe checkpoint:
+    /// after a tool batch has settled, or when the model has written what
+    /// would be its final answer. It does not interrupt a model call or a
+    /// tool that is already running.
     ///
     /// # Errors
     ///

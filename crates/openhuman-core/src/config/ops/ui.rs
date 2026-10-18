@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::core::Outcome;
 
-use super::loader::{fallback_workspace_dir, load_config_with_timeout, snapshot_config_json};
+use super::loader::{fallback_workspace_dir, snapshot_config_json};
 
 #[derive(Debug, Clone, Default)]
 pub struct BrowserSettingsPatch {

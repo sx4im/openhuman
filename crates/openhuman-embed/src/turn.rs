@@ -100,7 +100,7 @@ pub struct Turn {
     trace_content: crate::observe::TraceContent,
     hooks: openhuman_core::agent::hooks::HookScope,
     tools: Option<openhuman_core::agent::HostTools>,
-    tool_env: Option<tinytools_std::timeout::CommandEnvironment>,
+    tool_env: Option<Arc<std::collections::BTreeMap<String, String>>>,
 }
 
 impl Turn {
@@ -176,7 +176,7 @@ impl Turn {
     /// Interpreter pools are bypassed so a pooled process cannot carry another
     /// turn's environment. Independently spawned host tasks must carry the scope.
     pub fn tool_env(mut self, env: impl IntoIterator<Item = (String, String)>) -> Self {
-        self.tool_env = Some(tinytools_std::timeout::CommandEnvironment::new(env));
+        self.tool_env = Some(Arc::new(env.into_iter().collect()));
         self
     }
 
@@ -589,12 +589,15 @@ async fn dispatch(
             }
             let ctx = std::sync::Arc::clone(rt.context());
             let chat_env = options.chat_env;
+            let dispatch =
+                openhuman_core::core::runtime::DispatchCtx::new(std::sync::Arc::clone(&ctx));
             let turn: futures_box::BoxFuture<'_, Result<AgentReply, CoreError>> =
                 Box::pin(async move {
                     use openhuman_core::inference::host_runtime::ops::{
                         agent_chat_reply_for, AgentChatTarget,
                     };
-                    let mut config = openhuman_core::config::rpc::load_config_with_timeout()
+                    let mut config = dispatch
+                        .load_config()
                         .await
                         .map_err(|raw| CoreError::from_rpc_string(AGENT_CHAT, raw))?;
                     let target = match request.agent_id.as_deref().map(str::trim) {

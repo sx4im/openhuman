@@ -167,3 +167,73 @@ fn a_legacy_jobs_db_is_imported_by_the_storage_importer_and_left_untouched() {
     }
     assert_eq!(list_jobs(&config).unwrap().len(), 2);
 }
+
+#[test]
+fn a_patch_over_the_bus_keeps_the_agent_definition_it_does_not_mention() {
+    use tinyflows_bus::schedule::types::{CronJobPatch, SessionTarget};
+    let tmp = TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let job = add_agent_job_with_definition(
+        &config,
+        Some("patched".into()),
+        Schedule::Every {
+            every_ms: 3_600_000,
+        },
+        "say hi",
+        SessionTarget::Isolated,
+        None,
+        None,
+        false,
+        Some("teeny".into()),
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        job.agent_id.as_deref(),
+        Some("teeny"),
+        "the definition id is stored"
+    );
+    let renamed = update_job(
+        &config,
+        &job.id,
+        CronJobPatch {
+            prompt: Some("check in".into()),
+            ..CronJobPatch::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(renamed.prompt.as_deref(), Some("check in"));
+
+    let policy = update_job(
+        &config,
+        &job.id,
+        CronJobPatch {
+            policy: Some(Default::default()),
+            ..CronJobPatch::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        policy.prompt.as_deref(),
+        Some("check in"),
+        "a policy-only patch must not undo the earlier prompt patch"
+    );
+    assert_eq!(
+        get_job(&config, &job.id).unwrap().prompt.as_deref(),
+        Some("check in")
+    );
+    // Regression: `CronJobPatch.agent_id` is `Option<Option<_>>` and a present
+    // `null` means "clear it". A patch that never mentioned the agent used to
+    // serialize `agent_id: null` across the bus, so every update (pausing a
+    // job, a policy change) silently dropped the job's agent definition.
+    assert_eq!(
+        policy.agent_id.as_deref(),
+        Some("teeny"),
+        "an unrelated patch cleared the agent definition"
+    );
+    assert_eq!(
+        get_job(&config, &job.id).unwrap().agent_id.as_deref(),
+        Some("teeny")
+    );
+}

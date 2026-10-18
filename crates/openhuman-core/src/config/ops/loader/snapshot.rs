@@ -3,7 +3,6 @@
 use crate::core::runtime::DispatchCtx;
 use serde_json::json;
 
-use super::load::load_config_with_timeout;
 use crate::config::Config;
 use crate::core::Outcome;
 

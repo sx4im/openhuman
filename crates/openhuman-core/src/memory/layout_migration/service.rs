@@ -78,6 +78,7 @@ impl Drop for RunGuard {
 /// one is already running for this workspace, or while an import of old
 /// local memory is unfinished (import first, then reorganise).
 pub fn start(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: Config,
     host: Arc<dyn LayoutHost>,
     trigger: Trigger,
@@ -99,7 +100,7 @@ pub fn start(
         return false;
     }
     let guard = RunGuard(workspace);
-    crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+    ctx.spawn(async move {
         let _guard = guard;
         let outcome = lm::run(host.as_ref(), trigger, || {
             let paused = paused();
@@ -132,6 +133,7 @@ pub fn retry(config: &Config) -> MemoryResult<MigrationState> {
 /// Memory's background job: starts or resumes an automatic run unless the
 /// migration is done or already running. Returns whether one started.
 pub fn tick(
+    ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
     host: Arc<dyn LayoutHost>,
     paused: Arc<dyn Fn() -> bool + Send + Sync>,
@@ -139,7 +141,7 @@ pub fn tick(
     match lm::is_finished(host.as_ref()) {
         Ok(true) => false,
         Ok(false) if paused() || is_running(config) => false,
-        Ok(false) => start(config.clone(), host, Trigger::Auto, paused),
+        Ok(false) => start(ctx, config.clone(), host, Trigger::Auto, paused),
         Err(error) => {
             tracing::warn!(
                 code = error.code(),

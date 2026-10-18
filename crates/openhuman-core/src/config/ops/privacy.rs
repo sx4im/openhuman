@@ -9,8 +9,6 @@ use crate::config::{Config, PrivacyMode};
 use crate::core::runtime::DispatchCtx;
 use crate::core::Outcome;
 
-use super::loader::load_config_with_timeout;
-
 /// Partial update for the `[privacy]` block. `None` leaves the mode unchanged.
 #[derive(Debug, Clone, Default)]
 pub struct PrivacySettingsPatch {

@@ -194,7 +194,10 @@ impl Tool for TaskSourceFetchTool {
         log::debug!("[tool][task_sources] fetch invoked");
         let id = read_required_str(&args, "id")?;
         let ctx = crate::agent::tinyagents::host::run_context::dispatch_ctx_for_tool(context);
-        emit!(ops::fetch(&ctx, &self.config, &id).await, "task_source_fetch")
+        emit!(
+            ops::fetch(&ctx, &self.config, &id).await,
+            "task_source_fetch"
+        )
     }
 }
 

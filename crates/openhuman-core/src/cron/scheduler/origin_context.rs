@@ -5,8 +5,8 @@
 use crate::config::Config;
 use crate::core::runtime::DispatchCtx;
 use {
-    crate::cron::channel_bridge, tinyflows_schedule::types::CronJob,
-    tinyflows_schedule::types::JobOrigin,
+    crate::cron::channel_bridge, tinyflows_bus::schedule::types::CronJob,
+    tinyflows_bus::schedule::types::JobOrigin,
 };
 
 /// At most this many trailing messages of the origin conversation.
@@ -112,7 +112,7 @@ pub(crate) async fn build_run_prompt(
     name: &str,
 ) -> String {
     let prompt = job.prompt.clone().unwrap_or_default();
-    use tinyflows_schedule::types::SessionTarget;
+    use tinyflows_bus::schedule::types::SessionTarget;
     match (&job.session_target, &job.origin) {
         (SessionTarget::Isolated, _) => format!("[cron:{} {name}] {prompt}", job.id),
         (target, origin) => {

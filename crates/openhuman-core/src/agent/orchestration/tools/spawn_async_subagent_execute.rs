@@ -393,7 +393,7 @@ impl SpawnAsyncSubagentTool {
         // the off-task delivery subscriber resolves.
         let detached_run_context = detached_parent.data.child();
         let mut abort_report = AbortReport::arm(progress_sink.clone(), &definition.id, &task_id);
-        let join = crate::core::runtime::DispatchCtx::ambient().spawn(crate::agent::turn_origin::propagate(
+        let join = dispatch.spawn(crate::agent::turn_origin::propagate(
             async move {
                 let options = SubagentRunOptions {
                     skill_filter_override: None,

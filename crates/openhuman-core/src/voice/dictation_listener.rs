@@ -106,7 +106,7 @@ pub fn publish_transcription(text: String) -> usize {
 /// Tauri host already registers the shortcut via `tauri-plugin-global-shortcut`
 /// (main-thread-safe) and emits `dictation://toggle` to the frontend, making
 /// the core-side rdev listener redundant on macOS. (#2677)
-pub async fn start_if_enabled(config: &Config) {
+pub async fn start_if_enabled(ctx: &crate::core::runtime::DispatchCtx, config: &Config) {
     if !config.components.voice {
         log::info!("{LOG_PREFIX} [components].voice is off, skipping hotkey listener");
         return;
@@ -136,11 +136,15 @@ pub async fn start_if_enabled(config: &Config) {
 
     // Non-macOS: start the TinyVoice-owned native listener.
     #[cfg(not(target_os = "macos"))]
-    start_module_listener(hotkey_str, config).await;
+    start_module_listener(ctx, hotkey_str, config).await;
 }
 
 #[cfg(not(target_os = "macos"))]
-async fn start_module_listener(hotkey_str: String, config: &Config) {
+async fn start_module_listener(
+    ctx: &crate::core::runtime::DispatchCtx,
+    hotkey_str: String,
+    config: &Config,
+) {
     // Map DictationActivationMode to our hotkey ActivationMode.
     let mode = match config.dictation.activation_mode {
         crate::config::DictationActivationMode::Push => ActivationMode::Push,
@@ -157,6 +161,7 @@ async fn start_module_listener(hotkey_str: String, config: &Config) {
     let cancel = CancellationToken::new();
     let (listener, mut hotkey_rx) =
         match crate::voice::server::hotkey_listener::start_hotkey_listener(
+            ctx,
             config,
             &normalized,
             mode,

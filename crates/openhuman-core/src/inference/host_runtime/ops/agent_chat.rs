@@ -589,7 +589,7 @@ pub async fn agent_chat_reply_for(
     // trust statement and hand every such turn the blanket CLI allowance
     // instead of the narrower one it asked for.
     let run = crate::agent::turn_origin::with_origin(
-        effective_agent_chat_origin(),
+        effective_agent_chat_origin(&turn_ctx),
         agent.run_single_with_approval(message, None, approval),
     );
     // `untrusted_input` was set on the session above; the turn's run context

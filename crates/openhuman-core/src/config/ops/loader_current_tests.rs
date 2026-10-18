@@ -55,3 +55,17 @@ async fn a_context_without_a_route_loads_unchanged_providers() {
         Some(format!("{EPHEMERAL_ROUTE_SLUG}:ctx-model").as_str())
     );
 }
+
+#[tokio::test]
+async fn the_explicit_context_wins_over_the_tasks_scope_and_tenants_do_not_cross() {
+    let mut other = base_config();
+    other.default_model = Some("other-model".to_string());
+    let scoped = context_with(other);
+    let explicit = DispatchCtx::new(context_with(base_config()));
+
+    let loaded = CoreContext::scope(scoped, async { load_current_or_init(&explicit).await })
+        .await
+        .expect("explicit context config loads");
+
+    assert_eq!(loaded.default_model.as_deref(), Some("ctx-model"));
+}

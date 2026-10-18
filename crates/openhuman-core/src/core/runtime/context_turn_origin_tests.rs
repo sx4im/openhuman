@@ -113,10 +113,10 @@ async fn bound_external_authority_wins_over_legacy_trusted_automation() {
                         Some(AgentTurnOrigin::ExternalChannel { sender, .. })
                             if sender.as_deref() == Some("external-sender")
                     ));
-                    let child =
-                        crate::core::runtime::DispatchCtx::ambient().spawn(async { turn_origin::current() })
-                            .await
-                            .unwrap();
+                    let child = crate::core::runtime::DispatchCtx::ambient()
+                        .spawn(async { turn_origin::current() })
+                        .await
+                        .unwrap();
                     assert!(matches!(
                         child,
                         Some(AgentTurnOrigin::ExternalChannel { .. })
@@ -174,27 +174,28 @@ async fn concurrent_channel_turns_keep_tenant_agent_thread_and_policy_isolated()
         };
         let turn = context.derive_channel_turn(Some(thread.clone()), Some(origin));
         CoreContext::scope(turn, async move {
-            crate::core::runtime::DispatchCtx::ambient().spawn(async move {
-                barrier.wait().await;
-                let child = CoreContext::scoped().unwrap();
-                assert_eq!(child.profile(), Some(format!("profile-{label}").as_str()));
-                assert_eq!(
-                    child.session_agent(),
-                    Some(format!("agent-{label}").as_str())
-                );
-                assert_eq!(CoreContext::current_channel_thread(), Some(thread));
-                assert_eq!(child.domains(), DomainSet::none());
-                assert_eq!(child.tool_groups(), Default::default());
-                assert_eq!(child.embedder_config().unwrap().workspace_dir, workspace);
-                assert!(Arc::ptr_eq(&child.agent_policy().unwrap(), &policy));
-                assert!(matches!(
-                    turn_origin::current(),
-                    Some(AgentTurnOrigin::ExternalChannel { channel, sender, .. })
-                        if channel == label && sender == Some(format!("sender-{label}"))
-                ));
-            })
-            .await
-            .unwrap();
+            crate::core::runtime::DispatchCtx::ambient()
+                .spawn(async move {
+                    barrier.wait().await;
+                    let child = CoreContext::scoped().unwrap();
+                    assert_eq!(child.profile(), Some(format!("profile-{label}").as_str()));
+                    assert_eq!(
+                        child.session_agent(),
+                        Some(format!("agent-{label}").as_str())
+                    );
+                    assert_eq!(CoreContext::current_channel_thread(), Some(thread));
+                    assert_eq!(child.domains(), DomainSet::none());
+                    assert_eq!(child.tool_groups(), Default::default());
+                    assert_eq!(child.embedder_config().unwrap().workspace_dir, workspace);
+                    assert!(Arc::ptr_eq(&child.agent_policy().unwrap(), &policy));
+                    assert!(matches!(
+                        turn_origin::current(),
+                        Some(AgentTurnOrigin::ExternalChannel { channel, sender, .. })
+                            if channel == label && sender == Some(format!("sender-{label}"))
+                    ));
+                })
+                .await
+                .unwrap();
         })
         .await;
         assert!(context.turn_origin.is_none());
@@ -208,10 +209,10 @@ async fn concurrent_channel_turns_keep_tenant_agent_thread_and_policy_isolated()
 #[tokio::test]
 async fn scoped_spawn_does_not_invent_missing_turn_authority() {
     CoreContext::scope(ctx("/tmp/origin-missing"), async {
-        let child =
-            crate::core::runtime::DispatchCtx::ambient().spawn(async { crate::agent::turn_origin::current() })
-                .await
-                .unwrap();
+        let child = crate::core::runtime::DispatchCtx::ambient()
+            .spawn(async { crate::agent::turn_origin::current() })
+            .await
+            .unwrap();
         assert!(child.is_none());
     })
     .await;

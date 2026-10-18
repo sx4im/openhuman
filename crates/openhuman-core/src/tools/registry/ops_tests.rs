@@ -1,11 +1,12 @@
 use super::*;
 use crate::config::schema::{CapabilityProviderConfig, CapabilityProviderTrustState, Config};
 use crate::config::test_env::EnvVarGuard;
+use crate::core::runtime::DispatchCtx;
 use crate::core::{FieldSchema, TypeSchema};
 
 #[test]
 fn registry_entries_include_mcp_and_controller_tools() {
-    let entries = registry_entries();
+    let entries = registry_entries(&DispatchCtx::host_default());
 
     // The MCP-transport half of the inventory is sourced from
     // `mcp::server::tool_specs()`, which the `mcp` feature compiles out (the
@@ -46,7 +47,7 @@ fn registry_entries_include_mcp_and_controller_tools() {
 
 #[test]
 fn registry_entries_are_unique_and_sorted_by_tool_id() {
-    let entries = registry_entries();
+    let entries = registry_entries(&DispatchCtx::host_default());
     let ids = entries
         .iter()
         .map(|entry| entry.tool_id.as_str())
@@ -235,25 +236,27 @@ fn get_tool_trims_and_returns_exact_entry() {
     #[cfg(not(feature = "mcp"))]
     let tool_id = "tools.web_search";
 
-    let outcome = get_tool(&format!("  {tool_id}  ")).expect("registry lookup");
+    let outcome =
+        get_tool(&DispatchCtx::host_default(), &format!("  {tool_id}  ")).expect("registry lookup");
     assert_eq!(outcome.value.tool_id, tool_id);
 }
 
 #[test]
 fn get_tool_rejects_blank_id() {
-    let err = get_tool("  ").expect_err("blank id should fail");
+    let err = get_tool(&DispatchCtx::host_default(), "  ").expect_err("blank id should fail");
     assert!(err.contains("non-empty"));
 }
 
 #[test]
 fn get_tool_reports_unknown_id() {
-    let err = get_tool("missing.tool").expect_err("unknown id should fail");
+    let err =
+        get_tool(&DispatchCtx::host_default(), "missing.tool").expect_err("unknown id should fail");
     assert!(err.contains("missing.tool"));
 }
 
 #[test]
 fn all_registry_entries_have_non_empty_name_and_description() {
-    let entries = registry_entries();
+    let entries = registry_entries(&DispatchCtx::host_default());
     assert!(
         !entries.is_empty(),
         "registry must contain at least one tool"
@@ -413,4 +416,23 @@ async fn diagnostics_report_denials_recorded_through_tinytools() {
         .find(|d| d.tool_name == "tools.registry_snapshot_probe")
         .expect("recorded denial surfaces in diagnostics");
     assert_eq!(denial.reason, "probe denial reason");
+}
+
+#[test]
+fn registry_entries_read_the_handed_context_and_agree_with_the_config_form() {
+    // The context form and the config form differ only in where connected MCP
+    // client servers are read from; with none connected the snapshots match, and
+    // neither consults the calling task's ambient scope.
+    let from_ctx = registry_entries(&DispatchCtx::unbound());
+    let from_host = registry_entries(&DispatchCtx::host_default());
+    let ids = |entries: &[ToolRegistryEntry]| {
+        entries
+            .iter()
+            .map(|entry| entry.tool_id.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(!from_ctx.is_empty());
+    assert_eq!(ids(&from_ctx), ids(&from_host));
+    let listed = list_tools(&DispatchCtx::host_default());
+    assert_eq!(ids(&listed.value.tools), ids(&from_host));
 }

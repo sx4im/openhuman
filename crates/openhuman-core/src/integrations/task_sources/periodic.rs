@@ -15,8 +15,6 @@ use std::time::{Duration, Instant};
 
 use tokio::time::interval;
 
-use crate::config::rpc as config_rpc;
-
 use super::pipeline;
 use super::types::{FetchReason, TaskSource};
 
@@ -81,7 +79,9 @@ pub fn start_periodic_poll() {
         tracing::debug!("[task_sources:periodic] scheduler already running, skipping start");
         return;
     }
-    tokio::spawn(async move {
+    // The loop acts for the host: every tick visits `host_default()` and then
+    // each live agent scope itself, so the spawned task needs no ambient scope.
+    DispatchCtx::host_default().spawn(async move {
         tracing::info!(
             tick_seconds = TICK_SECONDS,
             "[task_sources:periodic] scheduler starting"
@@ -100,11 +100,12 @@ async fn run_loop() {
         ticker.tick().await;
         // `local`, then every agent that keeps its sources in its own storage
         // scope (`crate::storage::agents`).
-        for (agent, result) in
-            crate::storage::agents::for_each_live_scope(&DispatchCtx::host_default(), "task_sources", |ctx| async move {
-                run_one_tick(&ctx).await
-            })
-            .await
+        for (agent, result) in crate::storage::agents::for_each_live_scope(
+            &DispatchCtx::host_default(),
+            "task_sources",
+            |ctx| async move { run_one_tick(&ctx).await },
+        )
+        .await
         {
             if let Err(e) = result {
                 tracing::warn!(error = %e, agent = agent.as_deref().unwrap_or("local"), "[task_sources:periodic] tick failed (continuing)");

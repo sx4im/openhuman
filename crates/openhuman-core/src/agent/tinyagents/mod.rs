@@ -8,7 +8,7 @@
 //! **adapter seam**: it bridges openhuman's `Provider`, `Tool`, and `TranscriptMessage`
 //! types onto the crate's `ChatModel`, `Tool`, and `Message` traits, then drives
 //! a turn through [`AgentHarness::invoke`]. The chat / channel / sub-agent
-//! routes drive a turn through [`TurnSpec`].
+//! routes call [`run_turn_via_tinyagents_shared`] (default ON in production).
 //!
 //! The chat route is at functional parity with the legacy `run_turn_engine`:
 //! the [`OpenhumanEventBridge`] mirrors the harness event stream onto
@@ -57,15 +57,15 @@ mod steering_forwarder;
 pub(crate) mod stop_hooks;
 pub mod todos;
 pub(crate) mod tool_registration;
+mod turn_exec;
+mod turn_middleware;
 mod turn_model_resolver;
 mod turn_models;
 mod turn_outcome;
+mod turn_plan;
 mod turn_policy;
 mod turn_run_error;
 mod turn_run_finalize;
-mod turn_exec;
-mod turn_middleware;
-mod turn_plan;
 mod use_skill_dispatch;
 mod verify_before_finish;
 
@@ -77,6 +77,7 @@ pub(crate) use crate::agent::message_convert::ta_call_to_oh_call;
 pub(crate) use embeddings::ProviderEmbeddingModel;
 pub(crate) use observability::SubagentScope;
 pub(crate) use reasoning::{apply_requested_effort, parse_reasoning_effort};
+pub(crate) use turn_exec::TurnSpec;
 pub use turn_models::TurnModelSource;
 pub(crate) use turn_models::TurnModels;
 pub(crate) use turn_outcome::TinyagentsTurnOutcome;
@@ -86,7 +87,6 @@ pub(crate) use turn_policy::{
     agent_turn_wall_clock_ms_for, chat_provider_is_local, local_web_turn_backstop_secs,
     ToolPolicyEnforcement,
 };
-pub(crate) use turn_exec::TurnSpec;
 
 // Test-only glue so `tinyagents_tests.rs`'s `use super::*;` sees the
 // lower-level policy helpers it exercises directly (they otherwise stay

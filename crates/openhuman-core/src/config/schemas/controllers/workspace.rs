@@ -162,7 +162,7 @@ async fn resolve_data_paths(
     );
     match user_id.as_deref() {
         Some(id) => config_rpc::get_data_paths_for_user(id).await,
-        None => config_rpc::get_data_paths(&ctx).await,
+        None => config_rpc::get_data_paths(ctx).await,
     }
 }
 

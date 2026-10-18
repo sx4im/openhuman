@@ -151,12 +151,26 @@ pub struct MemoryTurn {
     pub thread_id: String,
     /// The pack the turn was given, if any.
     pub pack: Option<TurnPack>,
+    /// The first turn of the thread still verbatim in the turn's prompt: the
+    /// turns before it were compacted into a checkpoint (0 when nothing was).
+    /// Live: a compaction during the turn moves it forward.
+    pub in_prompt_from: std::sync::Arc<super::window::InPromptFrom>,
     /// The context the turn runs under, held weakly so a finished tenant's
     /// lease is not kept alive by a lingering turn handle.
     pub core: Option<std::sync::Weak<crate::core::runtime::CoreContext>>,
 }
 
 impl MemoryTurn {
+    /// The thread's turns still verbatim in the turn's prompt, which the
+    /// agent's own memory reads leave out (the compacted ones stay readable).
+    #[must_use]
+    pub fn in_prompt(&self) -> tinymemory_api::ThreadWindow {
+        tinymemory_api::ThreadWindow {
+            thread_id: self.thread_id.clone(),
+            from_turn: self.in_prompt_from.get(),
+        }
+    }
+
     /// The dispatch context the turn's memory work runs under: its own, else
     /// the calling task's.
     #[must_use]
@@ -212,9 +226,7 @@ pub async fn pre_turn(
     let dispatch = ctx.clone();
     let identity = identity.clone();
     let thread = input.thread_id.clone();
-    let task = ctx.spawn(async move {
-        pre_turn_work(&dispatch, &config, &identity, input).await
-    });
+    let task = ctx.spawn(async move { pre_turn_work(&dispatch, &config, &identity, input).await });
     let pack = match tokio::time::timeout(timeout, task).await {
         Ok(Ok(pack)) => pack,
         Ok(Err(error)) => {
@@ -279,10 +291,13 @@ pub(crate) async fn pre_turn_work(
             tokio::time::Instant::now() + timeout.saturating_sub(Duration::from_millis(100));
         async move {
             let zone = config.time_zone();
-            tokio::time::timeout_at(deadline, super::date_hint::extract(&ctx, &config, &text, &zone))
-                .await
-                .ok()
-                .flatten()
+            tokio::time::timeout_at(
+                deadline,
+                super::date_hint::extract(&ctx, &config, &text, &zone),
+            )
+            .await
+            .ok()
+            .flatten()
         }
     });
     let pack = async move {

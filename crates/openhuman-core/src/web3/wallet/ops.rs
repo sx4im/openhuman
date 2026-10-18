@@ -18,7 +18,6 @@ pub use types::{
 
 use log::debug;
 
-use crate::config::rpc as config_rpc;
 use crate::core::Outcome;
 use tinywallet_bus::wire::SecretMaterial;
 use tinywallet_bus::Chain as ModuleChain;

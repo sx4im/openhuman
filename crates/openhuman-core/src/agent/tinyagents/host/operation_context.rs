@@ -4,18 +4,51 @@
 use crate::agent::turn_origin::AgentTurnOrigin;
 use tinyagents_definition::SandboxMode;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 /// OpenHuman product values that tools read from the run through
 /// `ToolExecutionContext::host::<OpenHumanRunExt>()`, installed by
 /// [`OpenHumanRunContext::into_tinyagents`] with `RunContext::with_host`.
 /// It replaces the former per-value task-locals, which do not cross a module
 /// boundary.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct OpenHumanRunExt {
     /// Recency window narrowing integration task-fetch tools (morning
     /// briefing only); `None` leaves them unbounded.
     pub task_recency_window: Option<Duration>,
+    /// Explicit child-process environment supplied by the embedding host.
+    pub command_environment: Option<Arc<std::collections::BTreeMap<String, String>>>,
+}
+
+impl std::fmt::Debug for OpenHumanRunExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenHumanRunExt")
+            .field("task_recency_window", &self.task_recency_window)
+            .field("command_environment", &self.command_environment.is_some())
+            .finish()
+    }
+}
+
+impl OpenHumanRunExt {
+    pub(super) fn from_run_context(context: &super::run_context::OpenHumanRunContext) -> Self {
+        Self {
+            task_recency_window: context.task_recency_window,
+            command_environment: context.command_environment.clone(),
+        }
+    }
+}
+
+/// Reads the explicit command environment from a tool's run context.
+pub(crate) fn command_environment_for_tool(
+    context: Option<&dyn tinytools::ToolRunContext>,
+) -> Option<Arc<std::collections::BTreeMap<String, String>>> {
+    context
+        .and_then(tinytools::ToolRunContext::host_extension)
+        .and_then(|extension| {
+            extension.downcast_ref::<tinyagents_harness::tool::ToolExecutionContext>()
+        })
+        .and_then(|context| context.host::<OpenHumanRunExt>())
+        .and_then(|ext| ext.command_environment.clone())
 }
 
 /// Reads the run's task-recency window from the explicit tool carrier.
@@ -53,6 +86,10 @@ pub(crate) struct HostOperationContext {
     /// Who the run acts as on memory; see
     /// [`OpenHumanRunContext::memory_identity`](super::OpenHumanRunContext::memory_identity).
     pub(crate) memory_identity: Option<crate::memory::scope::MemoryIdentity>,
+    /// The turn's memory, read live for the thread's turns still verbatim in
+    /// the run's prompt (see [`MemoryTurn::in_prompt`](crate::memory::lifecycle::hooks::MemoryTurn::in_prompt)).
+    /// `None` when the turn has no memory, as a sub-agent's run does.
+    pub(crate) memory_turn: Option<std::sync::Arc<crate::memory::lifecycle::hooks::MemoryTurn>>,
     /// The context the run acts under; see
     /// [`OpenHumanRunContext::core`](super::OpenHumanRunContext::core).
     pub(crate) core: Option<std::sync::Weak<crate::core::runtime::CoreContext>>,
@@ -117,6 +154,21 @@ pub(crate) fn memory_identity_for_tool(
         })
         .and_then(|context| context.state::<HostOperationContext>())
         .and_then(|host| host.memory_identity.clone())
+}
+
+/// Reads the thread's turns still verbatim in the run's prompt from the
+/// explicit tool carrier, as they stand now: a compaction earlier in the turn
+/// has already moved them. Direct tool dispatch has none.
+pub(crate) fn memory_in_prompt_for_tool(
+    context: Option<&dyn tinytools::ToolRunContext>,
+) -> Option<tinymemory_api::ThreadWindow> {
+    context
+        .and_then(tinytools::ToolRunContext::host_extension)
+        .and_then(|extension| {
+            extension.downcast_ref::<tinyagents_harness::tool::ToolExecutionContext>()
+        })
+        .and_then(|context| context.state::<HostOperationContext>())
+        .and_then(|host| host.memory_turn.as_ref().map(|turn| turn.in_prompt()))
 }
 
 /// Reads the calling agent's sandbox policy from the explicit tool carrier.

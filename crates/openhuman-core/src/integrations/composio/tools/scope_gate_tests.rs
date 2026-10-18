@@ -156,6 +156,7 @@ async fn a_preference_still_in_the_legacy_file_gates_execution() {
     config.workspace_dir = tmp.path().join("workspace");
     config.config_path = tmp.path().join("config.toml");
     crate::integrations::composio::file_store::save(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         crate::integrations::composio::file_store::USER_SCOPES_FILE,
         &serde_json::json!({"gmail": {"read": true, "write": false, "admin": false}}),
@@ -163,8 +164,14 @@ async fn a_preference_still_in_the_legacy_file_gates_execution() {
     .await
     .unwrap();
 
-    let decision = evaluate_tool_visibility(&config, "GMAIL_SEND_EMAIL").await;
+    let decision = evaluate_tool_visibility(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        "GMAIL_SEND_EMAIL",
+    )
+    .await;
     let restored = crate::integrations::composio::ops::save_user_scope_pref(
+        &crate::core::runtime::DispatchCtx::ambient(),
         &config,
         "gmail",
         Default::default(),

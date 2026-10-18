@@ -28,7 +28,8 @@
     "tinydocs-extract",
     "tinysearch",
     "tinysearch-core",
-    "cpal"
+    "cpal",
+    "tinyflows-module"
   ],
   "implementationPrefixes": [
     "tinyjuice-",
@@ -104,6 +105,11 @@
       "name": "tinybox-bus",
       "manifest": "vendor/tinybox/crates/tinybox-bus/Cargo.toml",
       "owner": "https://github.com/tinyhumansai/tinybox"
+    },
+    {
+      "name": "tinyflows-bus",
+      "manifest": "vendor/tinyflows/crates/tinyflows-bus/Cargo.toml",
+      "owner": "https://github.com/tinyhumansai/tinyflows"
     }
   ],
   "linkedHost": {
@@ -114,11 +120,6 @@
   },
   "pendingContracts": [],
   "exceptions": [
-    {
-      "scope": "hosts",
-      "package": "tinymcp",
-      "reason": "#7205 tinymcp::ui pure rules; move to tinymcp-bus tracked under #7868"
-    },
     {
       "scope": "tinychannels-bus",
       "package": "anyhow",
@@ -133,6 +134,21 @@
       "scope": "tinychannels-bus",
       "package": "tokio",
       "reason": "tinychannels-bus (vendor/tinychannels) still carries a provider trait with async-trait/anyhow/tokio::sync; the contract needs to be split upstream in tinyhumansai/tinychannels before this edge can go (tracked under #7523)."
+    },
+    {
+      "scope": "tinyconnectors-bus",
+      "package": "hmac",
+      "reason": "TinyConnectors #72 adds optional pure Composio webhook verification helpers to the bus contract for hosts that own the endpoint; this edge is enabled only by its opt-in webhook feature and is recorded for contract-boundary review."
+    },
+    {
+      "scope": "tinyconnectors-bus",
+      "package": "sha2",
+      "reason": "TinyConnectors #72 adds optional pure Composio webhook verification helpers to the bus contract for hosts that own the endpoint; this edge is enabled only by its opt-in webhook feature and is recorded for contract-boundary review."
+    },
+    {
+      "scope": "tinyflows-bus",
+      "package": "chrono",
+      "reason": "tinyflows-bus schedule contract v3 carries the job, run and schedule records (CronJob, CronRun, Schedule, DeliveryConfig, ...) with their DateTime<Utc> fields so hosts redeclare none of them. chrono is time arithmetic and RFC3339 serde only, with no I/O or runtime; the schedule maths themselves (cron expressions, time zones) run in the module. Recorded for contract-boundary review (tinyflows#143, openhuman cron cutover #7397)."
     }
   ],
   "excludedSubsystems": [

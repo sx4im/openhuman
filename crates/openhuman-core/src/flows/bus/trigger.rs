@@ -112,10 +112,7 @@ impl FlowTriggerSubscriber {
     }
 
     /// The configuration to handle an event under (`super::owner::config_for_scope`).
-    pub(super) fn config_for_scope(
-        &self,
-        ctx: &crate::core::runtime::DispatchCtx,
-    ) -> Arc<Config> {
+    pub(super) fn config_for_scope(&self, ctx: &crate::core::runtime::DispatchCtx) -> Arc<Config> {
         super::owner::config_for_scope(ctx, &self.config)
     }
 
@@ -231,13 +228,14 @@ impl FlowTriggerSubscriber {
         };
 
         let config = self.config_for_scope(ctx);
+        let run_ctx = ctx.clone();
         // Scoped: the run keeps the owner's context the handler entered.
         ctx.spawn(async move {
             // Held for the lifetime of the run; released on drop (including
             // on panic) by `InFlightGuard`.
             let _guard = guard;
             tracing::info!(target: "flows", %flow_id, "[flows] trigger fired — starting run");
-            match crate::flows::ops::flows_run(&config, &flow_id, input, inputs, trigger).await {
+            match crate::flows::ops::flows_run(&run_ctx, &config, &flow_id, input, inputs, trigger).await {
                 Ok(_) => {
                     tracing::info!(target: "flows", %flow_id, "[flows] trigger-driven run finished")
                 }

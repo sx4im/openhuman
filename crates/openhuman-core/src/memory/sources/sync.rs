@@ -193,14 +193,18 @@ pub(crate) async fn place_and_store(
 
 /// `memory_sources_sync`: starts a background sync of source `id`, or of
 /// every source, and returns the ids whose sync started.
-pub fn start_sync(config: &Config, id: Option<&str>) -> MemoryResult<Vec<String>> {
+pub fn start_sync(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: &Config,
+    id: Option<&str>,
+) -> MemoryResult<Vec<String>> {
     engine::resolve(config).engine()?;
     let claims = syncer_for(config).start(id).map_err(host_error)?;
     let mut started = Vec::new();
     for claim in claims {
         started.push(claim.source().id.clone());
         let config = config.clone();
-        crate::core::runtime::DispatchCtx::ambient().spawn(async move {
+        ctx.spawn(async move {
             let result = match config
                 .memory
                 .sources
@@ -228,13 +232,17 @@ pub fn start_sync(config: &Config, id: Option<&str>) -> MemoryResult<Vec<String>
 
 /// The scheduled tick: starts every source whose `schedule_mins` has elapsed.
 /// Returns the ids started. Memory off starts nothing.
-pub fn sync_due(config: &Config, now: DateTime<Utc>) -> Vec<String> {
+pub fn sync_due(
+    ctx: &crate::core::runtime::DispatchCtx,
+    config: &Config,
+    now: DateTime<Utc>,
+) -> Vec<String> {
     if !engine::is_on(config) {
         return Vec::new();
     }
     let mut started = Vec::new();
     for id in syncer_for(config).due(now) {
-        match start_sync(config, Some(&id)) {
+        match start_sync(ctx, config, Some(&id)) {
             Ok(ids) => started.extend(ids),
             Err(error) => {
                 tracing::debug!(id = %id, code = error.code(), "[memory:sources] due sync not started")
