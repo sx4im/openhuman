@@ -544,7 +544,9 @@ fn apply_registry_entries_refreshes_the_process_registry() {
     }
 
     AgentDefinitionRegistry::init_global_builtins().expect("init");
-    let _restore = RestoreGlobal(Some(AgentDefinitionRegistry::global().expect("initialised")));
+    let _restore = RestoreGlobal(Some(
+        AgentDefinitionRegistry::global().expect("initialised"),
+    ));
 
     let entry = registry_entry_with_allowlist("orchestrator", vec!["researcher".to_string()]);
     AgentDefinitionRegistry::apply_registry_entries(std::slice::from_ref(&entry));
