@@ -521,8 +521,19 @@ fn entry_overlay_skips_ids_the_harness_does_not_know() {
 
 #[test]
 fn apply_registry_entries_refreshes_the_process_registry() {
+    /// Restores the process registry on drop, so parallel tests are
+    /// unaffected even when an assertion below panics.
+    struct RestoreGlobal(Option<std::sync::Arc<AgentDefinitionRegistry>>);
+    impl Drop for RestoreGlobal {
+        fn drop(&mut self) {
+            if let Some(previous) = self.0.take() {
+                AgentDefinitionRegistry::set_global(previous);
+            }
+        }
+    }
+
     AgentDefinitionRegistry::init_global_builtins().expect("init");
-    let before = AgentDefinitionRegistry::global().expect("initialised");
+    let _restore = RestoreGlobal(Some(AgentDefinitionRegistry::global().expect("initialised")));
 
     let entry = registry_entry_with_allowlist("orchestrator", vec!["researcher".to_string()]);
     AgentDefinitionRegistry::apply_registry_entries(std::slice::from_ref(&entry));
@@ -536,7 +547,4 @@ fn apply_registry_entries_refreshes_the_process_registry() {
         vec!["researcher".to_string()],
         "update_agent must reach the process registry without a restart (#6934)"
     );
-
-    // Restore the compiled registry so parallel tests are unaffected.
-    AgentDefinitionRegistry::set_global(before);
 }

@@ -328,9 +328,12 @@ impl AgentDefinitionRegistry {
     /// the shipped definitions. Without this refresh the registry keeps
     /// serving the compiled `subagents` policy until the next restart (#6934).
     ///
-    /// No-op when the global was never initialised.
+    /// No-op when the global was never initialised. The write lock is held
+    /// across read, overlay, and store so concurrent updates cannot each
+    /// start from the same stale registry and overwrite one another.
     pub fn apply_registry_entries(entries: &[AgentRegistryEntry]) {
-        let Some(current) = Self::global() else {
+        let mut global = GLOBAL.write();
+        let Some(current) = global.as_ref() else {
             return;
         };
         let overlaid: Vec<AgentDefinition> = entries
@@ -340,7 +343,8 @@ impl AgentDefinitionRegistry {
         if overlaid.is_empty() {
             return;
         }
-        Self::set_global(Arc::new(current.with_definitions(overlaid)));
+        let next = Arc::new(current.with_definitions(overlaid));
+        *global = Some(next);
     }
 
     /// Overlay one registry entry onto its harness definition, if present.
