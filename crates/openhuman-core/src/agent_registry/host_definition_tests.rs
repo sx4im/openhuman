@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::registry::types::{AgentRegistryEntry, AgentRegistrySource, AgentSubagentPolicy};
+use crate::agent_registry::types::{AgentRegistryEntry, AgentRegistrySource, AgentSubagentPolicy};
 use crate::core::runtime::{ContextOverlay, CoreContext, DomainSet};
 use std::fs;
 use std::io::Write;

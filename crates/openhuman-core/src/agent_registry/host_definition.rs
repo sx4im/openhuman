@@ -19,7 +19,7 @@ use tinyagents_definition::{
 };
 use tinyjuice_bus::types::AgentTokenjuiceCompression;
 
-use crate::agent::registry::types::{AgentRegistryEntry, AgentRegistrySource};
+use crate::agent_registry::types::{AgentRegistryEntry, AgentRegistrySource};
 
 #[cfg(test)]
 #[path = "host_definition_tests.rs"]
@@ -381,15 +381,13 @@ impl AgentDefinitionRegistry {
     /// Custom agents ship no harness definition, so an enabled `Custom`-source
     /// entry is synthesized into a runnable definition instead — otherwise a
     /// custom id the parent allowlist permits resolves to nothing at spawn.
-    /// Mirrors [`crate::agent::registry::find_custom_in_config`]: disabled
+    /// Mirrors [`crate::agent_registry::find_custom_in_config`]: disabled
     /// entries stay unresolvable, and `Default`-source ids the harness does
     /// not know are still skipped.
     fn overlay_entry(&self, entry: &AgentRegistryEntry) -> Option<AgentDefinition> {
         let Some(base) = self.get(&entry.id) else {
             if entry.enabled && matches!(entry.source, AgentRegistrySource::Custom) {
-                return Some(crate::agent::registry::definition_from_registry_entry(
-                    entry,
-                ));
+                return Some(crate::agent_registry::definition_from_registry_entry(entry));
             }
             return None;
         };
