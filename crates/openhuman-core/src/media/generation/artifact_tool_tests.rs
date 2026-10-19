@@ -7,7 +7,7 @@ use tinystoragedrivers::BlobStore;
 use tinytools::{PermissionLevel, Tool, ToolCategory, ToolContent, ToolResult};
 
 use super::{copy_blob_to_file, has_reusable_files_reference, MediaArtifactTool};
-use crate::agent::artifacts::{ArtifactKind, ArtifactStatus, FileRoots};
+use crate::artifacts::{ArtifactKind, ArtifactStatus, FileRoots};
 
 #[test]
 fn artifact_history_is_refreshed_only_for_absolute_paths_in_files_roots() {
@@ -208,7 +208,7 @@ async fn files_a_blob_backed_generated_artifact() {
     let artifact_id = artifact["artifact_id"]
         .as_str()
         .unwrap_or_else(|| panic!("blob-backed media was not filed: {artifact:?}"));
-    let record = crate::agent::artifacts::store::get_artifact(&workspace, artifact_id)
+    let record = crate::artifacts::store::get_artifact(&workspace, artifact_id)
         .await
         .expect("artifact record");
     let file = record.file.expect("visible file");
@@ -228,7 +228,7 @@ async fn files_a_blob_backed_generated_artifact() {
         .unwrap()
         .is_none());
 
-    let (_, failed_file) = crate::agent::artifacts::create_artifact_for_call(
+    let (_, failed_file) = crate::artifacts::create_artifact_for_call(
         &workspace,
         files_dir.clone(),
         ArtifactKind::Video,
@@ -240,14 +240,14 @@ async fn files_a_blob_backed_generated_artifact() {
     .await
     .unwrap();
     std::fs::write(&failed_file, b"failed output").unwrap();
-    let failed = crate::agent::artifacts::store::list_artifacts(&workspace, 0, 10, None)
+    let failed = crate::artifacts::store::list_artifacts(&workspace, 0, 10, None)
         .await
         .unwrap()
         .0
         .into_iter()
         .find(|meta| meta.title == "Failed generated clip")
         .expect("failed artifact record");
-    crate::agent::artifacts::fail_artifact(
+    crate::artifacts::fail_artifact(
         &workspace,
         files_dir.clone(),
         &failed.id,
@@ -275,7 +275,7 @@ async fn files_a_blob_backed_generated_artifact() {
         assert!(!allowed.contains(&failed_file.canonicalize().unwrap()));
     }
 
-    crate::agent::artifacts::fail_artifact(
+    crate::artifacts::fail_artifact(
         &workspace,
         fresh.files_dir.clone(),
         artifact_id,
@@ -338,7 +338,7 @@ async fn keeps_source_blob_when_artifact_finalization_fails() {
     .with_blobs(Arc::clone(&blobs));
 
     // An artifact whose file is gone cannot be completed.
-    let production = crate::agent::artifacts::production::Production::start(
+    let production = crate::artifacts::production::Production::start(
         &tool.workspace_dir,
         tool.files_dir.clone(),
         tiny_artifacts::ArtifactKind::Image,
@@ -392,7 +392,7 @@ async fn files_a_single_generated_artifact() {
     assert!(!staging.join("stub-0.png").exists());
     // The artifact record lives in the document store (no `meta.json`); resolve
     // it through the store and verify its user-facing Files-folder path.
-    let meta = crate::agent::artifacts::store::get_artifact(&workspace, artifact_id)
+    let meta = crate::artifacts::store::get_artifact(&workspace, artifact_id)
         .await
         .expect("artifact metadata is persisted");
     assert_eq!(meta.kind, ArtifactKind::Image);
@@ -429,7 +429,7 @@ async fn files_every_artifact_when_n_greater_than_one() {
     for entry in artifacts {
         let id = entry["artifact_id"].as_str().expect("artifact_id set");
         assert!(ids.insert(id.to_string()), "artifact ids must be unique");
-        let meta = crate::agent::artifacts::store::get_artifact(&workspace, id)
+        let meta = crate::artifacts::store::get_artifact(&workspace, id)
             .await
             .expect("artifact metadata is persisted");
         assert_eq!(meta.status, ArtifactStatus::Ready);

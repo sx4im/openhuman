@@ -14,7 +14,7 @@ use tinyagents_session::port::TurnStates;
 use tinyagents_session::turn_state::types::TurnState;
 
 fn store(dir: &std::path::Path) -> Arc<dyn TurnStates> {
-    crate::agent::session_store::turn_states_for(dir)
+    crate::storage::sessions::turn_states_for(dir)
 }
 
 fn turn_state(thread_id: &str, request_id: &str, started_at: &str) -> TurnState {

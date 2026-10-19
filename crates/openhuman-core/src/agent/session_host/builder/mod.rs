@@ -7,10 +7,11 @@
 //! [`super::turn`]; accessors and run-helpers live in [`super::runtime`].
 
 #[cfg(feature = "flows")]
-pub(crate) use factory::provider_role_for_definition;
+pub(crate) use factory_resolution::provider_role_for_definition;
 
 mod builder_build;
 mod factory;
+mod factory_resolution;
 mod host_only;
 mod host_tools;
 mod iteration_cap;
@@ -23,7 +24,7 @@ pub use host_tools::{HostTools, HostTurnTools, TurnContext};
 #[cfg(test)]
 mod builder_tests;
 
-use crate::agent::harness::host_definition::AgentDefinition;
+use crate::agent_registry::host_definition::AgentDefinition;
 use std::sync::Arc;
 use tinyagents_definition::ToolScope;
 use tinytools::ToolPolicySession;
@@ -208,7 +209,7 @@ pub(super) fn ensure_recovery_tool_visible(
     // recovery tool has nothing to recover for one — there are no tool outputs
     // to truncate. Adding it would turn "no tools" into "one tool" and put a
     // schema back on a turn whose whole point is that it stays flat.
-    if !crate::agent::harness::host_definition::is_empty_tool_scope(visible) {
+    if !crate::agent_registry::host_definition::is_empty_tool_scope(visible) {
         for name in crate::inference::tokenjuice::RECOVERY_TOOL_VISIBLE {
             visible.insert((*name).to_string());
         }
@@ -245,7 +246,7 @@ pub(super) fn ensure_repl_tools_visible(
     if !handle_mode_active {
         return;
     }
-    if !crate::agent::harness::host_definition::is_empty_tool_scope(visible) {
+    if !crate::agent_registry::host_definition::is_empty_tool_scope(visible) {
         for name in tinyjuice_bus::tools::REPL_TOOLS {
             visible.insert((*name).to_string());
         }
@@ -272,7 +273,7 @@ pub(super) fn should_synthesize_delegation_tools(def: &AgentDefinition) -> bool 
 /// the name extends at an `_` boundary. Empty when the registry is not up or
 /// the id resolves to nothing, which leaves the schema untouched.
 fn allowed_subagent_ids_for(agent_id: &str) -> Vec<String> {
-    let Some(registry) = crate::agent::harness::host_definition::AgentDefinitionRegistry::current()
+    let Some(registry) = crate::agent_registry::host_definition::AgentDefinitionRegistry::current()
     else {
         return Vec::new();
     };

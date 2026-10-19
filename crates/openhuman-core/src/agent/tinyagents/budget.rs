@@ -1,15 +1,18 @@
 //! Host budget policy, handed to the turn once at admission and carried
 //! explicitly to children (`HostTurnEnv::model_budget` -> `OpenHumanRunContext`).
+
 use std::sync::Arc;
+
+use tinyinference_llm::model::ChatModel;
 
 /// Product recursion ceiling shared by native and MCP delegation.
 pub(crate) const MAX_SPAWN_DEPTH: usize = 3;
 pub use tinyinference_llm::model::budget::{
     Budget, BudgetExceeded, BudgetSnapshot, CallBudget, Spend, SpendLimits,
 };
-use tinyinference_llm::model::ChatModel;
 
-/// A shared ledger and conservative reservation bounds for every physical call.
+/// OpenHuman's source-compatible carrier for the shared ledger and physical
+/// call reservation bounds. The owner harness performs the wrapping engine.
 #[derive(Debug, Clone)]
 pub struct ModelBudget {
     /// Run/turn ledger. Children of a turn share it.
@@ -17,6 +20,7 @@ pub struct ModelBudget {
     /// Per-call input, output and charge upper bounds for all allowed routes.
     pub call: CallBudget,
 }
+
 impl ModelBudget {
     /// Wait for live reservations when settled spend still affords admission.
     /// Clones and child turns inherit this opt-in; internal retries stay fail-fast.
@@ -25,15 +29,12 @@ impl ModelBudget {
         self
     }
 
-    /// Apply the policy below retries and fallback selection.
+    /// Wrap the model with TinyAgents' shared physical-call budget engine.
     pub(crate) fn wrap(&self, model: Arc<dyn ChatModel<()>>) -> Arc<dyn ChatModel<()>> {
-        Arc::new(tinyinference_llm::model::budget::BudgetedModel::new(
-            Arc::new(tinyagents_harness::cost::GatewayChargeModel::new(model)),
-            self.ledger.clone(),
-            self.call,
-        ))
+        tinyagents_harness::cost::ModelBudget::new(self.ledger.clone(), self.call).wrap_model(model)
     }
 }
+
 /// Effective host depth ceiling, never wider than product policy.
 pub(crate) fn depth(context: &super::host::OpenHumanRunContext) -> usize {
     context
@@ -52,7 +53,7 @@ pub(super) fn install_depth(
     }
 }
 
-impl super::turn_models::TurnModels {
+impl crate::inference::turn_models::TurnModels {
     /// Wrap every concrete route and summarizer below harness retries/fallback.
     pub(crate) fn with_budget(mut self, budget: Option<&ModelBudget>) -> Self {
         let Some(budget) = budget else {

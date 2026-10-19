@@ -77,7 +77,7 @@ pub(crate) async fn flows_build_with_extra_hidden_tools(
 
     // The registry must be initialised before building a named builtin agent
     // (idempotent — mirrors `flows_discover`).
-    crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global(
+    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global(
         &config.workspace_dir,
     )
     .map_err(|e| format!("failed to initialise agent registry: {e}"))?;

@@ -25,8 +25,8 @@ impl Drop for SessionStoreCleanup {
         let Some(installed) = self.installed.take() else {
             return;
         };
-        if openhuman_core::agent::session_store::clear_if(&installed) {
-            openhuman_core::agent::session_store::restore(self.previous.take());
+        if openhuman_core::storage::sessions::clear_if(&installed) {
+            openhuman_core::storage::sessions::restore(self.previous.take());
         }
     }
 }
@@ -190,9 +190,11 @@ impl RuntimeBuilder {
         };
         if self.session_store.is_none() {
             if let Some(backend) = &storage_backend {
-                let stores = tinyagents_session::DriverSessionStores::new(backend.clone())
-                    .map_err(|e| RuntimeError::Build(e.into()))?
-                    .recover_on_open(!openhuman_core::storage::driver_is_shared(backend.driver()));
+                let stores = openhuman_core::storage::sessions::TenantSessionStores::new(
+                    backend.clone(),
+                    !openhuman_core::storage::driver_is_shared(backend.driver()),
+                )
+                .map_err(|e| RuntimeError::Build(e.into()))?;
                 self.session_store = Some(Arc::new(stores));
             }
         }
@@ -236,7 +238,7 @@ impl RuntimeBuilder {
         let installed_session_store = self.session_store.clone();
         let previous_session_store = installed_session_store
             .clone()
-            .and_then(openhuman_core::agent::session_store::install);
+            .and_then(openhuman_core::storage::sessions::install);
         let mut session_store_cleanup = SessionStoreCleanup {
             installed: installed_session_store,
             previous: previous_session_store,
@@ -269,9 +271,6 @@ impl RuntimeBuilder {
         }
         if let Some(port) = self.listen_port {
             builder = builder.port(port);
-        }
-        if let Some(transport) = self.backend_transport.take() {
-            builder = builder.backend_transport(transport);
         }
         let runtime = builder.build().await.map_err(|error| {
             log::warn!("[embed][runtime] core build failed: {error:#}");
@@ -516,6 +515,7 @@ fn map_ws(err: crate::HarnessError) -> RuntimeError {
         crate::HarnessError::Workspace { what, source } => RuntimeError::Workspace { what, source },
         crate::HarnessError::Invalid(msg) => RuntimeError::Invalid(msg),
         crate::HarnessError::Build(e) => RuntimeError::Build(e),
+        crate::HarnessError::McpCleanup(e) => RuntimeError::Build(e.into()),
         crate::HarnessError::Call(e) => RuntimeError::Call(e),
         crate::HarnessError::AlreadyRunning => RuntimeError::AlreadyRunning,
     }

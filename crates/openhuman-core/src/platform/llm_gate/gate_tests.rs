@@ -126,7 +126,7 @@ async fn signed_out_is_ignored_when_gate_uninit() {
 #[tokio::test]
 async fn wait_for_capacity_acquires_immediately_when_signed_out_and_uninit() {
     // Regression test for the
-    // `openhuman::agent::triage::evaluator::tests::*` hangs that surfaced
+    // `openhuman::triage::evaluator::tests::*` hangs that surfaced
     // after #1516 added the `signed_out` override. Earlier tests in the
     // same `cargo test` binary that exercise `clear_session` /
     // `SessionExpiredSubscriber` / the RPC 401 path can leave the

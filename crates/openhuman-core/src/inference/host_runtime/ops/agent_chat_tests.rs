@@ -71,7 +71,7 @@ fn the_outcome_keeps_its_historical_shape() {
 
 #[test]
 fn explicit_turn_temperature_overrides_the_definition_without_mutating_it() {
-    let mut definition = crate::agent::harness::builtin_definitions::test_main_def();
+    let mut definition = crate::agent::harness::test_support::test_main_def();
     definition.temperature = 0.6;
     let effective = definition_for_turn(&definition, Some(0.9));
     assert_eq!(effective.temperature, 0.9);
@@ -83,18 +83,18 @@ fn explicit_turn_temperature_overrides_the_definition_without_mutating_it() {
     assert_eq!(definition_for_turn(&definition, None).temperature, 0.6);
 }
 
-fn chat_origin(thread: &str) -> crate::agent::turn_origin::AgentTurnOrigin {
-    crate::agent::turn_origin::AgentTurnOrigin::WebChat {
+fn chat_origin(thread: &str) -> crate::security::turn_origin::AgentTurnOrigin {
+    crate::security::turn_origin::AgentTurnOrigin::WebChat {
         thread_id: thread.into(),
         client_id: "client".into(),
         request_id: format!("req-{thread}").into(),
     }
 }
 
-fn chat_thread(origin: crate::agent::turn_origin::AgentTurnOrigin) -> String {
+fn chat_thread(origin: crate::security::turn_origin::AgentTurnOrigin) -> String {
     match origin {
-        crate::agent::turn_origin::AgentTurnOrigin::WebChat { thread_id, .. } => thread_id.into(),
-        crate::agent::turn_origin::AgentTurnOrigin::DirectChat => "direct".into(),
+        crate::security::turn_origin::AgentTurnOrigin::WebChat { thread_id, .. } => thread_id,
+        crate::security::turn_origin::AgentTurnOrigin::DirectChat => "direct".into(),
         other => panic!("unexpected origin {other:?}"),
     }
 }

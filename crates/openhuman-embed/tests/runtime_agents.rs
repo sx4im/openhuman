@@ -22,7 +22,7 @@ use wiremock::{Mock, ResponseTemplate};
 const API_KEY: &str = "th_test_key";
 
 struct RecordingBudgetStopHook {
-    inner: openhuman_core::agent::stop_hooks::BudgetStopHook,
+    inner: tinyagents_hooks::stop::BudgetStopHook,
     reason: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
@@ -288,7 +288,7 @@ fn one_runtime_hosts_independently_configured_agents() {
             let budgeted_turn = budget_agent
                 .turn("report a metered response")
                 .stop_hook(std::sync::Arc::new(RecordingBudgetStopHook {
-                    inner: openhuman_core::agent::stop_hooks::BudgetStopHook::new(1.0),
+                    inner: tinyagents_hooks::stop::BudgetStopHook::new(1.0),
                     reason: std::sync::Arc::clone(&stop_reason),
                 }))
                 .send()

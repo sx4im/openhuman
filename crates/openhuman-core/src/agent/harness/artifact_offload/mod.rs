@@ -51,7 +51,7 @@ pub mod policy;
 use std::path::Path;
 use std::sync::Arc;
 
-use tinyagents_harness::artifacts::{ArtifactKind, ArtifactOffload};
+use tinyagents_harness::artifacts::ArtifactOffload;
 use tinystoragedrivers::BlobStore;
 
 use crate::security::SecurityPolicy;
@@ -65,7 +65,7 @@ use crate::security::SecurityPolicy;
 pub const OFFLOAD_WRITE_TOOL: &str = "file_write";
 
 pub use policy::{SanitizingRedactor, WorkspaceGuard};
-use tinyagents_harness::artifacts::OffloadedArtifact;
+use tinyagents_harness::artifacts::{ArtifactKind, OffloadedArtifact};
 
 /// Tool OpenHuman tells a parent to open an offloaded artifact with.
 ///
@@ -118,43 +118,35 @@ pub async fn offload_oversized_result(
     materialize_root: &Path,
     policy: Option<&SecurityPolicy>,
 ) -> (String, Option<OffloadedArtifact>) {
-    // The blob key is relative, so the crate's path policy cannot see where the
-    // reader's copy will land. Refuse here, before anything is stored, a target
-    // that would reach the core's internal state.
+    // Public callers may pair this explicit policy with an ArtifactOffload
+    // configured under a different policy (or no path policy at all). Keep
+    // OpenHuman's workspace-internal floor before the owner writes any blob.
     if let Some(policy) = policy {
         if let Ok(key) = offload.resolve(ArtifactKind::Output, &offload.default_result_name()) {
-            let target = materialize_root.join(&key);
+            let target = materialize_root.join(key);
             if policy.is_workspace_internal_path(&target)
                 || target.starts_with(&policy.workspace_dir)
             {
-                tracing::warn!(
-                    path = %key,
-                    "[artifact] materialized target reaches workspace state; keeping the inline result"
-                );
+                tracing::warn!(path = %target.display(), "[artifact] materialized target reaches workspace state; keeping the inline result");
                 return (output, None);
             }
         }
     }
-    let (pointer, artifact) = tinyagents_harness::artifacts::offload_oversized_result(
+
+    // The owner's filesystem-aware offload validates the eventual target
+    // before storing bytes, then writes and materializes through its policy.
+    let (pointer, artifact) = tinyagents_harness::artifacts::offload_oversized_result_to_fs(
         output.clone(),
         offload,
         threshold_bytes,
         READ_TOOL,
+        materialize_root,
     )
     .await;
-    let Some(artifact) = artifact else {
-        return (output, None);
-    };
-    match materialize(offload, &artifact, materialize_root).await {
-        Ok(()) => (pointer, Some(artifact)),
-        Err(error) => {
-            tracing::warn!(
-                path = %artifact.relative_path,
-                error = %error,
-                "[artifact] could not materialize the stored artifact; keeping the inline result"
-            );
-            (output, None)
-        }
+    if artifact.is_some() {
+        (pointer, artifact)
+    } else {
+        (output, None)
     }
 }
 
@@ -181,7 +173,7 @@ pub async fn offload_run_result(
         .as_ref()
         .map(|p| p.workspace_dir.clone())
         .unwrap_or(action_dir);
-    let Some(blobs) = crate::agent::session_store::artifact_blobs_for(&workspace_dir) else {
+    let Some(blobs) = crate::storage::sessions::artifact_blobs_for(&workspace_dir) else {
         tracing::debug!(
             task_id = %task_id,
             agent_id = %agent_id,
@@ -198,32 +190,6 @@ pub async fn offload_run_result(
         policy.as_deref(),
     )
     .await
-}
-
-/// Write the stored (redacted) body of `artifact` to `root/<key>`.
-async fn materialize(
-    offload: &ArtifactOffload,
-    artifact: &OffloadedArtifact,
-    root: &Path,
-) -> Result<(), String> {
-    let body = offload
-        .read(&artifact.relative_path)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "the artifact vanished from the blob store".to_string())?;
-    // `read` re-ran the fail-closed key checks (no absolute names, `..`, or
-    // control characters), so the join cannot leave `root`.
-    let target = root.join(&artifact.relative_path);
-    if let Some(parent) = target.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    tokio::fs::write(&target, body)
-        .await
-        .map_err(|error| error.to_string())?;
-    tracing::debug!(path = %artifact.relative_path, "[artifact] materialized for file_read");
-    Ok(())
 }
 
 #[cfg(test)]

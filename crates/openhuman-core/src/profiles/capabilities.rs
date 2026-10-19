@@ -4,20 +4,21 @@
 //! call additionally passes the profile lease fence and the host permission
 //! callback. These adapters never install process-wide user capabilities.
 
-use crate::agent::hooks::{ToolHook, ToolHookContext, ToolHookDecision};
+use crate::agent::tinyagents::host::OpenHumanRunContext;
 use crate::agent::{HostTools, HostTurnTools, TurnContext};
 use crate::config::Config;
 use crate::core::runtime::{ContextOverlay, CoreContext, DispatchCtx};
 use crate::tools::toolpacks::{GroupMode, ToolGroups};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tinyagents_hooks::tool::{ToolHook, ToolHookContext, ToolHookDecision};
 use tinytools::PermissionLevel;
 
 /// Capabilities fixed when the profile runtime boots.
 pub struct ProfileCapabilities {
     host: Option<HostTools>,
     names: Option<HashSet<String>>,
-    permission: Option<Arc<dyn ToolHook>>,
+    permission: Option<Arc<dyn ToolHook<OpenHumanRunContext>>>,
     channels: HashMap<String, PermissionLevel>,
     groups: Vec<super::tools::SaasToolGroup>,
     /// The shared engine, resolved only under the forced profile memory root.
@@ -31,7 +32,7 @@ impl ProfileCapabilities {
     pub fn new(
         host: Option<HostTools>,
         names: Option<HashSet<String>>,
-        permission: Option<Arc<dyn ToolHook>>,
+        permission: Option<Arc<dyn ToolHook<OpenHumanRunContext>>>,
         channels: HashMap<String, PermissionLevel>,
         groups: Vec<super::tools::SaasToolGroup>,
         memory_engine: Option<Arc<dyn tinymemory_api::MemoryEngine>>,
@@ -58,7 +59,7 @@ impl ProfileCapabilities {
     /// Make `definition` render the operator's system prompt, if one is set.
     pub fn apply_system_prompt(
         &self,
-        definition: &mut crate::agent::harness::host_definition::AgentDefinition,
+        definition: &mut crate::agent_registry::host_definition::AgentDefinition,
     ) {
         if let Some(prompt) = &self.system_prompt {
             definition.system_prompt =
@@ -237,7 +238,7 @@ impl ProfileCapabilities {
         self: &Arc<Self>,
         profile: &super::ProfileId,
         fence: Arc<crate::storage::fence::LeaseFence>,
-    ) -> Arc<dyn ToolHook> {
+    ) -> Arc<dyn ToolHook<OpenHumanRunContext>> {
         Arc::new(ProfilePermission {
             capabilities: Arc::clone(self),
             profile: profile.as_str().to_owned(),
@@ -253,39 +254,28 @@ struct ProfilePermission {
 }
 
 #[async_trait::async_trait]
-impl ToolHook for ProfilePermission {
+impl ToolHook<OpenHumanRunContext> for ProfilePermission {
     fn name(&self) -> &str {
         "profile.can_use_tool"
     }
-    async fn before_tool(&self, _: &ToolHookContext) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn after_tool(&self, _: &ToolHookContext) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn before_tool_decision(&self, context: &ToolHookContext) -> ToolHookDecision {
-        // A caller that raised the call without a turn context: the calling
-        // task's own, as every call before the context was passed explicitly.
-        self.before_tool_decision_in(&DispatchCtx::from_weak(None), context)
-            .await
-    }
-    async fn before_tool_decision_in(
+    async fn before_tool_decision(
         &self,
-        dispatch: &DispatchCtx,
+        host: &OpenHumanRunContext,
         context: &ToolHookContext,
     ) -> ToolHookDecision {
+        let dispatch = host.dispatch_ctx();
         let tenant = dispatch.tenant().ok().and_then(|tenant| tenant.profile);
         if tenant.as_deref() != Some(self.profile.as_str())
             || self.fence.check_local(super::lease::now_ms()).is_err()
-            || !self.capabilities.admits(dispatch, &context.tool_name)
+            || !self.capabilities.admits(&dispatch, &context.tool_name)
         {
-            return ToolHookDecision::Deny(
-                "tool is outside the hosted profile capability boundary".into(),
+            return ToolHookDecision::deny(
+                "tool is outside the hosted profile capability boundary",
             );
         }
         match &self.capabilities.permission {
             Some(permission) => {
-                let binding = super::provider_settings::ProfileProviderSettings::in_ctx(dispatch);
+                let binding = super::provider_settings::ProfileProviderSettings::in_ctx(&dispatch);
                 let canonical = binding
                     .as_ref()
                     .and_then(|binding| binding.canonical_role_name(&context.tool_name));
@@ -293,31 +283,26 @@ impl ToolHook for ProfilePermission {
                 let mut rewritten = false;
                 if let Some(canonical) = canonical.filter(|name| *name != context.tool_name) {
                     if !self.capabilities.admits_capability(canonical) {
-                        return ToolHookDecision::Deny(
-                            "canonical search capability is denied".into(),
-                        );
+                        return ToolHookDecision::deny("canonical search capability is denied");
                     }
                     let mut original = context.clone();
                     original.tool_name = canonical.to_owned();
-                    match permission.before_tool_decision(&original).await {
-                        ToolHookDecision::Proceed => {}
-                        ToolHookDecision::ProceedWith(arguments) => {
-                            advertised.arguments = arguments;
-                            rewritten = true;
-                        }
-                        refusal => return refusal,
+                    let decision = permission.before_tool_decision(host, &original).await;
+                    if decision.is_deny() || decision.is_ask() {
+                        return decision;
+                    }
+                    if let Some(arguments) = decision.updated_input {
+                        advertised.arguments = arguments;
+                        rewritten = true;
                     }
                 }
-                match permission.before_tool_decision(&advertised).await {
-                    ToolHookDecision::Proceed if rewritten => {
-                        ToolHookDecision::ProceedWith(advertised.arguments)
-                    }
-                    decision => decision,
+                let mut decision = permission.before_tool_decision(host, &advertised).await;
+                if rewritten && !decision.is_deny() && !decision.is_ask() {
+                    decision.updated_input = Some(advertised.arguments);
                 }
+                decision
             }
-            None => {
-                ToolHookDecision::Deny("this profile has no host tool permission callback".into())
-            }
+            None => ToolHookDecision::deny("this profile has no host tool permission callback"),
         }
     }
 }

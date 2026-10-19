@@ -19,6 +19,9 @@
 //! It is a mitigation, not a guarantee — detecting fabrication needs the
 //! tool-call record carried out to the caller.
 
+use tinyagents_harness::middleware::library::{
+    StructuredDenialParts, StructuredDenialRenderOptions,
+};
 use tinytools::status::POLICY_BLOCKED_MARKER;
 use tinytools::PermissionLevel;
 
@@ -169,9 +172,11 @@ impl PolicyDenial<'_> {
             ),
         };
 
-        format!(
-            "Blocked: {blocked}. Reason: {reason}. Workaround: {workaround} {RELAY_INSTRUCTION}"
-        )
+        StructuredDenialParts::new(blocked, reason, workaround, RELAY_INSTRUCTION)
+            .render_with_options(&StructuredDenialRenderOptions {
+                reason_label: "Reason",
+                relay_separator: " ",
+            })
     }
 }
 

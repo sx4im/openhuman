@@ -27,7 +27,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use tinybus::{EventHandler, SubscriptionHandle};
 
-use crate::agent::artifacts::types::{ArtifactMeta, ArtifactStatus};
+use crate::artifacts::types::{ArtifactMeta, ArtifactStatus};
 use crate::core::events::DomainEvent;
 use crate::core::runtime::DispatchCtx;
 use crate::threads::store::{self as conversations, ConversationMessage};
@@ -184,7 +184,7 @@ pub async fn backfill_artifact_rows(
 ) -> Result<Vec<ConversationMessage>, String> {
     let mut artifacts = Vec::new();
     loop {
-        let (page, total) = crate::agent::artifacts::store::list_artifacts(
+        let (page, total) = crate::artifacts::store::list_artifacts(
             workspace_dir,
             artifacts.len(),
             BACKFILL_PAGE,

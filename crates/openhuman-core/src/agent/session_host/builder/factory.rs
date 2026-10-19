@@ -1,14 +1,14 @@
 //! `OpenHumanSessionHost::from_config` factory methods and internal `build_session_agent_inner` constructor.
 
 use super::should_synthesize_delegation_tools;
-use crate::agent::harness::host_definition::{
-    AgentDefinitionExt, AgentDefinitionRegistry, NO_TOOLS_SENTINEL,
-};
-use crate::agent::host_runtime;
 use crate::agent::prompts::SystemPromptBuilder;
 use crate::agent::session_host::types::OpenHumanSessionHost;
+use crate::agent_registry::host_definition::{
+    AgentDefinitionExt, AgentDefinitionRegistry, NO_TOOLS_SENTINEL,
+};
 use crate::config::Config;
 use crate::core::runtime::DispatchCtx;
+use crate::modules::tinybox::host_runtime;
 use crate::security::SecurityPolicy;
 use crate::tools;
 use anyhow::Result;
@@ -136,7 +136,7 @@ impl OpenHumanSessionHost {
         ctx: &DispatchCtx,
         config: &Config,
         agent_id: &str,
-        target_def: Option<&crate::agent::harness::host_definition::AgentDefinition>,
+        target_def: Option<&crate::agent_registry::host_definition::AgentDefinition>,
         host_only: bool,
         host: Option<&super::HostTools>,
         session_id: Option<&str>,
@@ -379,7 +379,7 @@ impl OpenHumanSessionHost {
             },
             None => SystemPromptBuilder::with_defaults(),
         };
-        let post_turn_hooks: Vec<Arc<dyn crate::agent::hooks::PostTurnHook>> =
+        let post_turn_hooks: Vec<Arc<dyn tinyagents_harness::host::LearningSink>> =
             crate::agent::hooks::embedder_post_turn_hooks_in(ctx);
 
         // Best-effort prewarm from the shared Composio cache. This avoids
@@ -418,7 +418,7 @@ impl OpenHumanSessionHost {
             Option<std::collections::HashSet<String>>,
         ) = match (
             target_def,
-            crate::agent::harness::host_definition::AgentDefinitionRegistry::current(),
+            crate::agent_registry::host_definition::AgentDefinitionRegistry::current(),
         ) {
             // Host-only: no delegation; the host's names join an empty belt.
             _ if host_only => (Vec::new(), Some(super::host_only::empty_belt())),
@@ -705,7 +705,7 @@ impl OpenHumanSessionHost {
         let payload_summarizer: Option<
             std::sync::Arc<crate::agent::tinyagents::payload_summarizer::DynPayloadSummarizer>,
         > = if !host_only && super::summarizes_tool_output(agent_id, config) {
-            match crate::agent::harness::host_definition::AgentDefinitionRegistry::current() {
+            match crate::agent_registry::host_definition::AgentDefinitionRegistry::current() {
                 Some(reg) => match reg.get("summarizer") {
                     Some(summarizer_def) => {
                         log::info!(
@@ -823,7 +823,6 @@ impl OpenHumanSessionHost {
                 config: Arc::clone(&base_config),
                 definitions,
                 security_policy: security,
-                post_turn_hooks: agent.post_turn_hooks.clone(),
                 session_definition: session_definition.clone().map(|definition| {
                     Arc::new(super::host_tools::add_permanent_tools(
                         definition,
@@ -871,7 +870,7 @@ impl OpenHumanSessionHost {
 pub(super) fn resolve_target_definition(
     config: &Config,
     agent_id: &str,
-) -> Result<Option<crate::agent::harness::host_definition::AgentDefinition>> {
+) -> Result<Option<crate::agent_registry::host_definition::AgentDefinition>> {
     let registry = AgentDefinitionRegistry::current();
 
     if let Some(reg) = registry.as_deref() {
@@ -883,16 +882,16 @@ pub(super) fn resolve_target_definition(
     // Harness registry miss (or not yet initialised). Before failing, check
     // the config-backed custom agent registry — the one place custom
     // (non-shipped) agents live.
-    if let Some(entry) = crate::agent::registry::find_custom_in_config(config, agent_id) {
+    if let Some(entry) = crate::agent_registry::find_custom_in_config(config, agent_id) {
         log::info!(
             "[agent::builder] agent_id={} not found in the harness AgentDefinitionRegistry — \
              synthesizing a definition from its custom agent_registry entry so it runs with its \
              real tool belt instead of persona-only / erroring",
             agent_id
         );
-        return Ok(Some(
-            crate::agent::registry::definition_from_registry_entry(&entry),
-        ));
+        return Ok(Some(crate::agent_registry::definition_from_registry_entry(
+            &entry,
+        )));
     }
 
     if agent_id == "orchestrator" {
@@ -919,47 +918,4 @@ pub(super) fn resolve_target_definition(
     ))
 }
 
-/// Resolve the provider/workload role for a session build.
-///
-/// Explicit `hint:<role>` markers route to their workload; everything else
-/// (incl. the legacy `default_model` tier the bootstrap pinned) falls through
-/// to `chat` so `chat_provider` drives the user-facing turn.
-pub(crate) fn provider_role_for(default_model: Option<&str>) -> &'static str {
-    match default_model.map(str::trim) {
-        Some("hint:agentic") => "agentic",
-        Some("hint:coding") => "coding",
-        Some("hint:summarization") => "summarization",
-        Some("hint:reasoning") => "reasoning",
-        _ => "chat",
-    }
-}
-
-#[cfg(test)]
-#[path = "factory_provider_role_tests_tests.rs"]
-mod provider_role_tests;
-
-/// Resolve the initial harness workload without constructing a session.
-/// Flow readiness shares this path so it checks the provider used at runtime.
-pub(crate) fn provider_role_for_definition(
-    default_model: Option<&str>,
-    target_def: Option<&crate::agent::harness::host_definition::AgentDefinition>,
-) -> &'static str {
-    let master_hint = default_model
-        .is_none()
-        .then(|| {
-            target_def.and_then(|def| {
-                if def.id == "orchestrator" {
-                    match &def.model {
-                        tinyagents_definition::ModelSpec::Hint(hint) => {
-                            Some(format!("hint:{hint}"))
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            })
-        })
-        .flatten();
-    provider_role_for(master_hint.as_deref().or(default_model))
-}
+use super::factory_resolution::provider_role_for_definition;

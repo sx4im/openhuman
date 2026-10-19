@@ -350,7 +350,14 @@ mod provider_config_rejection_suppression {
         // Verbatim wire body from TAURI-RUST-4XK Sentry issue 5338.
         let body = r#"ollama API error (403 Forbidden): {"error":"this model requires a subscription, upgrade for access: https://ollama.com/upgrade (ref: bc48f3c8-fba1-40b6-93a9-786a167d16f9)"}"#;
         assert!(
-            config_rejection_demoted(&tinyinference_llm::failure::http::classify_http_failure("ollama", reqwest::StatusCode::FORBIDDEN.as_u16(), body), "ollama"),
+            config_rejection_demoted(
+                &tinyinference_llm::failure::http::classify_http_failure(
+                    "ollama",
+                    reqwest::StatusCode::FORBIDDEN.as_u16(),
+                    body
+                ),
+                "ollama"
+            ),
             "TAURI-RUST-4XK: ollama 403 subscription-gate must be classified as provider config-rejection"
         );
     }

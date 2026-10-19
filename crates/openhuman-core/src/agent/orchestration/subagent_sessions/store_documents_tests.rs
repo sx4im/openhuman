@@ -21,7 +21,7 @@ fn session(id: &str) -> DurableSubagentSession {
         "actionRoot": null,
         "taskKey": "task",
         "taskTitle": "Task",
-        "currentTaskId": null,
+        "currentTaskId": "sub-legacy",
         "status": "idle",
         "reusable": true,
         "latestHistory": null,
@@ -49,6 +49,11 @@ fn save_upserts_sessions_and_keeps_the_others() {
     assert_eq!(loaded.len(), 2);
     assert_eq!(loaded[0].subagent_session_id, "a");
     assert_eq!(loaded[1].status, DurableSubagentStatus::Idle);
+    // The source fixture intentionally predates lifecycle_key. Its owner and
+    // task reference remain available for the scoped legacy lookup path.
+    assert_eq!(loaded[0].parent_session, "parent");
+    assert_eq!(loaded[0].current_task_id.as_deref(), Some("sub-legacy"));
+    assert_eq!(loaded[0].lifecycle_key, None);
     // A save from a stale snapshot never removes a session it does not know.
     docs.save(&[session("c")]).unwrap();
     let ids: Vec<_> = docs
@@ -204,4 +209,20 @@ fn a_late_importer_rechecks_the_marker_under_the_claim() {
         .map(|s| s.subagent_session_id)
         .collect();
     assert_eq!(ids, ["first"]);
+}
+
+#[test]
+fn a_durable_session_keeps_its_scoped_lifecycle_key_after_document_reopen() {
+    let storage = MemoryStorage::new();
+    let mut saved = session("scoped-lifecycle");
+    let key = tinyagents_orchestration::subagent::SubagentTaskKey {
+        root_run_id: "root".into(),
+        parent_run_id: "parent".into(),
+        thread_id: Some("thread".into()),
+        task_id: "task".into(),
+    };
+    saved.lifecycle_key = Some(key.clone());
+    docs_in(&storage, "local").save(&[saved]).unwrap();
+    let loaded = docs_in(&storage, "local").load().unwrap();
+    assert_eq!(loaded[0].lifecycle_key, Some(key));
 }

@@ -2,32 +2,38 @@
 //! keep failing with no progress, driving the crate no-progress ladder plus
 //! OpenHuman's recoverable-failure headroom and terminal-inference fast-halt.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
 use tinyagents_harness::context::RunContext;
 use tinyagents_harness::error::Result as TaResult;
 use tinyagents_harness::middleware::{
-    call_effect, dispatch_target, is_repeat_call_exempt, repeat_guard_marker, CallEffect,
-    Middleware, StopLatch, ToolFactsLookup, ToolInvocationIdentity,
+    call_effect, dispatch_target, is_repeat_call_exempt, repeat_guard_marker, FailureScope,
+    FailureScopeMiddleware, FailureScopePolicy, FailureStopKind, Middleware, ToolFactsLookup,
+    ToolInvocationIdentity,
 };
-use tinyagents_harness::no_progress::{
-    classified_step, clear_recovered, ClassifiedFailureTracker, ClassifiedStep, FailurePolicy,
-    NoProgress, NoProgressTracker, RecoverableFailureLadder, ToolAttempt,
-};
+use tinyagents_harness::no_progress::FailurePolicy;
 use tinyagents_harness::steering::SteeringHandle;
+use tinyagents_hooks::stop::StopLatch;
 use tinyinference_llm::tool::ToolCall as TaToolCall;
 use tinytools::ToolResult as TaToolResult;
 
 use super::fetched_site::{fetch_host_scope, heuristic_text};
+use crate::agent::tinyagents::host::OpenHumanRunContext;
 pub(crate) use crate::inference::failure_copy::user_actionable_escalation;
 use crate::inference::failure_copy::{
     recoverable_identical_halt_summary, recoverable_no_progress_halt_summary,
     terminal_inference_failure_kind, terminal_inference_halt_summary,
 };
-use tinyagents_harness::middleware::{EphemeralInstructionMiddleware, EphemeralInstructionQueue};
+use tinyagents_harness::middleware::EphemeralInstructionMiddleware;
 use tinyinference_llm::failure::is_recoverable_failure_text as is_recoverable_tool_failure;
+
+#[cfg(test)]
+use tinyagents_harness::no_progress::{
+    classified_step, ClassifiedFailureTracker, ClassifiedStep, RecoverableFailureLadder,
+};
 
 /// `after_tool`: stop (or nudge) the run when tool calls keep failing with no
 /// progress (issue #4249). The legacy tool loop's progress guard surfaced a
@@ -55,82 +61,36 @@ use tinyinference_llm::failure::is_recoverable_failure_text as is_recoverable_to
 ///   mechanism as the stop-hook / cap pausers), then [`reset`](NoProgressTracker::reset)
 ///   so a resumed run does not immediately re-pause on the latched state.
 pub(crate) struct RepeatedToolFailureMiddleware {
-    /// Pauses the run and records why in the shared stop-note slot.
-    stop: StopLatch,
-    /// Crate no-progress escalation ladder — the single source of the
-    /// identical-failure / varied-failure / hard-reject logic (tinyagents 1.5.0).
-    tracker: NoProgressTracker,
-    classified: ClassifiedFailureTracker,
-    /// Monotonic tool-outcome counter, used only for the crate's "no progress
-    /// since step X" nudge wording. Not the model-call count, but a stable,
-    /// increasing marker is all the wording needs.
-    step: AtomicUsize,
-    /// call_id → argument fingerprint, captured in `before_tool` (the tool result
-    /// carries no arguments). Folded into the identical-repeat signature so the
-    /// "identical arguments" halt only trips on the *same* args — two different
-    /// argument sets that happen to share a first error line don't count as a
-    /// repeat and can't pre-empt the generic no-progress backstop.
-    arg_sigs: std::sync::Mutex<std::collections::HashMap<String, String>>,
-    /// Call ID to stable target identity. Query strings and free-form prompts
-    /// are excluded so varying a query cannot evade a resource-level blocker.
-    target_scopes: std::sync::Mutex<std::collections::HashMap<String, String>>,
-    /// Recoverable-failure ladder (issue #4463): transient failures (timeouts,
-    /// connection resets, rate limits, 5xx) are routed here instead of the crate
-    /// tracker so they get the legacy extended headroom
-    /// ([`RECOVERABLE_REPEAT_FAILURE_THRESHOLD`] identical /
-    /// [`RECOVERABLE_NO_PROGRESS_FAILURE_THRESHOLD`] consecutive) rather than the
-    /// crate's fixed 3/6, which is right only for deterministic failures.
-    /// Counting lives in the harness ladder; the halt wording is
-    /// [`HaltCopy`].
-    recoverable: RecoverableFailureLadder,
-    /// Corrective nudges for the next model request, drained by
-    /// [`PendingNudgeInjector`]. Never sent through steering: an injected
-    /// message joins the working transcript and is committed into durable
-    /// history, where it replays as a stale instruction on every later turn
-    /// (#6725).
-    pending_nudges: EphemeralInstructionQueue,
-    /// `tool\u{1f}args` of the last finished command that exited non-zero,
-    /// kept so a *repeat* of it still counts as a failure while a different
-    /// command's non-zero exit counts as information (see `after_tool`).
-    last_exit_report: std::sync::Mutex<Option<String>>,
-    /// Call ID to what the call may have done ([`call_effect`]), judged in
-    /// `before_tool` where the arguments are visible. Decides whether a
-    /// timeout is a retryable read or an uncertain action.
-    call_effects: std::sync::Mutex<std::collections::HashMap<String, CallEffect>>,
-    /// The registered tools' declarations (read-only policy, external effect,
-    /// permission level). Without it only tool names are read.
-    tool_facts: Option<ToolFactsLookup>,
+    owner: FailureScopeMiddleware<OpenHumanRunContext>,
+    policy: Arc<HostFailurePolicy>,
 }
 
 impl RepeatedToolFailureMiddleware {
-    /// Build the breaker. `identical_threshold` (the identical-signature retry
-    /// ceiling) is handed straight to [`NoProgressTracker::new`], which clamps it
-    /// so a nudge always precedes a halt (a single failure is never a loop).
+    /// Build the host policy adapter over TinyAgents' failure-scope driver.
     pub(crate) fn new(
         handle: SteeringHandle,
         identical_threshold: usize,
         halt_summary: tinyagents_harness::turn_outcome::HaltSummarySlot,
     ) -> Self {
-        Self {
-            stop: StopLatch::new(handle, halt_summary),
-            tracker: NoProgressTracker::new(identical_threshold),
-            classified: ClassifiedFailureTracker::default(),
-            last_exit_report: std::sync::Mutex::default(),
-            step: AtomicUsize::new(0),
-            arg_sigs: std::sync::Mutex::new(std::collections::HashMap::new()),
-            target_scopes: std::sync::Mutex::new(std::collections::HashMap::new()),
-            recoverable: RecoverableFailureLadder::default(),
-            pending_nudges: EphemeralInstructionQueue::new(),
-            call_effects: std::sync::Mutex::new(std::collections::HashMap::new()),
-            tool_facts: None,
-        }
+        let policy = Arc::new(HostFailurePolicy::new(handle.clone(), halt_summary.clone()));
+        let owner = FailureScopeMiddleware::with_identical_threshold(
+            handle,
+            halt_summary,
+            policy.clone(),
+            identical_threshold,
+        );
+        Self { owner, policy }
     }
 
     /// Judge each call's side effect from the registered tools' own
     /// declarations ([`tinyagents_harness::middleware::tool_sets_lookup`]) rather than
     /// from tool names alone.
-    pub(crate) fn with_tool_facts(mut self, lookup: ToolFactsLookup) -> Self {
-        self.tool_facts = Some(lookup);
+    pub(crate) fn with_tool_facts(self, lookup: ToolFactsLookup) -> Self {
+        *self
+            .policy
+            .tool_facts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(lookup);
         self
     }
 
@@ -138,13 +98,26 @@ impl RepeatedToolFailureMiddleware {
     /// `before_model` must run after the transcript snapshot (which a failed
     /// turn persists) and after every reduction step.
     pub(crate) fn nudge_injector(&self) -> EphemeralInstructionMiddleware {
-        self.pending_nudges.middleware()
+        self.owner.nudge_injector()
     }
+}
 
-    /// Inspect pending product corrections in tests.
-    #[cfg(test)]
-    pub(crate) fn take_pending_nudges(&self) -> Vec<String> {
-        self.pending_nudges.drain_all()
+struct HostFailurePolicy {
+    stop: StopLatch,
+    tool_facts: Mutex<Option<ToolFactsLookup>>,
+    last_exit_report: Mutex<HashMap<u64, String>>,
+}
+
+impl HostFailurePolicy {
+    fn new(
+        handle: SteeringHandle,
+        halt_summary: tinyagents_harness::turn_outcome::HaltSummarySlot,
+    ) -> Self {
+        Self {
+            stop: StopLatch::new(handle, halt_summary),
+            tool_facts: Mutex::default(),
+            last_exit_report: Mutex::default(),
+        }
     }
 }
 
@@ -263,390 +236,303 @@ pub(crate) fn is_body_level_failure(name: &str, content: &str) -> bool {
     }
 }
 
-#[async_trait]
-impl Middleware<(), crate::agent::tinyagents::host::OpenHumanRunContext>
-    for RepeatedToolFailureMiddleware
-{
-    fn name(&self) -> &str {
-        "repeated_tool_failure"
+impl FailurePolicy for HostFailurePolicy {
+    fn identical_halt_summary(&self, tool: &str, count: u32, failure_text: &str) -> String {
+        HaltCopy.identical_halt_summary(tool, count, failure_text)
     }
 
-    // Failure accounting and corrective nudges must observe tool outcomes even
-    // when an earlier middleware has already requested a control action.
-    fn is_observer(&self) -> bool {
-        true
+    fn no_progress_halt_summary(&self, consecutive: u32, tool: &str, failure_text: &str) -> String {
+        HaltCopy.no_progress_halt_summary(consecutive, tool, failure_text)
     }
+}
 
-    /// A new model response starts a new tool batch for the stop latch.
-    async fn after_model(
-        &self,
-        _ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
-        _state: &(),
-        _response: &mut tinyinference_llm::model::ModelResponse,
-    ) -> TaResult<()> {
-        self.stop.start_batch();
-        Ok(())
-    }
-
-    /// Forget the run's stop-latch state (see [`StopLatch::finish_run`]).
-    async fn after_agent(
-        &self,
-        _ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
-        _state: &(),
-        _run: &mut tinyagents_harness::middleware::AgentRun,
-    ) -> TaResult<()> {
-        self.stop.finish_run();
-        Ok(())
-    }
-
-    async fn before_tool(
-        &self,
-        _ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
-        _state: &(),
-        call: &mut TaToolCall,
-    ) -> TaResult<()> {
-        // The tool result carries no arguments, so capture a fingerprint here and
-        // correlate it by call_id in `after_tool`.
-        if let Ok(mut sigs) = self.arg_sigs.lock() {
-            sigs.insert(call.id.clone(), args_fingerprint(&call.arguments));
+impl FailureScopePolicy<OpenHumanRunContext> for HostFailurePolicy {
+    fn scope(&self, _ctx: &RunContext<OpenHumanRunContext>, call: &TaToolCall) -> FailureScope {
+        FailureScope {
+            argument_fingerprint: args_fingerprint(&call.arguments),
+            scope: failure_scope(&call.name, &call.arguments),
         }
-        if let Ok(mut scopes) = self.target_scopes.lock() {
-            scopes.insert(call.id.clone(), failure_scope(&call.name, &call.arguments));
-        }
-        let effect = call_effect(self.tool_facts.as_ref(), &call.name, &call.arguments);
-        tracing::trace!(
-            tool = %call.name,
-            call_id = %call.id,
-            effect = ?effect,
-            "[tinyagents::mw] tool call side effect judged for failure classification"
-        );
-        if let Ok(mut effects) = self.call_effects.lock() {
-            effects.insert(call.id.clone(), effect);
-        }
-        Ok(())
     }
 
-    async fn after_tool(
+    fn assess(
         &self,
-        ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
-        _state: &(),
-        invocation: &ToolInvocationIdentity,
-        result: &mut TaToolResult,
-    ) -> TaResult<()> {
-        let tool_name = invocation.tool_name();
-        let content = crate::agent::tinyagents::middleware::tool_result_text(result);
-        let arg_fp = self
-            .arg_sigs
-            .lock()
-            .ok()
-            .and_then(|mut sigs| sigs.remove(&invocation.call_id().to_string()))
-            .unwrap_or_default();
-        let scope = self
-            .target_scopes
-            .lock()
-            .ok()
-            .and_then(|mut scopes| scopes.remove(&invocation.call_id().to_string()))
-            .unwrap_or_else(|| tool_name.to_owned());
-        let effect = self
-            .call_effects
-            .lock()
-            .ok()
-            .and_then(|mut effects| effects.remove(&invocation.call_id().to_string()))
-            .unwrap_or_default();
-        // A result the repeat guard answered itself (blocked/halted without
-        // running the tool) is the guard's verdict, not the tool failing, so it
-        // must not feed the failure ladder.
-        if let Some(marker) = repeat_guard_marker(result) {
-            tracing::debug!(
-                tool = tool_name,
-                marker,
-                "[tinyagents::mw] skipping repeat-guard result in failure ladder"
-            );
-            self.stop.record_refusal();
-            return Ok(());
-        }
-        // The memory budget refusing a call past its cap is the host's own
-        // limit (`memory::tool_budget`), not a failure: a parallel batch of
-        // memory calls past the cap must not halt the run (#7717).
+        _ctx: &RunContext<OpenHumanRunContext>,
+        _invocation: &ToolInvocationIdentity,
+        call: &TaToolCall,
+        _scope: &FailureScope,
+        result: &TaToolResult,
+    ) -> tinyagents_harness::middleware::FailureAssessment {
+        use tinyagents_harness::middleware::FailureAssessment;
+
         if crate::memory::tools::is_budget_refusal(result) {
-            tracing::debug!(
-                tool = tool_name,
-                "[tinyagents::mw] skipping memory budget refusal in failure ladder"
-            );
-            return Ok(());
+            return FailureAssessment::Ignore;
         }
-        let step = self.step.fetch_add(1, Ordering::SeqCst) + 1;
-
-        // Body-level failure signal: `validate_workflow` / `dry_run_workflow`
-        // report an invalid graph via a `success` result whose JSON body carries
-        // `"ok": false` — see `is_body_level_failure`. Only meaningful when
-        // `result.error` is `None`; when both are set, `result.error` already
-        // drives every check below, so this never double-counts one failure.
-        let body_level_failure = !result.is_error && is_body_level_failure(tool_name, &content);
-
-        // Combined failure text for classification: the model-facing content plus
-        // the (redundant but authoritative) error field. Both are scanned for the
-        // policy / terminal-inference / recoverable markers below.
-        let failure_text = match result.is_error {
-            true => content.clone(),
-            false if body_level_failure => content.clone(),
-            false => String::new(),
-        };
-        let heuristic_failure_text = heuristic_text(tool_name, &failure_text);
-        let failed = result.is_error || body_level_failure;
-        let repeated_failure = failed
-            && self
-                .stop
-                .witness()
-                .record_failure(tool_name, &arg_fp, &failure_text);
-
+        let content = crate::agent::tinyagents::middleware::tool_result_text(result);
+        let body_failure = !result.is_error && is_body_level_failure(&call.name, &content);
+        let failed = result.is_error || body_failure;
         if !failed {
-            self.stop.record_success();
-            // Only a successful observation against this operation and scope
-            // demonstrates that its blocker changed. Unrelated successes do not.
-            clear_recovered(&self.classified, tool_name, &scope);
-        } else if !is_repeat_call_exempt(tool_name) {
-            if let Some((class, budget)) =
-                recovery_policy_with_effect(tool_name, &failure_text, body_level_failure, effect)
-            {
-                match classified_step(
-                    &self.classified,
-                    class,
-                    tool_name,
-                    &scope,
-                    budget,
-                    &sanitized_failure(&failure_text),
-                ) {
-                    ClassifiedStep::Halt(summary) => {
-                        tracing::warn!(
-                            tool = tool_name,
-                            class,
-                            budget,
-                            "[tinyagents::mw] classified failure budget exhausted"
-                        );
-                        // An identical re-issue made while the repeat guard
-                        // refuses the calls around it is a repeat loop.
-                        self.stop.halt_classified(
-                            summary,
-                            class,
-                            tool_name,
-                            repeated_failure,
-                            || first_error_line(&failure_text),
-                        );
-                        self.tracker.reset();
-                        return Ok(());
-                    }
-                    ClassifiedStep::Nudge(generic) => {
-                        // The harness wording for `missing_app` is the
-                        // desktop-target one; a shell command names this
-                        // host's OS and shell instead.
-                        let instruction = if class == "missing_app" && tool_name == "shell" {
-                            missing_program_nudge(tool_name, &first_error_line(&failure_text))
-                        } else {
-                            generic
-                        };
-                        tracing::debug!(
-                            tool = tool_name,
-                            class,
-                            "[tinyagents::mw] classified failure within budget — nudging recovery"
-                        );
-                        self.pending_nudges.push(ctx, instruction);
-                    }
-                    ClassifiedStep::Within => {}
-                }
-                // The classified budget owns this known blocker. In particular,
-                // a different query must not reset its count or trigger a
-                // competing exact-repeat nudge.
-                return Ok(());
-            }
+            return FailureAssessment::Progress;
         }
 
-        // ── Part 5 (#3104): terminal delegated-inference fast-halt ──────────────
-        // A permanent inference failure (out of budget / provider-config rejection)
-        // surfaced by a delegated sub-agent cannot be recovered by retrying — the
-        // budget is account-wide and the model/provider config is shared by every
-        // (sub-)agent. Halt on the FIRST occurrence with an actionable root cause,
-        // *before* the count-based thresholds, because the orchestrator otherwise
-        // re-emits the doomed step under varied delegation-tool names so the
-        // identical-retry threshold never trips in time.
-        // A command's exit report carries the program's output, which can quote
-        // a provider error (a script calling an API) without the agent's own
-        // inference having failed.
+        let failure_text = sanitized_failure(&content);
+        let heuristic = heuristic_text(&call.name, &failure_text);
         if result.is_error && !is_command_exit_report(&failure_text) {
-            if let Some(kind) = terminal_inference_failure_kind(heuristic_failure_text) {
-                tracing::warn!(
-                    tool = tool_name,
-                    kind = ?kind,
-                    "[tinyagents::mw] terminal delegated-inference failure — halting on first occurrence with root cause"
-                );
-                self.stop.halt(terminal_inference_halt_summary(
-                    kind,
-                    tool_name,
-                    &failure_text,
-                ));
-                self.tracker.reset();
-                self.recoverable.reset_streak();
-                return Ok(());
+            if let Some(kind) = terminal_inference_failure_kind(heuristic) {
+                let summary = terminal_inference_halt_summary(kind, &call.name, &failure_text);
+                return FailureAssessment::Halt {
+                    summary: summary.clone(),
+                    cause: Some(tinyagents_harness::no_progress::ClassifiedStopCause {
+                        class: match kind {
+                            crate::inference::failure_copy::TerminalInferenceFailure::BudgetExhausted => "out_of_credits",
+                            crate::inference::failure_copy::TerminalInferenceFailure::ProviderConfig => "provider_config",
+                        }.to_owned(),
+                        operation: call.name.clone(),
+                        summary,
+                    }),
+                };
             }
         }
 
-        // A hard policy rejection is marked in the tool output; it can never
-        // succeed when re-issued unchanged, so the crate ladder trips it faster
-        // (its `HARD_REJECT_HALT_THRESHOLD` of 2). Both the read-only/forbidden
-        // block (`POLICY_BLOCKED_MARKER`) and the approval denial / TTL expiry
-        // (`POLICY_DENIED_MARKER`) are deterministic — restore the 2-repeat
-        // fast-trip for BOTH (issue #4463 part 6: denied had drifted to the
-        // generic 3).
-        let policy_marked = |s: &str| {
-            s.contains(tinytools::status::POLICY_BLOCKED_MARKER)
-                || s.contains(tinytools::status::POLICY_DENIED_MARKER)
-        };
-        let hard_reject = policy_marked(&content);
+        let hard_reject = content.contains(tinytools::status::POLICY_BLOCKED_MARKER)
+            || content.contains(tinytools::status::POLICY_DENIED_MARKER);
+        if !is_repeat_call_exempt(&call.name) {
+            let effect = call_effect(
+                self.tool_facts
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .as_ref(),
+                &call.name,
+                &call.arguments,
+            );
+            if let Some((class, budget)) =
+                recovery_policy_with_effect(&call.name, &failure_text, body_failure, effect)
+            {
+                let nudge = (class == "missing_app" && call.name == "shell")
+                    .then(|| missing_program_nudge(&call.name, &first_error_line(&failure_text)));
+                return FailureAssessment::ClassifiedFailure {
+                    class: class.to_owned(),
+                    budget,
+                    error: failure_text,
+                    nudge,
+                };
+            }
+        }
 
-        // ── Part 4: recoverable-failure headroom ────────────────────────────────
-        // Transient failures (timeouts, connection resets, rate limits, 5xx) get
-        // the legacy extended headroom instead of the crate's deterministic 3/6.
-        // Route them to the recoverable ladder; a success or a non-recoverable
-        // failure resets that streak and feeds the crate tracker as before.
-        // A finished command's exit report is the program's output, so a test
-        // run that prints `timed out` or `connection refused` is not a
-        // transient tool failure. Its identical-repeat count would otherwise
-        // persist across the turn and halt an edit-and-rerun loop on the same
-        // test command; the crate tracker below resets on any success instead.
         let recoverable = result.is_error
             && !hard_reject
             && !is_command_exit_report(&failure_text)
-            && (is_recoverable_tool_failure(heuristic_failure_text)
+            && (is_recoverable_tool_failure(heuristic)
                 || matches!(
-                    tinytools::status::classify(heuristic_failure_text, false).class,
+                    tinytools::status::classify(heuristic, false).class,
                     tinytools::status::ToolFailureClass::Timeout
                         | tinytools::status::ToolFailureClass::ServiceUnavailable
                         | tinytools::status::ToolFailureClass::ModelConnection
                 ));
         if recoverable {
-            // A poll tool's contract is the identical repeat (see
-            // [`is_repeat_call_exempt`]), and the thing it repeats on is a
-            // *timeout* — which lands here as a recoverable failure. Counting
-            // those toward the identical-argument headroom halts exactly the
-            // loop the tool is documented to ask for: a sub-agent that outlives
-            // eight wait windows killed the turn, discarding work it had already
-            // done. `RepeatProgressMiddleware` already honours this exemption on
-            // the success side; the failure ladder must agree, or the exemption
-            // only holds while the wait happens to return early.
-            if is_repeat_call_exempt(tool_name) {
-                return Ok(());
+            if is_repeat_call_exempt(&call.name) {
+                return FailureAssessment::Ignore;
             }
-            if let Some(summary) =
-                self.recoverable
-                    .record(&HaltCopy, tool_name, &arg_fp, &failure_text)
-            {
-                tracing::warn!(
-                    tool = tool_name,
-                    "[tinyagents::mw] recoverable-failure headroom exhausted — halting run so the root cause surfaces"
-                );
-                self.stop.halt(summary);
-                self.recoverable.reset_streak();
-            }
-            // Recoverable failures never feed the crate tracker — its fixed 3/6
-            // backstop would halt them before the extended headroom is spent.
-            return Ok(());
+            return FailureAssessment::RecoverableFailure {
+                error: failure_text,
+            };
         }
-        // Success or non-recoverable failure: clear the recoverable streak (its
-        // per-signature counts persist across the turn) before the crate tracker
-        // handles the deterministic 3/6 + hard-reject-2 path below.
-        self.recoverable.reset_streak();
 
-        // Union the body-level `ok:false` signal with the existing `error.is_some()`
-        // predicate so the crate tracker (which reads `attempt.error` as its sole
-        // success/failure signal — `None` means "progress was made, reset every
-        // counter") sees the repeat as a failure and feeds it into the same
-        // nudge/halt ladder as a real tool error.
-        // A finished command that exited non-zero is the program's answer, and
-        // a different command's non-zero exit is new information, not a
-        // repeat: `pip install` failing to build, `g++` turning out to be
-        // missing, a `which cc` that finds nothing. Six such answers in a row
-        // ended one turn 39 s into a 60-minute budget as "no progress". Only
-        // the same command failing again counts toward the ladder; a different
-        // one resets it the way a success would. A loop of varied commands is
-        // still bounded by the call cap and the clock.
-        let exit_report = result.is_error && !hard_reject && is_command_exit_report(&failure_text);
-        let same_command_again = exit_report && {
-            let key = format!("{tool_name}\u{1f}{arg_fp}");
-            let mut last = self.last_exit_report.lock().ok();
-            let repeat = last
-                .as_deref()
-                .is_some_and(|l| l.as_deref() == Some(key.as_str()));
-            if let Some(slot) = last.as_mut() {
-                **slot = Some(key);
-            }
-            repeat
-        };
-        if !exit_report {
-            if let Ok(mut last) = self.last_exit_report.lock() {
-                *last = None;
-            }
-        }
-        if exit_report && !same_command_again {
-            // A new command: the ladder starts over, as after a success, and
-            // the list a halt would print starts with this call.
-            self.tracker.reset();
-        }
-        let attempt_error: Option<&str> = match result.is_error {
-            true => Some(failure_text.as_str()),
-            false if body_level_failure => Some(failure_text.as_str()),
-            false => None,
-        };
-        let attempt = ToolAttempt {
-            tool: tool_name,
-            arg_fingerprint: &arg_fp,
-            error: attempt_error,
+        FailureAssessment::Failure {
+            error: failure_text,
             hard_reject,
-            // The unknown-tool recovery sentinel is a C3 concern; today every
-            // failure feeds the generic backstop exactly as the legacy ladder did.
             recoverable_miss: false,
-        };
+        }
+    }
 
-        match self.tracker.record(step, &attempt) {
-            NoProgress::Continue => {}
-            NoProgress::Nudge(instruction) => {
-                tracing::warn!(
-                    tool = tool_name,
-                    step,
-                    hard_reject,
-                    "[tinyagents::mw] no-progress nudge — steering the model to change strategy before the retry cap"
-                );
-                // Request-scoped, not steering: no run policy can reject it (a
-                // `Redirect` nudge aborted interactive turns, #4473), and it is
-                // never committed into durable history (#6725).
-                self.pending_nudges.push(ctx, instruction);
-            }
-            NoProgress::Halt(summary) => {
-                // #4092: if the blocker is user-actionable (a missing connection),
-                // escalate with a concrete ask instead of the crate's generic
-                // "unreachable environment, report back" summary.
-                // A command printing `not connected` is not a missing integration.
-                let escalation = (!is_command_exit_report(&content))
-                    .then(|| user_actionable_escalation(tool_name, &content))
-                    .flatten();
-                let user_actionable = escalation.is_some();
-                let summary = escalation.unwrap_or(summary);
-                tracing::warn!(
-                    tool = tool_name,
-                    step,
-                    hard_reject,
-                    user_actionable,
-                    "[tinyagents::mw] repeated tool failure — halting run so the root cause surfaces"
-                );
-                // Pause at the top of the next iteration (before the next model
-                // call), matching the stop-hook / cap pause path. Reset so a
-                // resumed run does not immediately re-pause on the latched state
-                // (the crate also resets internally on a halt; this is explicit
-                // and idempotent).
-                self.stop.halt(summary);
-                self.tracker.reset();
+    fn halt_copy_for_call(
+        &self,
+        _ctx: &RunContext<OpenHumanRunContext>,
+        kind: FailureStopKind,
+        summary: String,
+        error: &str,
+        call: &TaToolCall,
+    ) -> String {
+        if kind == FailureStopKind::NoProgress && !is_command_exit_report(error) {
+            if let Some(escalation) = user_actionable_escalation(&call.name, error) {
+                return escalation;
             }
         }
-        Ok(())
+        summary
+    }
+
+    fn halt_cause_for_call(
+        &self,
+        _ctx: &RunContext<OpenHumanRunContext>,
+        kind: FailureStopKind,
+        cause: Option<tinyagents_harness::no_progress::ClassifiedStopCause>,
+        error: &str,
+        call: &TaToolCall,
+    ) -> Option<tinyagents_harness::no_progress::ClassifiedStopCause> {
+        if kind == FailureStopKind::NoProgress
+            && !is_command_exit_report(error)
+            && user_actionable_escalation(&call.name, error).is_some()
+        {
+            return Some(tinyagents_harness::no_progress::ClassifiedStopCause {
+                class: "missing_connection".into(),
+                operation: call.name.clone(),
+                summary: String::new(),
+            });
+        }
+        cause
+    }
+
+    fn start_batch(&self, _ctx: &RunContext<OpenHumanRunContext>) {
+        self.stop.start_batch();
+    }
+
+    fn is_repeat_guard_refusal(
+        &self,
+        _ctx: &RunContext<OpenHumanRunContext>,
+        _call: &TaToolCall,
+        result: &TaToolResult,
+    ) -> bool {
+        repeat_guard_marker(result).is_some()
+    }
+
+    fn record_guard_refusal(&self, _ctx: &RunContext<OpenHumanRunContext>) {
+        self.stop.record_refusal();
+    }
+
+    fn record_progress(
+        &self,
+        ctx: &RunContext<OpenHumanRunContext>,
+        _call: &TaToolCall,
+        _scope: &FailureScope,
+    ) {
+        self.stop.record_success();
+        self.last_exit_report
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&ctx.instance_id());
+    }
+
+    fn current_halt_cause(
+        &self,
+        _ctx: &RunContext<OpenHumanRunContext>,
+    ) -> Option<tinyagents_harness::no_progress::ClassifiedStopCause> {
+        self.stop.current_classified_cause()
+    }
+
+    fn reset_no_progress_before_failure(
+        &self,
+        ctx: &RunContext<OpenHumanRunContext>,
+        call: &TaToolCall,
+        scope: &FailureScope,
+        result: &TaToolResult,
+    ) -> bool {
+        let content = crate::agent::tinyagents::middleware::tool_result_text(result);
+        if !result.is_error || !is_command_exit_report(&content) {
+            self.last_exit_report
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .remove(&ctx.instance_id());
+            return false;
+        }
+        let key = format!("{}\u{1f}{}", call.name, scope.argument_fingerprint);
+        let mut reports = self
+            .last_exit_report
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let is_new_command = reports.get(&ctx.instance_id()) != Some(&key);
+        reports.insert(ctx.instance_id(), key);
+        is_new_command
+    }
+
+    fn record_failure(
+        &self,
+        _ctx: &RunContext<OpenHumanRunContext>,
+        call: &TaToolCall,
+        scope: &FailureScope,
+        _result: &TaToolResult,
+        error: &str,
+    ) -> bool {
+        self.stop
+            .witness()
+            .record_failure(&call.name, &scope.argument_fingerprint, error)
+    }
+
+    fn classified_halt(
+        &self,
+        _ctx: &RunContext<OpenHumanRunContext>,
+        summary: &str,
+        class: &str,
+        call: &TaToolCall,
+        repeated: bool,
+        error: &str,
+    ) {
+        self.stop
+            .record_classified_halt(summary.to_owned(), class, &call.name, repeated, || {
+                first_error_line(error)
+            });
+    }
+
+    fn finish_run(&self, ctx: &RunContext<OpenHumanRunContext>) {
+        self.stop.finish_run();
+        self.last_exit_report
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&ctx.instance_id());
+    }
+}
+
+#[async_trait]
+impl Middleware<(), OpenHumanRunContext> for RepeatedToolFailureMiddleware {
+    fn name(&self) -> &str {
+        "repeated_tool_failure"
+    }
+
+    fn is_observer(&self) -> bool {
+        true
+    }
+
+    async fn after_model(
+        &self,
+        ctx: &mut RunContext<OpenHumanRunContext>,
+        state: &(),
+        response: &mut tinyinference_llm::model::ModelResponse,
+    ) -> TaResult<()> {
+        self.owner.after_model(ctx, state, response).await
+    }
+
+    async fn before_tool(
+        &self,
+        ctx: &mut RunContext<OpenHumanRunContext>,
+        state: &(),
+        call: &mut TaToolCall,
+    ) -> TaResult<()> {
+        self.owner.before_tool(ctx, state, call).await
+    }
+
+    async fn after_tool(
+        &self,
+        ctx: &mut RunContext<OpenHumanRunContext>,
+        state: &(),
+        invocation: &ToolInvocationIdentity,
+        result: &mut TaToolResult,
+    ) -> TaResult<()> {
+        self.owner.after_tool(ctx, state, invocation, result).await
+    }
+
+    async fn after_agent(
+        &self,
+        ctx: &mut RunContext<OpenHumanRunContext>,
+        state: &(),
+        run: &mut tinyagents_harness::middleware::AgentRun,
+    ) -> TaResult<()> {
+        self.owner.after_agent(ctx, state, run).await
+    }
+
+    async fn on_error(
+        &self,
+        ctx: &mut RunContext<OpenHumanRunContext>,
+        error: &tinyagents_harness::error::TinyAgentsError,
+    ) -> TaResult<()> {
+        self.owner.on_error(ctx, error).await
     }
 }
 

@@ -50,7 +50,7 @@ Required proof: product about_app list/search/lookup no longer offer the unsuppo
 
 ## rss-bench: keep the instrumentation gate
 
-Moving binaries did not eliminate their host-side instrumentation. OpenHuman [declares the off-by-default gate](../../crates/openhuman-core/Cargo.toml), [enables the deterministic provider override under it](../../crates/openhuman-core/src/inference/provider/factory.rs), and [allows profiling-only UTC forcing](../../crates/openhuman-core/src/agent/prompts/render_helpers/section_renderers.rs). None is a default or desktop product feature.
+Moving binaries did not eliminate their host-side instrumentation. OpenHuman [declares the off-by-default gate](../../crates/openhuman-core/Cargo.toml), [enables the deterministic provider override under it](../../crates/openhuman-core/src/inference/provider/factory.rs), and [allows profiling-only UTC forcing](../../crates/openhuman-core/src/prompts/section_renderers.rs). None is a default or desktop product feature.
 
 The external [profile manifest](https://github.com/tinyhumansai/openhuman-benchmarks/blob/3ac3de418eb8ff94498552724456ee201dd0c117/profile/Cargo.toml) requires `rss-bench` for both `rss-bench` and `library-profile`, forwarding it to `openhuman-core/rss-bench`. [Its mock providers](https://github.com/tinyhumansai/openhuman-benchmarks/blob/3ac3de418eb8ff94498552724456ee201dd0c117/profile/src/bin/library_profile/mock.rs) explicitly depend on the gated deterministic override. [The feature-forwarding checker](../../scripts/ci/check-feature-forwarding.mjs) already documents this intentional core-only exception.
 

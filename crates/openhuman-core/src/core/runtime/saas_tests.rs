@@ -128,13 +128,13 @@ fn boot_refuses_an_unseeded_definition_registry() {
 
 #[test]
 fn boot_accepts_a_builtins_only_registry() {
-    let registry = crate::agent::harness::host_definition::AgentDefinitionRegistry::builtins_only();
+    let registry = crate::agent_registry::host_definition::AgentDefinitionRegistry::builtins_only();
     verify_builtin_definitions(Some(&registry)).unwrap();
 }
 
 #[test]
 fn boot_refuses_a_registry_with_workspace_definitions() {
-    use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+    use crate::agent_registry::host_definition::AgentDefinitionRegistry;
     use tinyagents_definition::DefinitionSource;
     let mut custom = AgentDefinitionRegistry::builtins_only()
         .get("orchestrator")

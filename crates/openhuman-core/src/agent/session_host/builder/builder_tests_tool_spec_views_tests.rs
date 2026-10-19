@@ -12,7 +12,7 @@ use super::*;
 /// One spec is exempt by design — see the `use_skill` branch below.
 #[test]
 fn the_three_spec_views_share_their_leaf_schemas() {
-    crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins()
+    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins()
         .unwrap();
     let tmp = tempfile::TempDir::new().unwrap();
     let config = test_config(&tmp);

@@ -3,7 +3,6 @@
 //! delivering the draft/final reply.
 
 use crate::agent::bus::AgentTurnResponse;
-use crate::agent::progress::AgentProgress;
 use crate::channels::context::{
     compact_sender_history, is_context_window_overflow_error, ChannelRuntimeContext,
 };
@@ -13,6 +12,7 @@ use crate::channels::routes::{
 use crate::channels::{ChannelSendExt, SendMessage};
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
+use crate::progress::AgentProgress;
 use crate::util::truncate_with_ellipsis;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -406,7 +406,7 @@ pub(crate) async fn process_channel_runtime_message(
     // Slack channel cannot use it from their own session — distinct senders
     // produce distinct origins, and the wallet preparer / parked-approval
     // gates compare these for equality before honouring confirmations.
-    let turn_origin = crate::agent::turn_origin::AgentTurnOrigin::ExternalChannel {
+    let turn_origin = crate::security::turn_origin::AgentTurnOrigin::ExternalChannel {
         sender_name: msg.sender_name.clone(),
         channel: msg.channel.clone(),
         sender: Some(msg.sender.clone()),

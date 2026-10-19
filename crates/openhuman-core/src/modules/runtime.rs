@@ -51,16 +51,7 @@ static CALLBACKS: tokio::sync::OnceCell<Result<(), String>> = tokio::sync::OnceC
 /// a host callback cannot be served. The outcome is cached: a runtime that
 /// failed to start does not start on a later call.
 pub async fn runtime() -> tinybus::Result<&'static ModuleRuntime> {
-    let started = RUNTIME.get_or_init(|| {
-        let names = RuntimeNames {
-            thread: "openhuman-module-bus".to_string(),
-            worker: "openhuman-module-worker".to_string(),
-        };
-        ModuleRuntime::start(&names, None).map_err(|error| error.to_string())
-    });
-    let runtime = started
-        .as_ref()
-        .map_err(|error| tinybus::Error::Transport(error.clone()))?;
+    let runtime = runtime_now()?;
     CALLBACKS
         .get_or_init(|| async {
             // On the module runtime, not the caller's: the callbacks serve
@@ -72,6 +63,29 @@ pub async fn runtime() -> tinybus::Result<&'static ModuleRuntime> {
             }
         })
         .await
+        .as_ref()
+        .map_err(|error| tinybus::Error::Transport(error.clone()))?;
+    Ok(runtime)
+}
+
+/// Schedule host lifecycle cleanup without loading a module or installing callbacks.
+pub(crate) fn spawn_cleanup<F>(future: F) -> tinybus::Result<tokio::task::JoinHandle<F::Output>>
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    Ok(runtime_now()?.spawn(future))
+}
+
+fn runtime_now() -> tinybus::Result<&'static ModuleRuntime> {
+    let started = RUNTIME.get_or_init(|| {
+        let names = RuntimeNames {
+            thread: "openhuman-module-bus".to_string(),
+            worker: "openhuman-module-worker".to_string(),
+        };
+        ModuleRuntime::start(&names, None).map_err(|error| error.to_string())
+    });
+    let runtime = started
         .as_ref()
         .map_err(|error| tinybus::Error::Transport(error.clone()))?;
     Ok(runtime)

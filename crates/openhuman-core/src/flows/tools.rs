@@ -217,7 +217,7 @@ impl Tool for RunFlowTool {
     fn name(&self) -> &str {
         // NOTE: deliberately `run_flow`, not `run_workflow` — the latter
         // name is already taken by the unrelated legacy skills-workflow
-        // runner (`crate::agent::tools::run_workflow`,
+        // runner (`crate::skills::run_workflow`,
         // `RUN_WORKFLOW_TOOL_NAME`), which is registered in the same
         // default tool registry (`tools::ops::all_tools_with_runtime`).
         // Both tools were previously named identically, which

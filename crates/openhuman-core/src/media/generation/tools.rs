@@ -19,8 +19,8 @@ use tinyagents_harness::tinyinference_video::{VideoGenerator, WaitPolicy};
 use tinytools::{PermissionLevel, Tool, ToolCategory, ToolResult};
 
 use super::artifact_tool::MediaArtifactTool;
-use super::provider::{managed_generators, MediaGenerators};
-use crate::agent::artifacts::ArtifactKind;
+use super::provider::MediaGenerators;
+use crate::artifacts::ArtifactKind;
 use crate::config::Config;
 
 /// Image tool name (pinned by the `media` pack and agent allowlists).
@@ -34,7 +34,7 @@ pub const LIST_MODELS_TOOL_NAME: &str = "media_list_models";
 const VIDEO_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const VIDEO_WAIT_BUDGET: Duration = Duration::from_secs(600);
 
-pub(crate) type MediaReferenceAllowlist = Arc<Mutex<HashSet<PathBuf>>>;
+pub type MediaReferenceAllowlist = Arc<Mutex<HashSet<PathBuf>>>;
 
 const IMAGE_DESCRIPTION: &str = "Generate or edit images from a text prompt via OpenRouter \
      (default model: Seedream 5.0 Lite). Pass `references` (https URLs, workspace paths, or \
@@ -50,28 +50,22 @@ const VIDEO_DESCRIPTION: &str = "Generate a short video clip via OpenRouter (def
      ready (minutes) and saves it in the Files folder. Billed per call: if it times out, \
      call again with `resume_job_id` instead of submitting a new job.";
 
-/// Registers the media tools, or nothing when no backend is reachable.
-pub fn build_media_tools(root_config: &Config, action_dir: &Path) -> Vec<Box<dyn Tool>> {
-    build_media_tools_with_allowlist(
-        root_config,
-        action_dir,
-        Arc::new(Mutex::new(HashSet::new())),
-    )
-}
-
-pub(crate) fn build_media_tools_with_allowlist(
+/// Builds the media tools over `generators` for a configuration: the
+/// reference-file policy, the files roots and the video wait come from
+/// `root_config`; `allowed_references` is the session's shared allowlist of
+/// artifact paths. The generators come from the host that owns the media
+/// service (the core has none of its own).
+pub fn media_tools_for_config(
+    generators: MediaGenerators,
     root_config: &Config,
     action_dir: &Path,
     allowed_references: MediaReferenceAllowlist,
 ) -> Vec<Box<dyn Tool>> {
-    let Some(generators) = managed_generators(root_config) else {
-        return Vec::new();
-    };
     media_tools_from_with_allowlist(
         generators,
         action_dir,
         &root_config.workspace_dir,
-        crate::agent::artifacts::FileRoots::from_config(root_config),
+        crate::artifacts::FileRoots::from_config(root_config),
         // Each poll's job state feeds the call's progress heartbeat
         // (`super::progress`, wired per call by `MediaArtifactTool`), so a
         // multi-minute wait is not silent.
@@ -87,7 +81,7 @@ pub fn media_tools_from(
     generators: MediaGenerators,
     action_dir: &Path,
     workspace_dir: &Path,
-    files_dir: impl Into<crate::agent::artifacts::FileRoots>,
+    files_dir: impl Into<crate::artifacts::FileRoots>,
     video_wait: WaitPolicy,
 ) -> Vec<Box<dyn Tool>> {
     media_tools_from_with_allowlist(
@@ -104,7 +98,7 @@ fn media_tools_from_with_allowlist(
     generators: MediaGenerators,
     action_dir: &Path,
     workspace_dir: &Path,
-    files_dir: impl Into<crate::agent::artifacts::FileRoots>,
+    files_dir: impl Into<crate::artifacts::FileRoots>,
     video_wait: WaitPolicy,
     allowed_artifacts: MediaReferenceAllowlist,
 ) -> Vec<Box<dyn Tool>> {

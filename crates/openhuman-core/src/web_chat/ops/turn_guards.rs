@@ -15,7 +15,7 @@ use crate::agent::turn_env::HostTurnEnv;
 /// (env `OPENHUMAN_WEB_TURN_TIMEOUT_SECS=0`).
 ///
 /// This is the turn's fixed total ceiling (issue #4746), and the single source
-/// of truth for the turn's deadlines (`agent::session_host::turn_backstop`, default 3600s,
+/// of truth for the turn's deadlines (`web_chat::turn_guards::backstop`, default 3600s,
 /// the harness's own turn ceiling). The harness derives two earlier points
 /// from it:
 ///
@@ -35,7 +35,7 @@ use crate::agent::turn_env::HostTurnEnv;
 /// like a wedged one. Override via `OPENHUMAN_WEB_TURN_TIMEOUT_SECS`; set it to
 /// `0` to disable the backstop and the derived deadlines with it.
 fn web_turn_deadline() -> Option<Duration> {
-    crate::agent::session_host::turn_backstop::configured_backstop()
+    crate::web_chat::turn_guards::backstop::configured_backstop()
 }
 
 /// The backstop for a turn that has to be allowed to run long: one on a local /
@@ -116,7 +116,7 @@ where
         };
         // The session turn carries the matching `TurnDeadline` on its explicit
         // host environment (`run_turn_under_cancel_and_deadline`), so the
-        // harness (`agent::session_host::turn_backstop`) winds down before `d`.
+        // harness (`web_chat::turn_guards::backstop`) winds down before `d`.
         tokio::time::timeout(d, turn)
             .await
             .map_err(|_elapsed| Stop::Ceiling(d))
@@ -228,7 +228,7 @@ fn turn_host_env(
 pub(crate) async fn run_turn_under_cancel_and_deadline<B, F>(
     ctx: &crate::core::runtime::DispatchCtx,
     cancel_token: CancellationToken,
-    origin: crate::agent::turn_origin::AgentTurnOrigin,
+    origin: crate::security::turn_origin::AgentTurnOrigin,
     approval_ctx: crate::security::approval::ApprovalChatContext,
     build_turn: B,
 ) -> Option<Result<WebChatTaskResult, String>>
@@ -251,7 +251,7 @@ where
             turn_activity::configured_idle_window(),
             ids,
             |activity| {
-                crate::agent::turn_origin::with_origin(
+                crate::security::turn_origin::with_origin(
                     origin,
                     build_turn(
                         env,

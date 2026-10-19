@@ -9,11 +9,16 @@
 //! [`plan_shared_workspace_dispatch`](tinyagents_graph::parallel::plan_shared_workspace_dispatch).
 //! The rejection sentences stay here, which is why the crate reports conflicts
 //! as data.
+//!
+//! The host resolves definitions and normalizes prompts in the owner's async
+//! `Plan::stage_with_preflight` seam. That preparation has no external side
+//! effects: policy admission and whole-batch workspace arbitration finish
+//! before dispatch creates worktrees or emits spawn progress/events.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use std::cell::RefCell;
+use parking_lot::Mutex;
 
 use tinyagents_graph::parallel::{parse_relative_claim_paths, ClaimConflict, ClaimPathError};
 use tinyagents_orchestration::parallel::WorkerDispatchMode;
@@ -22,7 +27,7 @@ use tinyagents_orchestration::parallel::{
 };
 
 use crate::agent::harness::fork_context::ParentExecutionContext;
-use crate::agent::harness::host_definition::{AgentDefinition, AgentDefinitionRegistry};
+use crate::agent_registry::host_definition::{AgentDefinition, AgentDefinitionRegistry};
 use tinyagents_definition::{SandboxMode, ToolScope};
 use tinyagents_harness::workspace::GitWorktreeBaseRef;
 use tinytools::PermissionLevel;
@@ -221,6 +226,7 @@ pub(crate) fn snapshot_agent_definitions(
 
 /// Host payload carried through the module's [`Plan`]: the decoded request and,
 /// once the agent id resolved, its definition.
+#[derive(Clone)]
 struct AdmitPayload {
     task: ParallelAgentTask,
     /// Trimmed requested id, or the resolved definition id.
@@ -234,7 +240,7 @@ struct AdmitPayload {
 struct SpawnParallelPolicy<'a> {
     parent: &'a ParentExecutionContext,
     /// Rejection kind per input index (the module carries only the sentence).
-    kinds: RefCell<HashMap<usize, ParallelTaskRejectionKind>>,
+    kinds: Mutex<HashMap<usize, ParallelTaskRejectionKind>>,
 }
 
 impl SpawnParallelPolicy<'_> {
@@ -244,7 +250,7 @@ impl SpawnParallelPolicy<'_> {
         kind: ParallelTaskRejectionKind,
         message: String,
     ) -> AdmissionVerdict {
-        self.kinds.borrow_mut().insert(index, kind);
+        self.kinds.lock().insert(index, kind);
         AdmissionVerdict::Reject(message)
     }
 }
@@ -293,7 +299,7 @@ impl AdmissionPolicy<AdmitPayload> for SpawnParallelPolicy<'_> {
     }
 }
 
-pub(crate) fn prepare_spawn_parallel_tasks_from_defs(
+pub(crate) async fn prepare_spawn_parallel_tasks_from_defs(
     tasks: Vec<ParallelAgentTask>,
     definitions: &HashMap<String, AgentDefinition>,
     parent: &ParentExecutionContext,
@@ -303,14 +309,13 @@ pub(crate) fn prepare_spawn_parallel_tasks_from_defs(
             .into_iter()
             .map(|task| {
                 let requested = task.agent_id.trim().to_string();
-                let definition = definitions.get(&requested).cloned();
                 Task {
                     id: format!("sub-{}", uuid::Uuid::new_v4()),
-                    prompt: task.prompt.trim().to_string(),
+                    prompt: task.prompt.clone(),
                     ownership: task.ownership.clone(),
                     payload: AdmitPayload {
                         agent_id: requested,
-                        definition,
+                        definition: None,
                         task,
                     },
                 }
@@ -319,9 +324,19 @@ pub(crate) fn prepare_spawn_parallel_tasks_from_defs(
     );
     let policy = SpawnParallelPolicy {
         parent,
-        kinds: RefCell::new(HashMap::new()),
+        kinds: Mutex::new(HashMap::new()),
     };
-    let staged = plan.stage(&policy);
+    // Resolve product definitions and normalize the prompt in the owner's
+    // async staging seam. This preparation is side-effect free, so the shared
+    // workspace admission/arbitration still completes before dispatch creates
+    // any worktrees or publishes spawn effects.
+    let staged = plan
+        .stage_with_preflight(&policy, |_, mut task| async move {
+            task.payload.definition = definitions.get(&task.payload.agent_id).cloned();
+            task.prompt = task.prompt.trim().to_string();
+            Ok(task)
+        })
+        .await;
     let kinds = policy.kinds.into_inner();
     staged
         .into_iter()

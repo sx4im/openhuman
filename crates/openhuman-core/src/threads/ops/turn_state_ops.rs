@@ -1,8 +1,8 @@
 //! RPC accessors over persisted in-flight turn snapshots.
 
 use super::support::{counts, envelope, workspace_dir};
-use crate::agent::session_store::turn_states_for;
 use crate::core::Outcome;
+use crate::storage::sessions::turn_states_for;
 use crate::threads::turn_state::{
     ClearTurnStateRequest, ClearTurnStateResponse, GetTurnStateForRequestRequest,
     GetTurnStateRequest, GetTurnStateResponse, ListTurnStatesResponse,

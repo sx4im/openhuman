@@ -15,6 +15,8 @@ pub use tinychannels_bus::{Channel, ChannelSendExt, SendMessage};
 #[cfg(feature = "channels")]
 pub mod bus;
 #[cfg(feature = "channels")]
+pub mod callback_slot;
+#[cfg(feature = "channels")]
 mod commands;
 #[cfg(feature = "channels")]
 pub(crate) use commands::{configured_providers, has_listener_configuration};
@@ -26,6 +28,7 @@ pub mod controllers;
 pub mod host;
 #[cfg(feature = "channels")]
 pub mod proactive;
+pub(crate) mod prompt;
 #[cfg(feature = "channels")]
 pub mod providers;
 #[cfg(feature = "channels")]
@@ -109,14 +112,14 @@ pub use yuanbao::YuanbaoChannel;
 pub use runtime::test_support;
 
 #[cfg(feature = "channels")]
+pub use commands::doctor_channels;
+#[cfg(feature = "channels")]
 // Channel system-prompt assembly lives in
-// `crate::agent::context::channels_prompt` alongside the rest of
+// `crate::channels::prompt` alongside the rest of
 // the prompt-building code. Re-exported here for callers that used the
 // old `channels::build_system_prompt` path.
 #[cfg(feature = "channels")]
-pub use crate::agent::context::channels_prompt::build_system_prompt;
-#[cfg(feature = "channels")]
-pub use commands::doctor_channels;
+pub use prompt::build_system_prompt;
 #[cfg(feature = "channels")]
 pub use runtime::start_channels;
 #[cfg(feature = "channels")]

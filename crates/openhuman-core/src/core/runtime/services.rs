@@ -132,6 +132,15 @@ pub(crate) async fn start_selected_services(
                 crate::storage::blob_sweep::SWEEP_INTERVAL,
             ),
         );
+        // Run-journal sealing backfill, retention and backend maintenance.
+        tasks.track(
+            "journal_maintenance",
+            crate::storage::journal_maintenance::spawn(
+                &crate::core::runtime::DispatchCtx::new(std::sync::Arc::clone(ctx)),
+                crate::storage::journal_maintenance::FIRST_SWEEP_DELAY,
+                crate::storage::journal_maintenance::SWEEP_INTERVAL,
+            ),
+        );
     }
     // Flow-run boot reconciliation is selected by the flows *domain*, not by
     // a background service — runs can be started without cron in the
@@ -490,7 +499,7 @@ pub fn spawn_socket_auto_connect(
     services: ServiceSet,
     socket_mgr: std::sync::Arc<crate::platform::socket::SocketManager>,
 ) {
-    if services.socketio && crate::backend::transport::is_installed() {
+    if services.socketio {
         tokio::spawn(async move {
             log::info!("[socket] Checking for stored session to auto-connect...");
             let config = match Config::load_or_init().await {
@@ -500,8 +509,8 @@ pub fn spawn_socket_auto_connect(
                     return;
                 }
             };
-            let Ok(api_url) = crate::backend::base_url(&config.api_url) else {
-                log::debug!("[socket] No backend transport or base URL — skipping auto-connect");
+            let Some(api_url) = config.resolved_endpoints.control_plane_url.clone() else {
+                log::debug!("[socket] No resolved control plane — skipping auto-connect");
                 return;
             };
             let initial_token =

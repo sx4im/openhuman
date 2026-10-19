@@ -106,6 +106,7 @@ fn task_store() -> Arc<dyn TaskStore> {
 
 /// Record a freshly-spawned sub-agent in the workspace's store (`Pending` →
 /// `Running`). Insert errors (e.g. a re-used task id across tests) are ignored.
+#[cfg(test)]
 pub(crate) fn record_spawned(
     task_id: &str,
     agent_id: &str,
@@ -116,35 +117,55 @@ pub(crate) fn record_spawned(
     parent_thread_id: Option<&str>,
 ) {
     let workspace = workspace_dir.display().to_string();
-    if let Err(err) = ledger_spawned(
-        task_store_for_workspace(workspace_dir).as_ref(),
-        &SpawnedSubagent {
-            task_id,
-            agent_id,
-            parent_session,
-            session_parent_prefix,
-            subagent_session_id,
-            workspace_dir: &workspace,
-            parent_thread_id,
-        },
-    ) {
+    let record = SpawnedSubagent {
+        task_id,
+        agent_id,
+        parent_session,
+        session_parent_prefix,
+        subagent_session_id,
+        workspace_dir: &workspace,
+        parent_thread_id,
+    };
+    record_spawned_in_store(task_store_for_workspace(workspace_dir).as_ref(), &record);
+}
+
+pub(crate) fn record_spawned_in_store(store: &dyn TaskStore, spawned: &SpawnedSubagent<'_>) {
+    if let Err(err) = ledger_spawned(store, spawned) {
         log::debug!(
-            "[running_subagents] spawn ledger insert ignored task_id={task_id} error={err}"
+            "[running_subagents] spawn ledger insert ignored task_id={} error={err}",
+            spawned.task_id
         );
     }
 }
 
 /// Record a cancellation (`CancelRequested` → `Cancelled`) for `task_id`.
-pub(crate) fn record_cancelled(workspace_dir: &Path, task_id: &str) {
+pub(crate) fn record_cancelled_in_store(
+    store: &dyn TaskStore,
+    workspace_dir: &Path,
+    task_id: &str,
+) {
     log::debug!(
         "[running_subagents] recording task cancellation task_id={} workspace_dir={}",
         task_id,
         workspace_dir.display()
     );
-    if let Err(err) = ledger_cancelled(task_store_for_workspace(workspace_dir).as_ref(), task_id) {
+    if let Err(err) = ledger_cancelled(store, task_id) {
         log::debug!(
             "[running_subagents] cancel ledger update ignored task_id={task_id} error={err}"
         );
+    }
+}
+
+pub(crate) fn record_cancelled(
+    ctx: &crate::core::runtime::DispatchCtx,
+    workspace_dir: &Path,
+    task_id: &str,
+) {
+    match super::resolve::scoped_task_store(ctx, workspace_dir) {
+        Ok(store) => record_cancelled_in_store(store.as_ref(), workspace_dir, task_id),
+        Err(error) => log::debug!(
+            "[running_subagents] cancel ledger store unavailable task_id={task_id} error={error:?}"
+        ),
     }
 }
 

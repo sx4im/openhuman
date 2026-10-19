@@ -10,7 +10,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{chat_completion, chat_requests, runtime_without_master_key, PointedTransport};
+use common::{chat_completion, chat_requests, runtime_without_master_key, PointedInference};
 use openhuman_embed::seams::ToolHookDecision;
 use openhuman_embed::{
     DirectProfileProvider, InMemorySessionStores, PermissionLevel, ProfileRuntime, SaasConfig,
@@ -102,7 +102,7 @@ async fn scenario() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&managed)
         .await;
-    PointedTransport::install(&managed.uri());
+    PointedInference::install(&managed.uri());
     openhuman_core::storage::install(Arc::new(openhuman_core::storage::MemoryStorage::new()));
 
     let root = tempfile::tempdir().unwrap();
@@ -124,7 +124,7 @@ async fn scenario() {
                 .map(String::from)
                 .to_vec(),
         ))
-        .can_use_tool(|_| Box::pin(async { ToolHookDecision::Proceed }))
+        .can_use_tool(|_| Box::pin(async { ToolHookDecision::default() }))
         .channel_permissions([("web_channel", PermissionLevel::Execute)])
         .session_store(store.clone())
         .build()

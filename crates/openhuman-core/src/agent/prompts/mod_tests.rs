@@ -1,4 +1,6 @@
 use super::*;
+use crate::prompts::sections::*;
+use crate::prompts::*;
 use async_trait::async_trait;
 use std::collections::HashSet;
 use std::path::Path;
@@ -82,6 +84,8 @@ fn agents_md_ctx(global: Option<String>, local: Option<String>) -> PromptContext
 mod agents_md_registration_tests;
 #[path = "mod_tests_builder_sections_tests.rs"]
 mod builder_sections_tests;
+#[path = "mod_tests_composition_tests.rs"]
+mod composition_tests;
 #[path = "mod_tests_grounding_spec_check_tests.rs"]
 mod grounding_spec_check_tests;
 #[path = "mod_tests_subagent_render_tests.rs"]

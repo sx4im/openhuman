@@ -29,7 +29,7 @@ impl OpenHumanSessionHost {
     pub async fn run_single_with_origin(
         &mut self,
         message: &str,
-        origin: Option<crate::agent::turn_origin::AgentTurnOrigin>,
+        origin: Option<crate::security::turn_origin::AgentTurnOrigin>,
     ) -> Result<String> {
         self.run_single_with_approval(message, origin, Default::default())
             .await
@@ -41,7 +41,7 @@ impl OpenHumanSessionHost {
     pub async fn run_single_with_approval(
         &mut self,
         message: &str,
-        origin: Option<crate::agent::turn_origin::AgentTurnOrigin>,
+        origin: Option<crate::security::turn_origin::AgentTurnOrigin>,
         approval: crate::security::approval::ApprovalTurnContext,
     ) -> Result<String> {
         let origin = origin.or_else(|| {
@@ -90,7 +90,6 @@ impl OpenHumanSessionHost {
             return Err(anyhow::anyhow!(user_message));
         }
 
-        let history_snapshot = self.history();
         // Busy state for background-result delivery is marked here, in the
         // turn's own (profile) scope; the bus subscriber runs off-task.
         // A guard, so a turn dropped mid-flight does not leave it busy.
@@ -108,12 +107,10 @@ impl OpenHumanSessionHost {
             .await
         {
             Ok(response) => {
-                let history = self.history();
-                let new_entries = Self::new_entries_for_turn(&history_snapshot, &history);
                 BUS.publish(DomainEvent::AgentTurnCompleted {
                     session_id: self.event_session_id().to_string(),
                     text_chars: response.chars().count(),
-                    iterations: Self::count_iterations(new_entries),
+                    iterations: self.last_turn_iterations() as usize,
                 });
                 drop(busy);
                 Ok(response)

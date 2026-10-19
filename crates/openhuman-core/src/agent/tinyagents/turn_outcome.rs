@@ -6,9 +6,97 @@ use tinyagents_session::transcript::TranscriptMessage;
 use tinyinference_llm::model::ResolvedModelRoute;
 use tinytools_agent::dialect::TranscriptEntry;
 
+/// Terminal journal work deferred until a session host has completed its
+/// post-run close/repair and classified any wind-down stop.
+#[derive(Clone)]
+pub(crate) struct DeferredTurnTerminal {
+    pub(crate) run_id: tinyagents_harness::ids::RunId,
+    pub(crate) events: tinyagents_harness::events::EventSink,
+    pub(crate) journal: Option<crate::agent::tinyagents::journal::TurnJournal>,
+}
+
+impl std::fmt::Debug for DeferredTurnTerminal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DeferredTurnTerminal")
+            .finish_non_exhaustive()
+    }
+}
+
+impl DeferredTurnTerminal {
+    pub(crate) async fn finish(
+        self,
+        stop: Option<tinyagents_harness::turn_stop::TurnStop>,
+        turn: u32,
+    ) {
+        if let Some(stop) = stop {
+            self.events
+                .emit(tinyagents_harness::events::AgentEvent::TurnStopped { turn, stop });
+        }
+        self.events
+            .emit(tinyagents_harness::events::AgentEvent::RunFinalized {
+                run_id: self.run_id,
+            });
+        if let Some(journal) = self.journal {
+            journal.finish_completed().await;
+        }
+    }
+
+    /// Finalize a host turn that was cancelled after the harness had returned.
+    /// The host callback runs after Tiny persists any recoverable partial.
+    pub(crate) async fn finish_cancelled(self) {
+        use tinyagents_harness::terminal::{TerminalOutcome, TerminalReason};
+        self.events
+            .emit(tinyagents_harness::events::AgentEvent::RunFailed {
+                run_id: self.run_id.clone(),
+                error: "turn cancelled after harness completion".into(),
+                outcome: Some(TerminalOutcome::new(
+                    TerminalReason::Cancelled,
+                    "turn cancelled after harness completion",
+                )),
+            });
+        self.events
+            .emit(tinyagents_harness::events::AgentEvent::RunFinalized {
+                run_id: self.run_id,
+            });
+        if let Some(journal) = self.journal {
+            journal
+                .finish_cancelled("turn cancelled after harness completion")
+                .await;
+        }
+    }
+
+    /// Finalize a host turn that failed after the harness had returned.
+    /// Arbitrary runtime error text is kept out of the content-free trace.
+    pub(crate) async fn finish_failed(self) {
+        use tinyagents_harness::terminal::{TerminalOutcome, TerminalReason};
+        self.events
+            .emit(tinyagents_harness::events::AgentEvent::RunFailed {
+                run_id: self.run_id.clone(),
+                error: "host turn failed after harness completion".into(),
+                outcome: Some(TerminalOutcome::new(
+                    TerminalReason::Internal,
+                    "host turn failed after harness completion",
+                )),
+            });
+        self.events
+            .emit(tinyagents_harness::events::AgentEvent::RunFinalized {
+                run_id: self.run_id,
+            });
+        if let Some(journal) = self.journal {
+            journal
+                .finish_failed("host turn failed after harness completion")
+                .await;
+        }
+    }
+}
+
 /// The outcome of a turn driven on the `tinyagents` harness.
 #[derive(Debug, Clone)]
 pub(crate) struct TinyagentsTurnOutcome {
+    /// Present when a session host owns post-run completion and must emit a
+    /// final wind-down fact before the durable status is marked completed.
+    pub(crate) deferred_terminal: Option<DeferredTurnTerminal>,
     /// Final assistant text.
     pub text: String,
     /// Concrete provider/model/host route selected for the final successful
@@ -65,6 +153,8 @@ pub(crate) struct TinyagentsTurnOutcome {
     /// `text` already carries this same summary; the flag lets the status mapper
     /// distinguish a breaker halt from a genuine final answer.
     pub breaker_halt: Option<String>,
+    /// Typed classified-failure cause retained by the harness run, if present.
+    pub failure_cause: Option<tinyagents_harness::no_progress::ClassifiedStopCause>,
     /// `true` when the run ended on a reply that ran out of output tokens
     /// (`finish_reason = length`) with no visible text and no tool call — the
     /// model spent its whole output budget reasoning, even after the harness's

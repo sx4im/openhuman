@@ -114,8 +114,8 @@ pub(crate) fn active_subagents_context_block(
             .collect(),
         Err(err) => {
             log::warn!(
-                    "[running_subagents] durable roster load failed parent_session={parent_session} error={err}"
-                );
+                "[running_subagents] durable roster load failed parent_session={parent_session} error={err}"
+            );
             Vec::new()
         }
     };

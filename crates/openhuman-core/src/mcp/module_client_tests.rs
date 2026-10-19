@@ -612,3 +612,6 @@ async fn concurrent_workspaces_open_one_at_a_time_through_the_module_lifecycle_g
     assert!(a.expect("first workspace opens"));
     assert!(b.expect("second workspace opens"));
 }
+
+#[path = "module_client_cleanup_tests.rs"]
+mod captured_cleanup_tests;

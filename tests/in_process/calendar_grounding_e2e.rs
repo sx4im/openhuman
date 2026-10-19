@@ -114,7 +114,7 @@ async fn test_orchestrator_has_current_date_context() -> Result<()> {
     let model = calendar_model(captured_messages.clone());
     let workspace = tempfile::tempdir()?;
     let _ =
-        openhuman_core::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+        openhuman_core::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
 
     let mut agent = OpenHumanSessionHost::builder()
         .chat_model(model)
@@ -164,7 +164,7 @@ async fn test_subagent_has_current_date_context() -> Result<()> {
     let model = calendar_model(captured_messages.clone());
 
     let _ =
-        openhuman_core::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+        openhuman_core::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
 
     let parent = openhuman_core::agent::harness::ParentExecutionContext {
         agent_definition_id: "orchestrator".into(),
@@ -197,7 +197,7 @@ async fn test_subagent_has_current_date_context() -> Result<()> {
     };
 
     let mut def =
-        openhuman_core::agent::harness::host_definition::AgentDefinitionRegistry::global()
+        openhuman_core::agent_registry::host_definition::AgentDefinitionRegistry::global()
             .unwrap()
             .get("critic")
             .unwrap()

@@ -11,7 +11,9 @@ pub(super) const COMMAND_TIMEOUT_NOTE: &str = "[exit 124: the command's own `tim
 
 /// The result when the tool's own `timeout_secs` deadline killed the command.
 pub(super) fn tool_timeout_message(secs: u64) -> String {
-    format!("Command timed out after {secs}s and was killed: the shell tool's timeout_secs limit fired.")
+    format!(
+        "Command timed out after {secs}s and was killed: the shell tool's timeout_secs limit fired."
+    )
 }
 
 /// [`tinytools::command_failure`], plus [`COMMAND_TIMEOUT_NOTE`] on exit 124.

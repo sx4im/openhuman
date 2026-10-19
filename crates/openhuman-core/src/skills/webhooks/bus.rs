@@ -121,7 +121,7 @@ impl EventHandler<DomainEvent> for WebhookRequestSubscriber {
                     (resp, None, Some(e.to_string()))
                 } else {
                     let payload = decoded.unwrap();
-                    let envelope = crate::agent::triage::TriggerEnvelope::from_webhook(
+                    let envelope = crate::triage::TriggerEnvelope::from_webhook(
                         &tunnel_uuid,
                         &method,
                         &path,
@@ -306,21 +306,21 @@ fn decode_webhook_body(base64_body: &str) -> Result<serde_json::Value, String> {
 /// human-readable decision summary on success.
 async fn run_agent_trigger(
     ctx: &crate::core::runtime::DispatchCtx,
-    envelope: &crate::agent::triage::TriggerEnvelope,
+    envelope: &crate::triage::TriggerEnvelope,
 ) -> Result<String, String> {
-    let outcome = crate::agent::triage::run_triage(ctx, envelope)
+    let outcome = crate::triage::run_triage(ctx, envelope)
         .await
         .map_err(|e| format!("triage evaluation failed: {e}"))?;
 
     match outcome {
-        crate::agent::triage::TriageOutcome::Decision(run) => {
+        crate::triage::TriageOutcome::Decision(run) => {
             // Remote payload: an inbound webhook body is
             // attacker-influenceable, so the dispatch parks rather than running
             // on a trust root (#5634).
-            let origin = crate::agent::triage::remote_trigger_origin(envelope);
-            crate::agent::turn_origin::with_origin(
+            let origin = crate::triage::remote_trigger_origin(envelope);
+            crate::security::turn_origin::with_origin(
                 origin,
-                crate::agent::triage::apply_decision(ctx, run.clone(), envelope),
+                crate::triage::apply_decision(ctx, run.clone(), envelope),
             )
             .await
             .map_err(|e| format!("apply_decision failed: {e}"))?;
@@ -331,11 +331,11 @@ async fn run_agent_trigger(
                 run.decision.target_agent
             ))
         }
-        crate::agent::triage::TriageOutcome::Deferred {
+        crate::triage::TriageOutcome::Deferred {
             defer_until_ms,
             reason,
         } => Ok(format!("Triage deferred until {defer_until_ms}: {reason}")),
-        crate::agent::triage::TriageOutcome::Terminal { reason } => {
+        crate::triage::TriageOutcome::Terminal { reason } => {
             Ok(format!("Triage reached terminal state: {reason}"))
         }
     }

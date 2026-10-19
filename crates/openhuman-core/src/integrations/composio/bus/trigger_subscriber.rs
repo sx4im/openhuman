@@ -4,12 +4,12 @@ use crate::core::runtime::DispatchCtx;
 use async_trait::async_trait;
 use tinybus::EventHandler;
 
-use crate::agent::triage::{
-    apply_decision, remote_trigger_origin, run_triage, TriageOutcome, TriggerEnvelope,
-};
-use crate::agent::turn_origin::with_origin;
 use crate::core::events::DomainEvent;
 use crate::integrations::composio::trigger_history;
+use crate::security::turn_origin::with_origin;
+use crate::triage::{
+    apply_decision, remote_trigger_origin, run_triage, TriageOutcome, TriggerEnvelope,
+};
 
 /// Env var that **disables** the triage pipeline. The pipeline is
 /// enabled by default; set to `1`/`true`/`yes` to opt out (e.g. for
@@ -18,7 +18,7 @@ use crate::integrations::composio::trigger_history;
 pub(super) const TRIAGE_DISABLED_ENV: &str = "OPENHUMAN_TRIGGER_TRIAGE_DISABLED";
 
 /// Logs and (when enabled) routes `ComposioTriggerReceived` events
-/// through the reusable `agent::triage` pipeline.
+/// through the reusable `triage` pipeline.
 pub struct ComposioTriggerSubscriber;
 
 impl ComposioTriggerSubscriber {
@@ -67,7 +67,7 @@ impl EventHandler<DomainEvent> for ComposioTriggerSubscriber {
         // [composio-direct] Direct-mode trigger gate.
         //
         // Inbound `composio:trigger` events ride the backend socket
-        // (`wss://api.tinyhumans.ai`) which only fans out events from
+        // (the managed backend socket) which only fans out events from
         // the tinyhumans Composio tenant. When the user has switched
         // to direct mode, that tenant is no longer their active source
         // of truth — connections live on `backend.composio.dev` under
@@ -181,7 +181,7 @@ impl EventHandler<DomainEvent> for ComposioTriggerSubscriber {
         tracing::debug!(
             label = %envelope.display_label,
             external_id = %envelope.external_id,
-            "[composio][triage] dispatching to agent::triage::run_triage"
+            "[composio][triage] dispatching to triage::run_triage"
         );
 
         // Spawn so the bus dispatch loop stays non-blocking — the

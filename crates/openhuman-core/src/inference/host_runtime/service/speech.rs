@@ -63,8 +63,8 @@ pub async fn transcribe_with_prompt(
 
     let provider_name = effective_stt_provider(config);
     debug!(
-            "{LOG_PREFIX} configured STT dispatch provider={provider_name} path={audio_path} mime={mime}"
-        );
+        "{LOG_PREFIX} configured STT dispatch provider={provider_name} path={audio_path} mime={mime}"
+    );
     let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| format!("failed to read audio file {audio_path}: {e}"))?;

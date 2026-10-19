@@ -215,9 +215,9 @@ pub(super) struct MergedHostTurnTools {
 }
 
 pub(super) fn add_permanent_tools(
-    mut definition: crate::agent::harness::host_definition::AgentDefinition,
+    mut definition: crate::agent_registry::host_definition::AgentDefinition,
     permanent: &HashSet<String>,
-) -> crate::agent::harness::host_definition::AgentDefinition {
+) -> crate::agent_registry::host_definition::AgentDefinition {
     definition.extra_tools.extend(permanent.iter().cloned());
     definition.extra_tools.sort();
     definition.extra_tools.dedup();
@@ -225,9 +225,9 @@ pub(super) fn add_permanent_tools(
 }
 
 pub(super) fn scope_def(
-    definition: Option<&crate::agent::harness::host_definition::AgentDefinition>,
+    definition: Option<&crate::agent_registry::host_definition::AgentDefinition>,
     host_tools: &MergedHostTurnTools,
-) -> Option<crate::agent::harness::host_definition::AgentDefinition> {
+) -> Option<crate::agent_registry::host_definition::AgentDefinition> {
     let mut definition = definition.cloned()?;
     if let tinyagents_definition::ToolScope::Named(names) = &mut definition.tools {
         names.retain(|name| !host_tools.withheld.contains(name));
@@ -397,7 +397,7 @@ impl OpenHumanSessionHost {
     pub fn from_config_with_host_tools(
         ctx: &crate::core::runtime::DispatchCtx,
         config: &Config,
-        definition: &crate::agent::harness::host_definition::AgentDefinition,
+        definition: &crate::agent_registry::host_definition::AgentDefinition,
         host: &super::HostTools,
         session_id: Option<&str>,
     ) -> Result<Self> {
@@ -425,7 +425,7 @@ impl OpenHumanSessionHost {
     pub fn from_config_with_definition(
         ctx: &crate::core::runtime::DispatchCtx,
         config: &Config,
-        definition: &crate::agent::harness::host_definition::AgentDefinition,
+        definition: &crate::agent_registry::host_definition::AgentDefinition,
     ) -> Result<Self> {
         log::debug!(
             "[agent] from_config_with_definition id={} sandbox={:?}",

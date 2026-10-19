@@ -69,8 +69,7 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "detect" => ControllerSchema {
             namespace: "tokenjuice",
             function: "detect",
-            description:
-                "Detect the content kind of a blob (json/code/log/search/diff/html/plain_text).",
+            description: "Detect the content kind of a blob (json/code/log/search/diff/html/plain_text).",
             inputs: vec![
                 FieldSchema {
                     name: "content",
@@ -396,10 +395,9 @@ fn handle_settings_update(ctx: DispatchCtx, params: Map<String, Value>) -> Contr
             .await
             .map_err(|e| format!("load config: {e}"))?;
         patch.apply(&mut config.tokenjuice);
-        config
-            .save()
-            .await
-            .map_err(|e| format!("save config: {e}"))?;
+        config.save().await.map_err(|error| {
+            crate::config::ops::config_save_error_with_context(error, "save config", true)
+        })?;
 
         // Re-install so router flags / CCR limits / threshold take effect live.
         crate::inference::tokenjuice::install_from_config(&config).await?;

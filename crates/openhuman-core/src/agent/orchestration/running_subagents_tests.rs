@@ -1,4 +1,5 @@
 use super::*;
+use tinyagents_orchestration::subagent::SteerError;
 
 /// The context these tests dispatch under: the calling task's own.
 fn cx() -> crate::core::runtime::DispatchCtx {
@@ -37,6 +38,9 @@ mod wire_tests;
 
 #[path = "running_subagents_tenant_tests.rs"]
 mod tenant_tests;
+
+#[path = "running_subagents_projection_tests.rs"]
+mod projection_tests;
 
 /// Serializes every test that touches the global [`REGISTRY`]. We reuse the
 /// crate-wide `TEST_ENV_LOCK` (rather than a module-local mutex) because the
@@ -291,7 +295,7 @@ async fn snapshot_and_block_scope_to_parent_and_reflect_live_status() {
     // The shipped orchestrator has no wait/steer/close tools (#5701): the
     // guidance must not name them and must say results arrive on their own.
     {
-        use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+        use crate::agent_registry::host_definition::AgentDefinitionRegistry;
         let registry = AgentDefinitionRegistry::builtins_only();
         let def = registry.get("orchestrator").expect("built-in orchestrator");
         let fleet = FleetToolSet::from_scope(&def.tools, &def.disallowed_tools);
@@ -343,6 +347,7 @@ async fn snapshot_and_block_scope_to_parent_and_reflect_live_status() {
                 task_title: "Daily X trending email workflow".into(),
                 worker_thread_id: None,
                 task_id: "task-cold-1".into(),
+                lifecycle_key: None,
             },
             None,
         )

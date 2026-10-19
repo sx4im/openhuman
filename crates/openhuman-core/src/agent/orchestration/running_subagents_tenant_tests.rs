@@ -1,7 +1,11 @@
 use super::*;
+use crate::agent::orchestration::running_subagents::resolve::{
+    resume_ref_for_task_in_workspace, task_id_for_session_in_workspace,
+};
 use crate::core::runtime::DispatchCtx;
 use crate::core::runtime::{ContextOverlay, CoreContext, DomainSet, Mode};
 use crate::tools::toolpacks::ToolGroups;
+use tinyagents_orchestration::subagent::SteerError;
 
 const CHILD: &str = "OPENHUMAN_DETACHED_TENANT_TEST_CHILD";
 const PARENT: &str = "same-parent-session";
@@ -120,7 +124,7 @@ impl Pair {
 }
 
 async fn control(function: &str, task: &str) -> serde_json::Value {
-    let controller = crate::agent::orchestration::subagent_control::all_registered_controllers()
+    let controller = crate::agent_runs::subagent_control::all_registered_controllers()
         .into_iter()
         .find(|c| c.schema.function == function)
         .expect("public controller");
@@ -206,12 +210,11 @@ async fn saas_dispatch_exposes_only_the_callers_detached_worker_controls() {
         );
         assert!(crate::core::all::schema_for_rpc_method("openhuman.config_get_config").is_none());
         let unreviewed =
-            crate::agent::orchestration::command_center::all_command_center_registered_controllers(
-            )
-            .into_iter()
-            .find(|controller| controller.schema.function == "list")
-            .expect("existing Agent controller")
-            .schema;
+            crate::agent_runs::command_center::all_command_center_registered_controllers()
+                .into_iter()
+                .find(|controller| controller.schema.function == "list")
+                .expect("existing Agent controller")
+                .schema;
         let method = crate::core::all::rpc_method_name(&unreviewed);
         assert!(crate::core::all::schema_for_rpc_method(&method).is_none());
         assert!(
@@ -248,7 +251,7 @@ async fn unscoped_async_spawn_refuses_before_persisting_a_running_session() {
     use crate::agent::orchestration::subagent_sessions::SubagentSessionStore;
     use crate::agent::orchestration::tools::{SpawnAsyncSubagentDispatch, SpawnAsyncSubagentTool};
     use tinyagents_harness::tool::ToolDispatch;
-    let _ = crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+    let _ = crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
     let workspace = tempfile::tempdir().unwrap();
     assert!(
         crate::storage::installed().is_none(),
@@ -613,8 +616,134 @@ async fn saas_controls_follow_the_explicit_context_not_the_tasks_scope() {
         "alice reaches her own worker"
     );
     assert_eq!(b_side.unwrap(), (true, true), "bob reaches his own worker");
+    assert!(snapshot_for_parent(&alice, PARENT)
+        .iter()
+        .all(|worker| worker.task_id != a_task));
+}
+
+#[tokio::test]
+async fn durable_fallback_store_uses_explicit_profile_context_at_shared_workspace() {
+    if !child(
+        "durable_fallback_store_uses_explicit_profile_context_at_shared_workspace",
+        Mode::Saas,
+    ) {
+        return;
+    }
+    let workspace = tempfile::tempdir().unwrap();
+    let alice_context = profile("durable-alice", workspace.path());
+    let bob_context = profile("durable-bob", workspace.path());
+    let alice = DispatchCtx::new(alice_context.clone());
+    let bob = DispatchCtx::new(bob_context.clone());
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let session_id = uuid::Uuid::new_v4().to_string();
+
+    CoreContext::sync_scope(alice_context, || {
+        super::super::task_ledger::record_spawned(
+            &task_id,
+            "researcher",
+            PARENT,
+            None,
+            Some(&session_id),
+            workspace.path(),
+            None,
+        );
+    });
+
+    let assert_alice_can_recover = || {
+        assert_eq!(
+            task_id_for_session_in_workspace(&alice, &session_id, PARENT, workspace.path())
+                .unwrap(),
+            task_id
+        );
+        assert_eq!(
+            resume_ref_for_task_in_workspace(&alice, &task_id, PARENT, workspace.path())
+                .unwrap()
+                .task_id,
+            task_id
+        );
+    };
+
+    // No ambient task scope is installed: the explicit Alice context owns the
+    // durable lookup even though both profiles use the same workspace path.
+    assert!(CoreContext::scoped().is_none());
+    assert_alice_can_recover();
+
+    // A foreign ambient scope must not redirect Alice's explicit lookup to
+    // Bob's profile store.
+    CoreContext::sync_scope(bob_context, assert_alice_can_recover);
+    assert!(matches!(
+        resume_ref_for_task_in_workspace(&bob, &task_id, PARENT, workspace.path()),
+        Err(WaitError::Unknown)
+    ));
     assert!(
-        resume_ref_for_task(&alice, &a_task, PARENT).is_err(),
-        "each cancel removed only that profile's worker, and it is gone"
+        matches!(
+            super::super::wait_in_workspace(
+                &alice,
+                &task_id,
+                PARENT,
+                workspace.path(),
+                std::time::Duration::ZERO,
+            )
+            .await,
+            Ok(tinyagents_orchestration::subagent::WaitOutcome::TimedOut(
+                tinyagents_orchestration::subagent::DetachedSubagentStatus::Running
+            )),
+        ),
+        "Alice's scoped durable wait must read her running row after registry miss"
+    );
+    assert_eq!(
+        super::super::wait_in_workspace(
+            &bob,
+            &task_id,
+            PARENT,
+            workspace.path(),
+            std::time::Duration::ZERO,
+        )
+        .await
+        .unwrap_err(),
+        WaitError::Unknown,
+        "Bob's profile store must not expose Alice's task"
+    );
+}
+
+#[tokio::test]
+async fn unbound_desktop_wait_keeps_local_durable_fallback() {
+    if !child(
+        "unbound_desktop_wait_keeps_local_durable_fallback",
+        Mode::SingleUser,
+    ) {
+        return;
+    }
+    let ctx = DispatchCtx::unbound();
+    assert!(ctx.resolved().is_none());
+    assert!(CoreContext::scoped().is_none());
+
+    let workspace = tempfile::tempdir().unwrap();
+    let task_id = uuid::Uuid::new_v4().to_string();
+    super::super::task_ledger::record_spawned(
+        &task_id,
+        "researcher",
+        PARENT,
+        None,
+        None,
+        workspace.path(),
+        None,
+    );
+
+    assert!(
+        matches!(
+            super::super::wait_in_workspace(
+                &ctx,
+                &task_id,
+                PARENT,
+                workspace.path(),
+                std::time::Duration::ZERO,
+            )
+            .await,
+            Ok(tinyagents_orchestration::subagent::WaitOutcome::TimedOut(
+                tinyagents_orchestration::subagent::DetachedSubagentStatus::Running
+            )),
+        ),
+        "an unbound single-user caller still reaches its local durable task store"
     );
 }

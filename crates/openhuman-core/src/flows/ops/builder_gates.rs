@@ -320,11 +320,11 @@ pub(crate) async fn build_builder_proposal(
 /// `RegistryFallback` "unknown agent_ref" hard error mid-run
 /// (`run_via_registry_fallback` in `tinyflows/caps.rs`) — a real ref is one
 /// that resolves via [`crate::flows::tinyflows::caps::route_for_agent_ref`]
-/// to a harness [`AgentDefinition`](crate::agent::harness::host_definition::AgentDefinition)
+/// to a harness [`AgentDefinition`](crate::agent_registry::host_definition::AgentDefinition)
 /// (`AgentRoute::Harness`), OR — when it routes to `AgentRoute::RegistryFallback`
 /// — resolves to an *enabled*
-/// [`AgentRegistryEntry`](crate::agent::registry::AgentRegistryEntry)
-/// via [`crate::agent::registry::get_agent`]. Both are exactly the
+/// [`AgentRegistryEntry`](crate::agent_registry::AgentRegistryEntry)
+/// via [`crate::agent_registry::get_agent`]. Both are exactly the
 /// checks `OpenHumanAgentRunner::run_agent` performs at run time, reused here
 /// rather than duplicated so the two planes cannot drift.
 ///
@@ -360,8 +360,8 @@ pub(crate) async fn validate_agent_refs(
     config: &Config,
     graph: &WorkflowGraph,
 ) -> Vec<String> {
-    use crate::agent::harness::host_definition::AgentDefinitionRegistry;
-    use crate::agent::registry::AgentRegistryEntry;
+    use crate::agent_registry::host_definition::AgentDefinitionRegistry;
+    use crate::agent_registry::AgentRegistryEntry;
     use crate::flows::tinyflows::caps::{route_for_agent_ref, AgentRoute};
 
     let mut errors = Vec::new();
@@ -403,7 +403,7 @@ pub(crate) async fn validate_agent_refs(
             }
             AgentRoute::RegistryFallback => {
                 if custom_registry.is_none() {
-                    custom_registry = Some(crate::agent::registry::list_agents(ctx, true).await);
+                    custom_registry = Some(crate::agent_registry::list_agents(ctx, true).await);
                 }
                 match custom_registry.as_ref().expect("just populated") {
                     Ok(entries) => match entries.iter().find(|entry| entry.id == agent_ref) {

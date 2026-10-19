@@ -410,7 +410,9 @@ impl Turn {
         let dispatch = dispatch(self.target, self.request, self.seed.take(), usage, options);
 
         let reply = match self.origin {
-            Some(origin) => openhuman_core::agent::turn_origin::with_origin(origin, dispatch).await,
+            Some(origin) => {
+                openhuman_core::security::turn_origin::with_origin(origin, dispatch).await
+            }
             None => dispatch.await,
         }
         .inspect_err(|err| {

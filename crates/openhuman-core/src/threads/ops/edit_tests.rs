@@ -295,7 +295,7 @@ fn a_profile_prefixed_key_round_trips_through_edit_and_regenerate() {
 
     // What the session host writes under: the ambient-tenant resolution, fed
     // the same tenant the request carries.
-    let writer_key = crate::agent::session_store::agent_key_for(
+    let writer_key = crate::storage::sessions::agent_key_for(
         &tenant,
         &crate::web_chat::pick_target_agent_id(&config),
     );
@@ -392,7 +392,7 @@ async fn transcript_store_reads_the_profile_from_the_request_context() {
 #[tokio::test]
 async fn edit_and_regenerate_use_the_threads_recorded_key_after_a_chat_agent_change() {
     use crate::core::runtime::{ContextOverlay, CoreContext, DispatchCtx, DomainSet};
-    let _ = crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+    let _ = crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
     let dir = TempDir::new().expect("tempdir");
     let ctx_with = |chat_agent: Option<&str>| {
         let mut config = crate::config::Config {

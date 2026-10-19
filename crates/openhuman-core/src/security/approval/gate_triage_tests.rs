@@ -40,7 +40,7 @@ fn parse_approval_reply_maps_yes_no_and_rejects_other() {
 /// audit trail, not restored function.
 #[tokio::test]
 async fn a_remote_triage_escalation_parks_with_an_audit_row_rather_than_an_unknown_denial() {
-    use crate::agent::triage::{remote_trigger_origin, TriggerEnvelope};
+    use crate::triage::{remote_trigger_origin, TriggerEnvelope};
 
     let (gate, _dir) = test_gate();
     let envelope = TriggerEnvelope::from_composio(
@@ -86,7 +86,7 @@ async fn a_remote_triage_escalation_parks_with_an_audit_row_rather_than_an_unkno
 /// simplification to one blanket label would have to break one of them.
 #[tokio::test]
 async fn a_local_triage_escalation_is_allowed_without_a_prompt() {
-    use crate::agent::triage::local_trigger_origin;
+    use crate::triage::local_trigger_origin;
 
     let (gate, _dir) = test_gate();
     let outcome = turn_origin::with_origin(

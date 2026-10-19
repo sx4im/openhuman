@@ -164,7 +164,7 @@ struct Probe {
     name: &'static str,
     level: PermissionLevel,
     runs: Arc<AtomicUsize>,
-    origins: Arc<Mutex<Vec<Option<crate::agent::turn_origin::AgentTurnOrigin>>>>,
+    origins: Arc<Mutex<Vec<Option<crate::security::turn_origin::AgentTurnOrigin>>>>,
 }
 
 #[async_trait::async_trait]
@@ -195,7 +195,7 @@ struct OneHostAgent {
     config: Config,
     reads: Arc<AtomicUsize>,
     writes: Arc<AtomicUsize>,
-    origins: Arc<Mutex<Vec<Option<crate::agent::turn_origin::AgentTurnOrigin>>>>,
+    origins: Arc<Mutex<Vec<Option<crate::security::turn_origin::AgentTurnOrigin>>>>,
 }
 
 impl HostAgentResolver for OneHostAgent {
@@ -204,7 +204,7 @@ impl HostAgentResolver for OneHostAgent {
             return None;
         }
         let mut definition =
-            crate::agent::harness::host_definition::AgentDefinitionRegistry::builtins_only()
+            crate::agent_registry::host_definition::AgentDefinitionRegistry::builtins_only()
                 .get("orchestrator")
                 .cloned()
                 .unwrap();
@@ -320,7 +320,7 @@ async fn bound_channel_runs_its_host_agent() {
     let tmp = tempfile::tempdir().unwrap();
     // Every host boots the definition registry; a session's hosted authority
     // is built from it.
-    crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins()
+    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins()
         .unwrap();
     let mut agent_config = config(&tmp, None);
     agent_config.default_model = Some("fixture".into());
@@ -394,7 +394,7 @@ async fn bound_channel_runs_its_host_agent() {
     assert!(
         matches!(
             origins.as_slice(),
-            [Some(crate::agent::turn_origin::AgentTurnOrigin::ExternalChannel { channel, .. })]
+            [Some(crate::security::turn_origin::AgentTurnOrigin::ExternalChannel { channel, .. })]
                 if channel == "telegram"
         ),
         "the read-only tool ran under the channel's origin: {origins:?}"

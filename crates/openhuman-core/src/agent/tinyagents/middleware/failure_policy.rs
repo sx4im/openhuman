@@ -100,7 +100,7 @@ const ALWAYS_RETRYABLE_ON_TIMEOUT: &[&str] = &[
 /// The shell agent commands run under on this host, for a nudge that has to
 /// say which commands exist.
 fn host_shell_description() -> String {
-    let shell = match crate::agent::host_runtime::host_shell_flavor() {
+    let shell = match crate::modules::tinybox::host_runtime::host_shell_flavor() {
         tinybox_bus::ShellFlavor::Cmd => "cmd.exe",
         tinybox_bus::ShellFlavor::Posix => "bash or sh",
     };

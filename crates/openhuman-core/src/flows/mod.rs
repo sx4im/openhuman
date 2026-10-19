@@ -15,7 +15,7 @@
 //! every symbol reached from outside is a *registration site* (`core::all`,
 //! `core::runtime::subscribers`' `FlowTriggerSubscriber`, `core::runtime::services`' boot
 //! reconcile, the agent-tool `vec!` in `tools::ops`, the `workflow_builder` /
-//! `flow_discovery` entries in `agent::registry`'s `BUILTINS`), and a registration site wants
+//! `flow_discovery` entries in `agent_registry`'s `BUILTINS`), and a registration site wants
 //! *absence*, not a disabled-error stub — otherwise `flows.*` becomes a known
 //! method that fails at runtime.
 //!

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::cron::handlers::{
-    kind_handler, register_kind, JobKindHandler, JobOutcome, JobRunContext,
+    kind_handler, register_kind, JobKindHandler, JobOutcome, JobRunContext, KIND_REGISTRY_TEST_LOCK,
 };
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -88,6 +88,7 @@ impl JobKindHandler for Marker {
 
 #[tokio::test]
 async fn execute_runs_the_registered_handler_and_reports_a_retryable_failure() {
+    let _kinds = KIND_REGISTRY_TEST_LOCK.lock().await;
     let tmp = TempDir::new().unwrap();
     let config = config(&tmp);
     let (_host, proxy) = host(&config, false).await;
@@ -114,6 +115,7 @@ async fn execute_runs_the_registered_handler_and_reports_a_retryable_failure() {
 
 #[tokio::test]
 async fn a_permanent_handler_outcome_stops_the_retry_loop() {
+    let _kinds = KIND_REGISTRY_TEST_LOCK.lock().await;
     let tmp = TempDir::new().unwrap();
     let config = config(&tmp);
     let (_host, proxy) = host(&config, false).await;
@@ -137,6 +139,7 @@ async fn a_permanent_handler_outcome_stops_the_retry_loop() {
 
 #[tokio::test]
 async fn an_agent_only_scheduler_refuses_shell_jobs_before_running_anything() {
+    let _kinds = KIND_REGISTRY_TEST_LOCK.lock().await;
     let tmp = TempDir::new().unwrap();
     let config = config(&tmp);
     let (_host, proxy) = host(&config, true).await;

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use crate::agent::session_store::splice_fixture::memory_locator;
+use crate::storage::sessions::splice_fixture_tests::memory_locator;
 use tempfile::TempDir;
 use tinyagents_session::transcript::view::{
     project_records, project_thread_in, DisplayItem, ToolCallStatus,

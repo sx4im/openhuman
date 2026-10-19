@@ -678,35 +678,29 @@ impl SecurityPolicy {
             return false;
         }
 
-        let artifacts = match crate::agent::artifacts::store::list_artifacts(
-            &self.workspace_dir,
-            0,
-            usize::MAX,
-            None,
-        )
-        .await
-        {
-            Ok((artifacts, _)) => artifacts,
-            Err(error) => {
-                tracing::warn!(
-                    target: "security",
-                    %error,
-                    "[security] could not resolve a media artifact read"
-                );
-                return false;
-            }
-        };
+        let artifacts =
+            match crate::artifacts::store::list_artifacts(&self.workspace_dir, 0, usize::MAX, None)
+                .await
+            {
+                Ok((artifacts, _)) => artifacts,
+                Err(error) => {
+                    tracing::warn!(
+                        target: "security",
+                        %error,
+                        "[security] could not resolve a media artifact read"
+                    );
+                    return false;
+                }
+            };
 
         for meta in artifacts.iter().filter(|meta| {
             matches!(
                 &meta.kind,
-                crate::agent::artifacts::ArtifactKind::Image
-                    | crate::agent::artifacts::ArtifactKind::Video
-            ) && matches!(&meta.status, crate::agent::artifacts::ArtifactStatus::Ready)
+                crate::artifacts::ArtifactKind::Image | crate::artifacts::ArtifactKind::Video
+            ) && matches!(&meta.status, crate::artifacts::ArtifactStatus::Ready)
         }) {
             let Ok(ready_path) =
-                crate::agent::artifacts::resolve_ready_file_meta(&self.workspace_dir, &roots, meta)
-                    .await
+                crate::artifacts::resolve_ready_file_meta(&self.workspace_dir, &roots, meta).await
             else {
                 continue;
             };

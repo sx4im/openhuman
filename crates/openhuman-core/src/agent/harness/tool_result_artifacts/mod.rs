@@ -13,7 +13,7 @@
 //! * **the read limit**: the largest body `file_read` will open
 //!   ([`FileReadTool::MAX_FILE_SIZE_BYTES`]);
 //! * **where the bodies live**: on the acting tenant's scoped blob store
-//!   ([`crate::agent::session_store::artifact_blobs_for`]), under the
+//!   ([`crate::storage::sessions::artifact_blobs_for`]), under the
 //!   `tool-results/<session>/<tool>/<call>.txt` key the pointer quotes. Nothing
 //!   is written into the project the agent is working in;
 //! * **how `file_read` opens one**: `file_read` reads the filesystem, so a read
@@ -127,10 +127,13 @@ impl HostArtifactStore {
     }
 }
 
-/// The part of a key below the `tool-results` namespace (either form).
+/// The part of a key below the tool-results namespace: the harness's
+/// `harness/tool_results/…` (v2), `tool-results/…` (v1) or the relative
+/// `artifacts/tool-results/…` form.
 fn relative_to_namespace(key: &str) -> &str {
     let key = key.trim_start_matches("./");
     key.strip_prefix("artifacts/tool-results/")
+        .or_else(|| key.strip_prefix("harness/tool_results/"))
         .or_else(|| key.strip_prefix("tool-results/"))
         .unwrap_or(key)
 }

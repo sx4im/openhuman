@@ -62,9 +62,9 @@ pub(crate) async fn build_root_parent(
     // engines can also be reached from contexts that only built the HTTP router
     // (e.g. the JSON-RPC e2e harness) — so init defensively here. `OnceLock`
     // makes this idempotent: a no-op when the registry is already loaded.
-    if crate::agent::harness::host_definition::AgentDefinitionRegistry::global().is_none() {
+    if crate::agent_registry::host_definition::AgentDefinitionRegistry::global().is_none() {
         if let Err(err) =
-            crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global(
+            crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global(
                 &config.workspace_dir,
             )
         {
@@ -73,7 +73,7 @@ pub(crate) async fn build_root_parent(
             // the registry is *still* `None`, init genuinely failed — fail fast
             // here rather than letting every downstream `spawn_agent` fail later
             // with `NoParentContext` after orchestration state has advanced.
-            if crate::agent::harness::host_definition::AgentDefinitionRegistry::global().is_none() {
+            if crate::agent_registry::host_definition::AgentDefinitionRegistry::global().is_none() {
                 return Err(err)
                     .context("initialize AgentDefinitionRegistry for orchestration root parent");
             }

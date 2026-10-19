@@ -5,10 +5,10 @@ use super::orchestration::tools::{
     SpawnAsyncSubagentTool, SpawnParallelAgentsTool, SpawnSubagentTool, SteerSubagentTool,
     WaitSubagentTool,
 };
-#[cfg(feature = "skills")]
-use super::tools::{AwaitWorkflowTool, RunWorkflowTool};
 use super::tools::{PlanExitTool, TodoTool};
 use crate::config::Config;
+#[cfg(feature = "skills")]
+use crate::skills::run_workflow::{AwaitWorkflowTool, RunWorkflowTool};
 use std::path::Path;
 use tinyagents_harness::tools as harness_tools;
 use tinytools::Tool;
@@ -57,7 +57,7 @@ pub(crate) fn dialogue_tools(action_dir: &Path, root_config: &Config) -> Vec<Box
         Box::new(TodoTool::new(root_config.workspace_dir.clone())),
         // Interactive plan-review gate: parks the live turn on a thread-scoped
         // plan the user must approve before execution (Codex/Claude plan mode).
-        Box::new(crate::agent::plan_review::RequestPlanReviewTool::new()),
+        Box::new(crate::plan_review::RequestPlanReviewTool::new()),
         Box::new(PlanExitTool::new()),
         // Workflow composition: `run_workflow` runs another workflow as a
         // subagent and (by default) waits on its result like a function call;

@@ -2,12 +2,12 @@ use super::shell_description::{command_param_description, shell_description};
 #[cfg(feature = "modules")]
 use super::shell_support::container_environment;
 use super::shell_support::{command_failure, exec_result, python_utf8_env, tool_timeout_message};
-use crate::agent::host_runtime::RuntimeAdapter;
 use crate::agent::tinyagents::host::run_context::{
     command_environment_for_tool, dispatch_ctx_for_tool,
 };
 use crate::config::Config;
 use crate::core::runtime::DispatchCtx;
+use crate::modules::tinybox::host_runtime::RuntimeAdapter;
 use crate::security::{AuditLogger, CommandExecutionLog, SecurityPolicy};
 use async_trait::async_trait;
 use serde_json::json;
@@ -361,7 +361,7 @@ impl ShellTool {
                 match crate::modules::tinybox::analyze_command(config, command.to_owned()).await {
                     Ok(analysis) => analysis,
                     Err(_) => {
-                        return (false, ToolResult::error("Command analysis is unavailable."))
+                        return (false, ToolResult::error("Command analysis is unavailable."));
                     }
                 };
             if let Err(reason) = self.security.check_gated_command_analysis(&analysis) {
@@ -452,7 +452,7 @@ impl ShellTool {
                 return (
                     false,
                     ToolResult::error(format!("Cannot read sandbox configuration: {err}")),
-                )
+                );
             }
         };
         if sandbox_required {
@@ -630,7 +630,7 @@ impl ShellTool {
                     return (
                         true,
                         ToolResult::error(format!("Cannot read module configuration: {e}")),
-                    )
+                    );
                 }
             },
         };

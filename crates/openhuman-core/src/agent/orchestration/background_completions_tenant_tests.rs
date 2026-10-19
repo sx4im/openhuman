@@ -34,8 +34,8 @@ async fn record(ctx: &Arc<CoreContext>, ws: &std::path::Path, task: &str) {
     .await;
 }
 
-fn pending(ws: &std::path::Path) -> Vec<String> {
-    pending_for(ws, "t1")
+fn pending(ctx: &DispatchCtx, ws: &std::path::Path) -> Vec<String> {
+    pending_for_ctx(ctx, ws, "t1")
         .into_iter()
         .map(|r| r.task_id)
         .collect()
@@ -47,6 +47,8 @@ async fn one_profiles_stop_and_delete_never_reach_anothers_thread() {
     let (ws_a, ws_b) = (TestWorkspace::new(), TestWorkspace::new());
     let alice = profile("u-alice", ws_a.path());
     let bob = profile("u-bob", ws_b.path());
+    let alice_ctx = DispatchCtx::new(Arc::clone(&alice));
+    let bob_ctx = DispatchCtx::new(Arc::clone(&bob));
 
     // Alice presses Stop on her `t1`.
     {
@@ -57,10 +59,10 @@ async fn one_profiles_stop_and_delete_never_reach_anothers_thread() {
 
     // Bob's `t1` is untouched: his results still queue.
     record(&bob, ws_b.path(), "bob-1").await;
-    assert_eq!(pending(ws_b.path()), ["bob-1"]);
+    assert_eq!(pending(&bob_ctx, ws_b.path()), ["bob-1"]);
     // Alice's late result is gated by her own Stop.
     record(&alice, ws_a.path(), "alice-1").await;
-    assert!(pending(ws_a.path()).is_empty());
+    assert!(pending(&alice_ctx, ws_a.path()).is_empty());
 
     // Bob deletes his `t1`; Alice re-engages hers and keeps working.
     {
@@ -78,10 +80,10 @@ async fn one_profiles_stop_and_delete_never_reach_anothers_thread() {
         );
     };
     record(&alice, ws_a.path(), "alice-2").await;
-    assert_eq!(pending(ws_a.path()), ["alice-2"]);
+    assert_eq!(pending(&alice_ctx, ws_a.path()), ["alice-2"]);
     record(&bob, ws_b.path(), "bob-2").await;
     assert!(
-        !pending(ws_b.path()).contains(&"bob-2".to_string()),
+        !pending(&bob_ctx, ws_b.path()).contains(&"bob-2".to_string()),
         "bob's deleted thread stays deleted"
     );
 
@@ -164,7 +166,7 @@ async fn the_explicit_context_keys_completions_without_any_ambient_scope() {
         "alice's stop withdraws her queue"
     );
     assert_eq!(
-        pending_for(ws_b.path(), "t-x")
+        pending_for_ctx(&bob, ws_b.path(), "t-x")
             .into_iter()
             .map(|r| r.task_id)
             .collect::<Vec<_>>(),
@@ -173,4 +175,109 @@ async fn the_explicit_context_keys_completions_without_any_ambient_scope() {
     );
     resume_stopped_thread(&alice, "t-x");
     discard_for_thread(&bob, ws_b.path(), "t-x");
+}
+
+#[tokio::test]
+async fn explicit_profiles_share_a_workspace_without_sharing_completion_routers() {
+    let _guard = crate::config::TEST_ENV_LOCK.lock().await;
+    let ws = TestWorkspace::new();
+    let alice = DispatchCtx::new(profile("same-ws-alice", ws.path()));
+    let bob = DispatchCtx::new(profile("same-ws-bob", ws.path()));
+
+    for (ctx, task) in [(&alice, "alice-task"), (&bob, "bob-task")] {
+        record_completion(
+            ctx,
+            ws.path(),
+            "same-session",
+            task,
+            "researcher",
+            "done",
+            Some("same-thread".into()),
+        )
+        .await;
+    }
+
+    for ctx in [&alice, &bob] {
+        router_pool()
+            .remove(&router_scope_for(ctx, ws.path()))
+            .expect("reopen only this profile's storage-backed router");
+    }
+    let alice_recovered = recover_pending_threads(&alice, ws.path());
+    let bob_recovered = recover_pending_threads(&bob, ws.path());
+    assert_eq!(alice_recovered, ["same-thread"]);
+    assert_eq!(bob_recovered, ["same-thread"]);
+
+    let alice_after_reopen: Vec<_> = pending_for_ctx(&alice, ws.path(), "same-thread")
+        .into_iter()
+        .map(|record| record.task_id)
+        .collect();
+    let bob_after_reopen: Vec<_> = pending_for_ctx(&bob, ws.path(), "same-thread")
+        .into_iter()
+        .map(|record| record.task_id)
+        .collect();
+    assert_eq!(alice_after_reopen, ["alice-task"]);
+    assert_eq!(bob_after_reopen, ["bob-task"]);
+}
+
+#[tokio::test]
+async fn an_unbound_single_user_caller_keeps_workspace_local_persistence() {
+    let _guard = crate::config::TEST_ENV_LOCK.lock().await;
+    const CHILD_FLAG: &str = "OPENHUMAN_UNBOUND_COMPLETION_TEST_CHILD";
+    if std::env::var_os(CHILD_FLAG).is_none() {
+        let output = std::process::Command::new(
+            std::env::current_exe().expect("test executable path"),
+        )
+        .args([
+            "--exact",
+            "agent::orchestration::background_completions_tenant_tests::an_unbound_single_user_caller_keeps_workspace_local_persistence",
+            "--nocapture",
+        ])
+        .env(CHILD_FLAG, "1")
+        .output()
+        .expect("run the isolated no-core persistence case");
+        assert!(
+            output.status.success(),
+            "isolated no-core case failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    let ws = TestWorkspace::new();
+    let ctx = DispatchCtx::unbound();
+    assert!(
+        ctx.resolved().is_none(),
+        "the case under test has no core context"
+    );
+    assert!(
+        CoreContext::scoped().is_none(),
+        "the case under test has no ambient core scope"
+    );
+
+    record_completion(
+        &ctx,
+        ws.path(),
+        "local-session",
+        "local-task",
+        "researcher",
+        "persisted locally",
+        Some("local-thread".into()),
+    )
+    .await;
+    assert_eq!(
+        pending_for_ctx(&ctx, ws.path(), "local-thread")[0]
+            .result
+            .text,
+        "persisted locally"
+    );
+
+    router_pool()
+        .remove(&router_scope_for(&ctx, ws.path()))
+        .unwrap();
+    assert_eq!(
+        recover_pending_threads(&ctx, ws.path()),
+        ["local-thread"],
+        "unbound single-user storage reopens from the workspace-local backend"
+    );
 }

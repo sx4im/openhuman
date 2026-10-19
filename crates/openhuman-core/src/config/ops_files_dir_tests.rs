@@ -118,8 +118,8 @@ fn a_relative_override_on_disk_falls_back_to_the_default() {
 /// the default one.
 #[tokio::test]
 async fn boot_migrates_legacy_files_into_the_chosen_folder() {
-    use crate::agent::artifacts::store::save_artifact_meta;
-    use crate::agent::artifacts::{ArtifactKind, ArtifactMeta, ArtifactStatus};
+    use crate::artifacts::store::save_artifact_meta;
+    use crate::artifacts::{ArtifactKind, ArtifactMeta, ArtifactStatus};
 
     let _g = ENV_LOCK.lock().await;
     let tmp = tempdir().unwrap();
@@ -185,8 +185,8 @@ async fn a_symlinked_route_into_the_data_folder_is_rejected() {
 /// folder keeps resolving, because that folder is recorded as trusted.
 #[tokio::test]
 async fn files_made_before_a_folder_change_keep_resolving() {
-    use crate::agent::artifacts::store::{create_artifact, finalize_artifact};
-    use crate::agent::artifacts::{ArtifactKind, FileRoots};
+    use crate::artifacts::store::{create_artifact, finalize_artifact};
+    use crate::artifacts::{ArtifactKind, FileRoots};
 
     let tmp = tempdir().unwrap();
     let mut cfg = tmp_config(&tmp);
@@ -220,7 +220,7 @@ async fn files_made_before_a_folder_change_keep_resolving() {
         "{:?}",
         cfg.files_dir_history
     );
-    let value = crate::agent::artifacts::ops::ai_get_artifact(&cfg, &meta.id)
+    let value = crate::artifacts::ops::ai_get_artifact(&cfg, &meta.id)
         .await
         .expect("an artifact from the previous folder still resolves")
         .into_cli_compatible_json()

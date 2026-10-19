@@ -32,11 +32,11 @@ use tinymemory_api::{
 };
 use tinytools::{PermissionLevel, Tool, ToolResult};
 
-use crate::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::config::Config;
 use crate::memory::types::{LearnParams, RecallParams};
 use crate::memory::{MemoryError, MemoryResult};
 use crate::security::policy::ToolOperation;
+use crate::security::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::security::SecurityPolicy;
 
 /// Prefix of a flow's own tag (see [`flow_tag`]).

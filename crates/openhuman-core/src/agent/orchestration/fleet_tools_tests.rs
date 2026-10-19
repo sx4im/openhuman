@@ -56,7 +56,7 @@ fn all_is_the_full_vocabulary() {
 /// module: it must not be told about wait/steer/close tools.
 #[test]
 fn builtin_orchestrator_has_no_wait_or_steer() {
-    let registry = crate::agent::harness::host_definition::AgentDefinitionRegistry::builtins_only();
+    let registry = crate::agent_registry::host_definition::AgentDefinitionRegistry::builtins_only();
     let def = registry.get("orchestrator").expect("built-in orchestrator");
     let set = FleetToolSet::from_scope(&def.tools, &def.disallowed_tools);
     assert!(set.has("list_subagents"));

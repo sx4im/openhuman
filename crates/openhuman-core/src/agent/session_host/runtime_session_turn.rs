@@ -11,7 +11,7 @@ impl OpenHumanSessionHost {
     pub async fn turn_with_origin(
         &mut self,
         user_message: &str,
-        origin: Option<&crate::agent::turn_origin::AgentTurnOrigin>,
+        origin: Option<&crate::security::turn_origin::AgentTurnOrigin>,
     ) -> Result<String> {
         self.turn_with_approval(user_message, origin, Default::default())
             .await
@@ -24,7 +24,7 @@ impl OpenHumanSessionHost {
     pub async fn turn_with_approval(
         &mut self,
         user_message: &str,
-        origin: Option<&crate::agent::turn_origin::AgentTurnOrigin>,
+        origin: Option<&crate::security::turn_origin::AgentTurnOrigin>,
         approval: crate::security::approval::ApprovalTurnContext,
     ) -> Result<String> {
         // The turn's context is bound once, here, before the runtime session
@@ -34,7 +34,14 @@ impl OpenHumanSessionHost {
             self.host_env.core = crate::core::runtime::DispatchCtx::ambient().downgrade();
         }
         self.ensure_runtime_session()?;
-        let staged = super::attachment_input::stage_turn(self, user_message, origin).await?;
+        let staged = crate::attachments::stage_turn(
+            user_message,
+            self.runtime_config.as_deref(),
+            self.workspace_descriptor.as_ref(),
+            self.thread_id.as_deref(),
+            origin,
+        )
+        .await?;
         let mut context = OpenHumanRunContext::new().with_host_env(&self.host_env);
         context.untrusted_input_turn = self.untrusted_input;
         context.origin = origin.cloned();
@@ -54,7 +61,7 @@ impl OpenHumanSessionHost {
         let root_config = context.root_run_config("openhuman-session");
         let mut options = TurnOptions {
             request_id: origin.and_then(|origin| match origin {
-                crate::agent::turn_origin::AgentTurnOrigin::WebChat { request_id, .. } => {
+                crate::security::turn_origin::AgentTurnOrigin::WebChat { request_id, .. } => {
                     request_id.clone()
                 }
                 _ => None,

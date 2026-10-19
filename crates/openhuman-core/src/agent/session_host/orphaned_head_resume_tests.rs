@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::agent::session_store::splice_fixture::{head_of, memory_locator, replace_head};
+use crate::storage::sessions::splice_fixture_tests::{head_of, memory_locator, replace_head};
 use tinyagents_session::transcript::{TranscriptMessage, TranscriptToolCall};
 use tinyinference_llm::message::Message;
 
@@ -33,7 +33,7 @@ async fn resumed_orphaned_tool_head_is_repaired_before_the_request() {
     // definitions (core/jsonrpc.rs), which routes a root turn through the
     // hosted harness. Without this the result depended on whether another test
     // in the process had installed them first.
-    let _ = crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+    let _ = crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
     let root = tempfile::tempdir().expect("tempdir");
     let locator = memory_locator();
     // The native dialect resolves from the model's profile (`Native` means

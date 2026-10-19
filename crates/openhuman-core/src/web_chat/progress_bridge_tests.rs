@@ -118,7 +118,7 @@ async fn tool_call_completed_forwards_real_output_on_tool_result() {
         crate::core::runtime::DispatchCtx::ambient(),
     );
 
-    tx.send(crate::agent::progress::AgentProgress::ToolCallCompleted {
+    tx.send(crate::progress::AgentProgress::ToolCallCompleted {
         call_id: "call-1".into(),
         tool_name: "web_search".into(),
         success: true,
@@ -188,8 +188,8 @@ fn worktree_detail_forwards_isolated_worker_fields() {
 
 // ── #4270 inference heartbeat ────────────────────────────────────────────
 
-use crate::agent::progress::AgentProgress;
 use crate::config::Config;
+use crate::progress::AgentProgress;
 use std::time::Duration;
 use tokio::sync::broadcast::error::TryRecvError;
 
@@ -569,7 +569,7 @@ fn cap_wire_args_truncates_oversized_payload_to_a_marker_string() {
 /// spawning tool call (#C1).
 #[tokio::test]
 async fn hold_text_stream_suppresses_text_delta_but_keeps_interim() {
-    use crate::agent::progress::AgentProgress;
+    use crate::progress::AgentProgress;
     let tmp = tempfile::TempDir::new().unwrap();
     let config = crate::config::Config {
         workspace_dir: tmp.path().join("workspace"),

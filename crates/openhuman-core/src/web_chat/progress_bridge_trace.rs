@@ -5,20 +5,19 @@
 //! thread id for headless/autonomous runs). Disabled (both the remote and the
 //! local exporter off), it costs nothing.
 
-use crate::agent::progress_tracing::SpanCollector;
 use tinyagents_harness::observability::trace_export as te;
 
 use super::super::types::ChatRequestMetadata;
 
 /// The span collector for the turn, and the trace context the journal export
 /// reuses after the turn ends. `None` when tracing is disabled.
-pub(super) fn span_collector(
+pub(super) fn trace_context(
     config: &crate::config::Config,
     metadata: &ChatRequestMetadata,
     client_id: &str,
     thread_id: &str,
     request_id: &str,
-) -> Option<(SpanCollector, te::TraceContext)> {
+) -> Option<te::TraceContext> {
     if !(config.observability.share_usage_data || config.observability.agent_tracing.enabled) {
         return None;
     }
@@ -70,5 +69,9 @@ pub(super) fn span_collector(
     if let Some(agent_id) = metadata.agent_id.clone() {
         trace_ctx = trace_ctx.with_agent_id(agent_id);
     }
-    Some((SpanCollector::new(trace_ctx.clone()), trace_ctx))
+    Some(trace_ctx)
 }
+
+#[cfg(test)]
+#[path = "progress_bridge_trace_tests.rs"]
+mod tests;

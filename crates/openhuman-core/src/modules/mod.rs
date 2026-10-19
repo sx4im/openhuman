@@ -90,17 +90,7 @@ mod search_path;
 pub(crate) mod site_memory_host;
 mod source;
 #[cfg(feature = "modules")]
-mod storage_grant_tinybox;
-#[cfg(feature = "modules")]
-mod storage_grant_tinychannels;
-#[cfg(feature = "modules")]
-mod storage_grant_tinyconnectors;
-#[cfg(feature = "modules")]
-mod storage_grant_tinyjuice;
-#[cfg(feature = "modules")]
-mod storage_grant_tinymcp;
-#[cfg(feature = "modules")]
-mod storage_grant_tinywallet;
+mod storage_grant_schemas;
 #[cfg(feature = "modules")]
 pub mod storage_grants;
 #[cfg(feature = "modules")]
@@ -118,10 +108,11 @@ mod storage_import_tinyconnectors;
 #[cfg(feature = "modules")]
 mod storage_import_tinyjuice;
 #[cfg(feature = "modules")]
+mod storage_import_tinyjuice_savings;
+#[cfg(feature = "modules")]
 mod storage_import_tinymcp;
 #[cfg(all(feature = "modules", feature = "web3"))]
 mod storage_import_tinywallet;
-#[cfg(feature = "modules")]
 pub mod tinybox;
 pub(crate) mod tinyflows;
 #[cfg(feature = "modules")]
@@ -135,6 +126,8 @@ pub mod voice;
 #[cfg(feature = "web3")]
 #[cfg(feature = "modules")]
 pub mod wallet;
+#[cfg(feature = "web3")]
+pub mod wallet_backend;
 #[cfg(feature = "web3")]
 mod wallet_host;
 #[cfg(feature = "web3")]
@@ -177,7 +170,11 @@ pub async fn import_legacy_mcp(
 ) {
     #[cfg(feature = "modules")]
     match storage_import_tinymcp::import_legacy(ctx, data_dir).await {
-        Ok(outcome) => log::debug!("[mcp] legacy storage import: {outcome:?}"),
+        Ok(outcome) => {
+            log::debug!("[mcp] legacy storage import: {outcome:?}");
+            storage_grant_schemas::migrate_imported(ctx, storage_grant_schemas::tinymcp::MODULE_ID)
+                .await;
+        }
         Err(error) => log::warn!("[mcp] legacy storage import failed, will retry: {error:#}"),
     }
     #[cfg(not(feature = "modules"))]
@@ -209,6 +206,12 @@ settled_outcome!(
     storage_import_tinybox,
     storage_import_tinyjuice
 );
+#[cfg(feature = "modules")]
+impl Settled for storage_import_tinyjuice_savings::Outcome {
+    fn settled(&self) -> bool {
+        matches!(self, Self::AlreadyDone | Self::Imported { .. })
+    }
+}
 #[cfg(all(feature = "modules", feature = "web3"))]
 settled_outcome!(storage_import_tinywallet);
 
@@ -258,6 +261,7 @@ where
         Ok(outcome) => {
             log::debug!("[{kind}] legacy storage import: {outcome:?}");
             if outcome.settled() {
+                storage_grant_schemas::migrate_imported(ctx, module_id).await;
                 done.insert(key);
             }
             true
@@ -280,7 +284,7 @@ pub async fn import_legacy_connectors(
     import_once(
         ctx,
         "connectors",
-        storage_grant_tinyconnectors::MODULE_ID,
+        storage_grant_schemas::tinyconnectors::MODULE_ID,
         state_dir,
         storage_import_tinyconnectors::import_legacy(ctx, state_dir),
     )
@@ -302,7 +306,7 @@ pub async fn import_legacy_x402(
     return import_once(
         ctx,
         "x402",
-        storage_grant_tinywallet::MODULE_ID,
+        storage_grant_schemas::tinywallet::MODULE_ID,
         workspace_dir,
         storage_import_tinywallet::import_legacy(ctx, workspace_dir),
     )
@@ -325,7 +329,7 @@ pub async fn import_legacy_tinybox(
     import_once(
         ctx,
         "tinybox",
-        storage_grant_tinybox::MODULE_ID,
+        storage_grant_schemas::tinybox::MODULE_ID,
         workspace_dir,
         storage_import_tinybox::import_legacy(ctx, workspace_dir),
     )
@@ -344,7 +348,7 @@ pub(crate) fn expiring_blob_module_scopes(
 ) -> Vec<crate::storage::Scope> {
     #[cfg(feature = "modules")]
     {
-        [storage_grant_tinyjuice::MODULE_ID]
+        [storage_grant_schemas::tinyjuice::MODULE_ID]
             .into_iter()
             .filter_map(|id| storage_host::current_module_scope(ctx, id).ok())
             .collect()
@@ -356,25 +360,19 @@ pub(crate) fn expiring_blob_module_scopes(
     }
 }
 
-/// [`expiring_blob_module_scopes`] for SaaS profile `profile`, whose acting
-/// scope is `base`, from outside that profile's task scope.
+/// [`expiring_blob_module_scopes`] for SaaS profile `profile`, from outside
+/// that profile's task scope.
 #[cfg(feature = "modules")]
-pub(crate) fn expiring_blob_module_scopes_for(
-    profile: &str,
-    base: &crate::storage::Scope,
-) -> Vec<crate::storage::Scope> {
-    [storage_grant_tinyjuice::MODULE_ID]
+pub(crate) fn expiring_blob_module_scopes_for(profile: &str) -> Vec<crate::storage::Scope> {
+    [storage_grant_schemas::tinyjuice::MODULE_ID]
         .into_iter()
-        .filter_map(|id| storage_host::module_scope(Some(profile), base, id).ok())
+        .filter_map(|id| storage_host::module_scope(Some(profile), id).ok())
         .collect()
 }
 
 /// See the `modules` build: with the feature off no module writes blobs.
 #[cfg(not(feature = "modules"))]
-pub(crate) fn expiring_blob_module_scopes_for(
-    _profile: &str,
-    _base: &crate::storage::Scope,
-) -> Vec<crate::storage::Scope> {
+pub(crate) fn expiring_blob_module_scopes_for(_profile: &str) -> Vec<crate::storage::Scope> {
     Vec::new()
 }
 
@@ -399,13 +397,46 @@ pub async fn import_legacy_tinyjuice(
     import_once(
         ctx,
         "tinyjuice",
-        storage_grant_tinyjuice::MODULE_ID,
+        storage_grant_schemas::tinyjuice::MODULE_ID,
         root,
         storage_import_tinyjuice::import_legacy(ctx, root, ttl),
     )
     .await;
     #[cfg(not(feature = "modules"))]
     let _ = (ctx, root, ttl);
+}
+
+/// Hands the legacy `state/tokenjuice_savings.json` under `workspace_dir` to
+/// the tinyjuice module (`ImportSavings`), once per file. Never fails the
+/// caller: an error is logged and the import is retried at the next install.
+pub async fn import_legacy_tinyjuice_savings(
+    ctx: &crate::core::runtime::DispatchCtx,
+    client: &tinybus::module::ModuleClient,
+    workspace_dir: &std::path::Path,
+) {
+    #[cfg(feature = "modules")]
+    {
+        let file = storage_import_tinyjuice_savings::legacy_file(workspace_dir);
+        import_once(
+            ctx,
+            "tinyjuice-savings",
+            storage_grant_schemas::tinyjuice::MODULE_ID,
+            &file,
+            storage_import_tinyjuice_savings::import_legacy(ctx, &file, |aggregate| async move {
+                client
+                    .call::<bool>(
+                        "tinyjuice",
+                        tinyjuice_bus::names::methods::IMPORT_SAVINGS,
+                        (aggregate,),
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("ImportSavings: {e}"))
+            }),
+        )
+        .await;
+    }
+    #[cfg(not(feature = "modules"))]
+    let _ = (ctx, client, workspace_dir);
 }
 
 #[cfg(all(test, feature = "modules"))]

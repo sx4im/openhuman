@@ -43,6 +43,7 @@ repository = "https://github.com/tinyhumansai/openhuman"
 openhuman-rpc = { path = "crates/openhuman-rpc", default-features = false }
 openhuman-embed = { path = "crates/openhuman-embed", default-features = false }
 openhuman-tinyhumans = { path = "crates/openhuman-tinyhumans", default-features = false }
+tinyagents-hooks = { path = "vendor/tinyagents/crates/tinyagents-hooks" }
 
 # Patches are workspace-root settings; Cargo ignores them in member manifests.
 [patch."https://github.com/tinyhumansai/tinytools"]
@@ -98,6 +99,7 @@ tinyinference-voice = { path = "vendor/tinyagents/vendor/tinyinference/crates/ti
 # own for standalone builds); resolve those names to the one copy the host uses.
 tinyagents-live = { path = "vendor/tinyagents/crates/tinyagents-live" }
 tinyagents-harness = { path = "vendor/tinyagents/crates/tinyagents-harness" }
+tinyagents-hooks = { path = "vendor/tinyagents/crates/tinyagents-hooks" }
 tinytools = { path = "vendor/tinyagents/vendor/tinytools/crates/tinytools" }
 tinybus = { path = "vendor/tinybus/crates/tinybus" }
 tinybus-macros = { path = "vendor/tinybus/crates/tinybus-macros" }
@@ -132,3 +134,10 @@ debug = false
 
 [profile.dev.package."*"]
 debug = false
+
+# Module admission hashes the host executable (tinybus `attach_linked`), once
+# per process. nextest runs every test in its own process, so an unoptimised
+# SHA-256 over a ~500 MB test binary cost ~10 s per module-backed test. Keep
+# in sync with the other workspace manifest.
+[profile.dev.package.sha2]
+opt-level = 3

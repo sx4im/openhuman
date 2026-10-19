@@ -2,11 +2,11 @@
 //! turn-deadline wind-down, the two graceful pauses of a top-level turn.
 
 use super::*;
-use crate::agent::stop_hooks::BudgetStopHook;
 use crate::agent::tinyagents::TurnModelSource;
 use async_trait::async_trait;
 use std::sync::Arc;
-use tinyagents_harness::middleware::{StopDecision, StopHook, TurnState};
+use tinyagents_hooks::stop::BudgetStopHook;
+use tinyagents_hooks::stop::{StopDecision, StopHook, TurnState};
 use tinyinference_llm::model::{ChatModel, ModelProfile, ModelRequest, ModelResponse};
 use tinyinference_llm::tool::ToolCall;
 use tinyinference_llm::usage::Usage;
@@ -100,10 +100,9 @@ fn hosted_base() -> Arc<crate::agent::tinyagents::host::OpenHumanHostBase> {
     Arc::new(crate::agent::tinyagents::host::OpenHumanHostBase {
         config: Arc::new(crate::config::Config::default()),
         definitions: Arc::new(
-            crate::agent::harness::host_definition::AgentDefinitionRegistry::builtins_only(),
+            crate::agent_registry::host_definition::AgentDefinitionRegistry::builtins_only(),
         ),
         security_policy: Arc::new(crate::security::policy::SecurityPolicy::default()),
-        post_turn_hooks: Vec::new(),
         session_definition: None,
     })
 }
@@ -111,10 +110,10 @@ fn hosted_base() -> Arc<crate::agent::tinyagents::host::OpenHumanHostBase> {
 fn root_context(
     thread_id: &str,
     workspace: &str,
-    progress: tokio::sync::mpsc::Sender<crate::agent::progress::AgentProgress>,
+    progress: tokio::sync::mpsc::Sender<crate::progress::AgentProgress>,
 ) -> crate::agent::tinyagents::host::OpenHumanRunContext {
     let mut context = crate::agent::tinyagents::host::OpenHumanRunContext::new();
-    context.origin = Some(crate::agent::turn_origin::AgentTurnOrigin::WebChat {
+    context.origin = Some(crate::security::turn_origin::AgentTurnOrigin::WebChat {
         thread_id: thread_id.to_string(),
         client_id: format!("client-{thread_id}"),
         request_id: Some(format!("request-{thread_id}")),
@@ -176,6 +175,7 @@ async fn budget_stop_hook_pauses_the_hosted_turn_inner() {
         max_iterations: 3,
         context_window: None,
         run_queue: None,
+        message_run_queue: None,
         early_exit_tools: &[],
         pause_at_cap: false,
         max_output_tokens: None,
@@ -248,6 +248,7 @@ async fn deadline_wind_down_pauses_the_hosted_turn_inner() {
         max_iterations: 50,
         context_window: None,
         run_queue: None,
+        message_run_queue: None,
         early_exit_tools: &[],
         pause_at_cap: true,
         max_output_tokens: None,
@@ -320,6 +321,7 @@ fn a_turn_before_its_wind_down_point_runs_to_its_final_answer() {
                         max_iterations: 50,
                         context_window: None,
                         run_queue: None,
+                        message_run_queue: None,
                         early_exit_tools: &[],
                         pause_at_cap: true,
                         max_output_tokens: None,
@@ -387,6 +389,7 @@ async fn golden_turn(label: &str, stop: GoldenStop) -> serde_json::Value {
         max_iterations: 50,
         context_window: None,
         run_queue: None,
+        message_run_queue: None,
         early_exit_tools: &[],
         pause_at_cap: matches!(stop, GoldenStop::Finishes | GoldenStop::DeadlineWindDown),
         max_output_tokens: None,

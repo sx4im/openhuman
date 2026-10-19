@@ -20,20 +20,13 @@ use tinytools::ToolResult as TaToolResult;
 /// recording the final (summarized/capped) content the transcript keeps, not the
 /// raw payload.
 pub(crate) struct ToolOutcomeCaptureMiddleware {
+    capture: tinyagents_harness::middleware::library::ToolOutcomeCaptureMiddleware,
     sink: tinyagents_harness::turn_outcome::ToolOutcomeSink,
     /// `call_id → (success, classified failure, elapsed, output chars)` fallback
     /// read by the event bridge when projecting `ToolCallCompleted`. TinyAgents
     /// 1.6 owns the raw outcome fields; the host still adds classified failure
     /// metadata for the UI.
     failure_map: crate::agent::tinyagents::observability::ToolFailureMap,
-    /// Invocation start + the original structured arguments.  `after_tool`
-    /// receives only an identity/result pair, so preserve both facts at the
-    /// boundary where TinyTools still exposes the full call.
-    started: std::sync::Arc<
-        std::sync::Mutex<
-            std::collections::HashMap<String, (std::time::Instant, serde_json::Value)>,
-        >,
-    >,
 }
 
 impl ToolOutcomeCaptureMiddleware {
@@ -42,9 +35,11 @@ impl ToolOutcomeCaptureMiddleware {
         failure_map: crate::agent::tinyagents::observability::ToolFailureMap,
     ) -> Self {
         Self {
+            capture: tinyagents_harness::middleware::library::ToolOutcomeCaptureMiddleware::new(
+                sink.clone(),
+            ),
             sink,
             failure_map,
-            started: Default::default(),
         }
     }
 }
@@ -59,40 +54,22 @@ impl Middleware<(), crate::agent::tinyagents::host::OpenHumanRunContext>
 
     async fn before_tool(
         &self,
-        _ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
-        _state: &(),
+        ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
+        state: &(),
         call: &mut tinyinference_llm::tool::ToolCall,
     ) -> TaResult<()> {
-        if let Ok(mut started) = self.started.lock() {
-            started.insert(
-                call.id.to_string(),
-                (std::time::Instant::now(), call.arguments.clone()),
-            );
-        }
-        Ok(())
+        self.capture.before_tool(ctx, state, call).await
     }
 
     async fn after_tool(
         &self,
-        _ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
-        _state: &(),
+        ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
+        state: &(),
         invocation: &ToolInvocationIdentity,
         result: &mut TaToolResult,
     ) -> TaResult<()> {
         let tool_name = invocation.tool_name();
         let call_id = invocation.call_id().to_string();
-        let (duration_ms, arguments) = self
-            .started
-            .lock()
-            .ok()
-            .and_then(|mut started| started.remove(&call_id))
-            .map(|(started, arguments)| {
-                (
-                    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
-                    arguments,
-                )
-            })
-            .unwrap_or_default();
         // Enrich a raw security-policy / autonomy block (issue #4094): the ~20
         // `[policy-blocked]` denials emitted deep in `SecurityPolicy` / the tools
         // return a bare marker line with no workaround and no relay directive, so
@@ -154,7 +131,19 @@ impl Middleware<(), crate::agent::tinyagents::host::OpenHumanRunContext>
             .metadata
             .clone()
             .filter(|v| v.is_object() && v.get("kind").is_some());
-        if let Ok(mut map) = self.failure_map.lock() {
+        // TinyAgents owns call timing, argument correlation and the outcome
+        // record. Run it after host enrichment so the sink sees the final text.
+        self.capture
+            .after_tool(ctx, state, invocation, result)
+            .await?;
+        let captured = self.sink.lock().ok().and_then(|outcomes| {
+            outcomes
+                .iter()
+                .rev()
+                .find(|outcome| outcome.call_id == call_id)
+                .cloned()
+        });
+        if let (Some(captured), Ok(mut map)) = (captured, self.failure_map.lock()) {
             // Keep duration + rendered output size as a compatibility fallback
             // for old/deserialized completion events; TinyAgents 1.6 supplies
             // these fields directly on live `ToolCompleted` events.
@@ -163,7 +152,7 @@ impl Middleware<(), crate::agent::tinyagents::host::OpenHumanRunContext>
                 (
                     success,
                     failure,
-                    duration_ms,
+                    captured.duration_ms,
                     crate::agent::tinyagents::middleware::tool_result_text(result)
                         .chars()
                         .count(),
@@ -171,17 +160,28 @@ impl Middleware<(), crate::agent::tinyagents::host::OpenHumanRunContext>
                 ),
             );
         }
-        if let Ok(mut sink) = self.sink.lock() {
-            sink.push(tinyagents_harness::turn_outcome::ToolCallOutcome {
-                call_id,
-                name: tool_name.to_string(),
-                arguments,
-                success,
-                content: crate::agent::tinyagents::middleware::tool_result_text(result),
-                duration_ms,
-            });
-        }
         Ok(())
+    }
+
+    async fn after_agent(
+        &self,
+        ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
+        state: &(),
+        run: &mut tinyagents_harness::middleware::AgentRun,
+    ) -> TaResult<()> {
+        self.capture.after_agent(ctx, state, run).await
+    }
+
+    async fn on_error(
+        &self,
+        ctx: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
+        error: &tinyagents_harness::error::TinyAgentsError,
+    ) -> TaResult<()> {
+        <tinyagents_harness::middleware::library::ToolOutcomeCaptureMiddleware as Middleware<
+            (),
+            crate::agent::tinyagents::host::OpenHumanRunContext,
+        >>::on_error(&self.capture, ctx, error)
+        .await
     }
 }
 

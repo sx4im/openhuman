@@ -10,6 +10,7 @@ fn sample_outcome(output: &str) -> SubagentRunOutcome {
         output: output.to_string(),
         elapsed: Duration::from_millis(120),
         iterations: 3,
+        failure_cause: None,
         mode: SubagentMode::Typed,
         status: SubagentRunStatus::Completed,
         final_history: Vec::new(),

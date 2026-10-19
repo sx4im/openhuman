@@ -5,7 +5,7 @@
 use serde_json::json;
 use tokio::sync::mpsc::Sender;
 
-use crate::agent::progress::AgentProgress;
+use crate::progress::AgentProgress;
 use tinyagents_orchestration::parallel::{BranchReport, Collected};
 use tinytools_std::file_state;
 
@@ -117,8 +117,9 @@ pub(crate) async fn project_spawn_parallel_result(
                         // An incomplete worker was stopped early (breaker /
                         // cap); its span closes at WARNING with that stop.
                         stop: matches!(result.status, ParallelAgentStatus::Incomplete).then(|| {
-                            crate::agent::turn_projection::stop_from_incomplete(
+                            crate::agent::session_host::stop_summary::stop_from_incomplete_with_cause(
                                 error.as_deref().unwrap_or(""),
+                                result.failure_cause.clone(),
                             )
                         }),
                     })

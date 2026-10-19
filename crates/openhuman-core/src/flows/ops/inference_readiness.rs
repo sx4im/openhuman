@@ -152,12 +152,12 @@ pub(super) async fn cached_probe_inference_readiness(
 /// 1. Node `config.model` — a managed tier or `hint:*` alias, translated via
 ///    [`role_for_model_tier`](crate::inference::provider::role_for_model_tier).
 /// 2. A static (non-`=`) `agent_ref` whose custom
-///    [`AgentRegistryEntry`](crate::agent::registry::AgentRegistryEntry)
+///    [`AgentRegistryEntry`](crate::agent_registry::AgentRegistryEntry)
 ///    itself pins a `model` (e.g. `hint:reasoning`) — resolved the same way
 ///    [`OpenHumanAgentRunner::run_via_harness`](crate::flows::tinyflows::caps::OpenHumanAgentRunner)
 ///    does via `resolve_node_model(&request, entry_model)`, using the same
 ///    sync, config-only accessor
-///    ([`find_custom_in_config`](crate::agent::registry::find_custom_in_config))
+///    ([`find_custom_in_config`](crate::agent_registry::find_custom_in_config))
 ///    it calls.
 /// 3. Otherwise, caps.rs's own default role (`"summarization"`, its fallback
 ///    absent a `role` field on the completion request).
@@ -173,13 +173,13 @@ pub(super) fn agent_node_role(config: &Config, node: &tinyflows::model::Node) ->
         .map(str::trim)
         .filter(|s| !s.is_empty() && !s.starts_with('='))
     {
-        use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+        use crate::agent_registry::host_definition::AgentDefinitionRegistry;
         if let Err(error) = AgentDefinitionRegistry::init_global(&config.workspace_dir) {
             tracing::debug!(target: "flows", %error,
                 "[flows] readiness: agent definition registry unavailable; using registry fallback");
         }
         let definition = AgentDefinitionRegistry::current().and_then(|r| r.get(agent_ref).cloned());
-        let custom = crate::agent::registry::find_custom_in_config(config, agent_ref);
+        let custom = crate::agent_registry::find_custom_in_config(config, agent_ref);
         if definition.is_some() || custom.is_some() {
             let entry_model = if definition.is_some() {
                 None

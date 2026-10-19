@@ -20,10 +20,10 @@ use tinyagents_runtime::{DriverRequest, RuntimeError};
 use tinyinference_llm::model::ErrorSlotModel;
 
 use crate::agent::tinyagents::host::OpenHumanRunContext;
-use crate::agent::tinyagents::model::TurnChatModel;
 use crate::agent::tinyagents::routes;
-use crate::agent::tinyagents::tool_registration::host_tool_set_builder;
+use crate::agent::tinyagents::tool_registration::host_tool_set_builder_for_turn;
 use crate::agent::tinyagents::turn_policy::run_policy_for_provider;
+use crate::inference::provider::model::TurnChatModel;
 
 /// The run policy for one turn, and whether it carries a cross-route fallback.
 ///
@@ -116,15 +116,16 @@ pub(super) struct OpenHumanTurnPlanner {
 impl TurnPlanner<(), OpenHumanRunContext> for OpenHumanTurnPlanner {
     async fn plan(
         &self,
-        _request: &DriverRequest<OpenHumanRunContext>,
+        request: &DriverRequest<OpenHumanRunContext>,
     ) -> Result<TurnPlan<(), OpenHumanRunContext>, RuntimeError> {
         let mut plan = TurnPlan::new(self.models.clone());
         plan.policy = self.policy.clone();
-        plan.tools = host_tool_set_builder(
+        plan.tools = host_tool_set_builder_for_turn(
             &self.tool_sets,
             &self.allowed,
             self.has_thread,
             &self.session_deferred,
+            &request.run_context.data,
         );
         // A turn driven outside a `Session` has no frozen tool declaration to
         // compare against; the registration above is the authority.

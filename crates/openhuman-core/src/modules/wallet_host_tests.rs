@@ -23,11 +23,12 @@ fn x402_approval_is_bound_to_the_exact_chat_owner_and_payment_facts() {
             client_id: "client-1".into(),
         }),
     };
-    let origin = |thread: &str, client: &str| crate::agent::turn_origin::AgentTurnOrigin::WebChat {
-        thread_id: thread.into(),
-        client_id: client.into(),
-        request_id: Some("request-1".into()),
-    };
+    let origin =
+        |thread: &str, client: &str| crate::security::turn_origin::AgentTurnOrigin::WebChat {
+            thread_id: thread.into(),
+            client_id: client.into(),
+            request_id: Some("request-1".into()),
+        };
     assert!(x402_request_owner_matches(
         &request,
         Some(&origin("thread-1", "client-1"))
@@ -43,7 +44,7 @@ fn x402_approval_is_bound_to_the_exact_chat_owner_and_payment_facts() {
     // Only a WebChat turn can own an x402 payment: another origin, or none, never matches.
     assert!(!x402_request_owner_matches(
         &request,
-        Some(&crate::agent::turn_origin::AgentTurnOrigin::Cli)
+        Some(&crate::security::turn_origin::AgentTurnOrigin::Cli)
     ));
     assert!(!x402_request_owner_matches(&request, None));
 

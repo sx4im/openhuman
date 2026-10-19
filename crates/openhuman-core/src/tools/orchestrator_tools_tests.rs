@@ -28,7 +28,7 @@ fn def(id: &str, when_to_use: &str, delegate_name: Option<&str>) -> AgentDefinit
         delegate_name: delegate_name.map(String::from),
         agent_tier: tinyagents_definition::AgentTier::Worker,
         source: DefinitionSource::Builtin,
-        extensions: crate::agent::harness::host_definition::AgentExt {
+        extensions: crate::agent_registry::host_definition::AgentExt {
             omit_identity: true,
             omit_memory_context: true,
             omit_safety_preamble: true,
@@ -90,7 +90,7 @@ fn integration_with_actions(
     let mut ci = integration(toolkit, description);
     ci.tools = actions
         .iter()
-        .map(|name| crate::agent::prompts::ConnectedIntegrationTool {
+        .map(|name| crate::integrations::ConnectedIntegrationTool {
             name: (*name).to_string(),
             description: format!("{name} action"),
             parameters: None,
@@ -329,7 +329,7 @@ fn unconnected_integrations_contribute_no_actions() {
         ConnectedIntegration {
             toolkit: "github".into(),
             description: "GitHub access.".into(),
-            tools: vec![crate::agent::prompts::ConnectedIntegrationTool {
+            tools: vec![crate::integrations::ConnectedIntegrationTool {
                 name: "GITHUB_CREATE_ISSUE".into(),
                 description: "Create an issue".into(),
                 parameters: None,

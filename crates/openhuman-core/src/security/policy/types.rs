@@ -268,7 +268,7 @@ pub struct SecurityPolicy {
     /// Configured Files roots used to resolve Ready artifact records after a
     /// session is rebuilt.
     #[doc(hidden)]
-    pub media_files_roots: Arc<std::sync::Mutex<Option<crate::agent::artifacts::FileRoots>>>,
+    pub media_files_roots: Arc<std::sync::Mutex<Option<crate::artifacts::FileRoots>>>,
     /// Whether the agent may install OS packages via the `install_tool` tool.
     pub allow_tool_install: bool,
     /// Tool names the user has pre-approved ("Always allow"). The `ApprovalGate`

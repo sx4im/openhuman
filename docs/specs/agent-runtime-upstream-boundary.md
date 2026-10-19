@@ -3,7 +3,7 @@
 > **Status, verified 2026-10-07.** The migration this spec governs is mostly
 > executed. Its audit matrix is the original work-list, so several rows name
 > paths that have since been deleted and several "Delete" rows are already
-> done; one Package A target, `crates/openhuman-core/src/agent/registry/tools.rs`,
+> done; one Package A target, `crates/openhuman-core/src/agent_registry/tools.rs`,
 > is still present. Read
 > [`../plans/README.md`](../plans/README.md) for the per-plan status and the
 > commands that re-check it, and treat the matrix below as the record of intent
@@ -285,8 +285,8 @@ all consumers import the owner directly, not that behavior is dropped.
 | `progress_tracing.rs`, `progress_tracing/` | Keep | OpenHuman UI/Langfuse projection and transport. Generic observations/events remain upstream. |
 | `prompts/` | Keep/Split | Keep bundled product prompts and section content. Move behavior-free render helpers/building blocks that name no product type to harness/prompt. |
 | `registry/` | Split | Keep enablement, custom-agent persistence, product defaults and RPC; move definition parsing/validation/lookup to `tinyagents-registry`; delete thin `registry/tools.rs`. |
-| `session_db/` | Keep | OpenHuman RPC controllers over TinyAgents ledger. |
-| `session_import/` | Keep | Legacy OpenHuman source and disk migration. |
+| `sessions/` | Keep | OpenHuman RPC controllers over TinyAgents ledger. |
+| `storage/import/` | Keep | Legacy OpenHuman source and disk migration. |
 | `task_dispatcher/` | Delete | Upstream removed the task runtime. Delete the obsolete poller, executor, task-board binding and their callers; do not recreate a host shim. |
 | `tinyagents/` | Split/Delete | Host adapters and product journal/projections stay; generic assembly, model/tool wrappers, middleware, task-local routing and graph wrappers move upstream, then the integration facade disappears. |
 | `tools/` | Keep | Product control tools, changed to implement `tinytools::Tool` directly. Generic todo/delegation mechanics move to graph/harness. |

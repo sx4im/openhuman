@@ -1727,7 +1727,7 @@ async fn wait_for_request(f: &Fixture, what: &str, found: impl Fn(&str, &str) ->
 async fn a_later_chat_turn_carries_cached_memory_and_is_logged() {
     // Chat sessions resolve their hosted authority from the agent definition
     // registry, which the full runtime initialises at startup.
-    openhuman_core::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins(
+    openhuman_core::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins(
     )
     .expect("builtin agent definitions");
     let f = Fixture::new(true).await;

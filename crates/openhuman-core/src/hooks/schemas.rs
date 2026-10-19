@@ -14,8 +14,8 @@ use serde_json::{json, Map, Value};
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};
 
-use tinyagents_runtime::command_hooks::context::TurnIdentity;
-use tinyagents_runtime::command_hooks::types::{HookEvent, HookPayload};
+use tinyagents_hooks::command::context::TurnIdentity;
+use tinyagents_hooks::command::types::{HookEvent, HookPayload};
 
 pub fn all_controller_schemas() -> Vec<ControllerSchema> {
     vec![schemas("list"), schemas("reload"), schemas("test")]
@@ -135,7 +135,7 @@ fn handle_test(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFutur
         )
         .map_err(|error| format!("invalid payload for '{event}': {error}"))?;
 
-        let input = tinyagents_runtime::command_hooks::context::build_input(
+        let input = tinyagents_hooks::command::context::build_input(
             event,
             TurnIdentity::default(),
             payload,
@@ -160,7 +160,7 @@ fn handle_test(_ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFutur
 }
 
 /// Render a config for the wire, naming the source file of every definition.
-fn describe(config: &tinyagents_runtime::command_hooks::config::HookConfig) -> Value {
+fn describe(config: &tinyagents_hooks::command::config::HookConfig) -> Value {
     let by_event: Map<String, Value> = config
         .by_event
         .iter()
@@ -175,7 +175,7 @@ fn describe(config: &tinyagents_runtime::command_hooks::config::HookConfig) -> V
                         "timeout": definition.timeout,
                         "fail_closed": definition.fail_closed,
                         "enabled": definition.enabled,
-                        "layer": definition.layer.map(tinyagents_runtime::command_hooks::config::HookLayer::as_str),
+                        "layer": definition.layer.map(tinyagents_hooks::command::config::HookLayer::as_str),
                         "source_dir": definition.source_dir.as_ref().map(|dir| dir.display().to_string()),
                     })
                 })

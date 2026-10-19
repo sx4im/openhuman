@@ -4,7 +4,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::json;
 
 use super::*;
-use crate::agent::artifacts::types::{ArtifactKind, ArtifactMeta, ArtifactStatus};
+use crate::artifacts::types::{ArtifactKind, ArtifactMeta, ArtifactStatus};
 use crate::core::runtime::DispatchCtx;
 use crate::threads::store::{self as conversations, CreateConversationThread};
 

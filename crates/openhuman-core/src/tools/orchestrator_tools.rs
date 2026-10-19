@@ -28,13 +28,13 @@
 //! registry (for delegation target lookups), and the current list of
 //! connected Composio integrations.
 //!
-//! [`AgentDefinition::when_to_use`]: crate::agent::harness::host_definition::AgentDefinition::when_to_use
+//! [`AgentDefinition::when_to_use`]: crate::agent_registry::host_definition::AgentDefinition::when_to_use
 //! [`SubagentEntry::AgentId`]: tinyagents_definition::SubagentEntry::AgentId
 //! [`SubagentEntry::Skills`]: tinyagents_definition::SubagentEntry::Skills
 
-use crate::agent::harness::host_definition::{AgentDefinition, AgentDefinitionRegistry};
-use crate::agent::prompts::ConnectedIntegration;
+use crate::agent_registry::host_definition::{AgentDefinition, AgentDefinitionRegistry};
 use crate::integrations::composio::ComposioActionTool;
+use crate::integrations::ConnectedIntegration;
 use tinyagents_definition::SubagentEntry;
 
 // SpawnWorkerThreadTool import kept commented while the worker-thread spawn is
@@ -42,7 +42,7 @@ use tinyagents_definition::SubagentEntry;
 use crate::agent::orchestration::tools::ArchetypeDelegationTool;
 use crate::agent::orchestration::tools::DelegationTarget;
 #[allow(unused_imports)]
-use crate::agent::orchestration::tools::SpawnWorkerThreadTool;
+use crate::tools::implementations::threads::SpawnWorkerThreadTool;
 use tinytools::Tool;
 
 /// Synthesise the delegation tool list for an agent based on its
@@ -197,7 +197,7 @@ pub fn collect_deferred_integration_actions(
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
     for integration in integrations {
-        let mut actions: Vec<&crate::agent::prompts::ConnectedIntegrationTool> =
+        let mut actions: Vec<&crate::integrations::ConnectedIntegrationTool> =
             integration.tools.iter().collect();
         actions.sort_by(|a, b| a.name.cmp(&b.name));
         for action in actions {

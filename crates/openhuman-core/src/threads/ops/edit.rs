@@ -393,7 +393,7 @@ async fn clear_dropped_turn_states(
     cut_request_id: &str,
 ) {
     // Resolved here, not in the blocking task: the tenant is task-local.
-    let store = crate::agent::session_store::turn_states_for(workspace_dir);
+    let store = crate::storage::sessions::turn_states_for(workspace_dir);
     let thread_id_owned = thread_id.to_string();
     let cut_request_id_owned = cut_request_id.to_string();
     let result = tokio::task::spawn_blocking(move || {

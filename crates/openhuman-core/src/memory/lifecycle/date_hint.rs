@@ -40,7 +40,7 @@ pub async fn extract(
     };
     let system = format!(
         "{}\n\n{INSTRUCTION}",
-        crate::agent::prompts::current_datetime_line(Some(zone))
+        crate::prompts::current_datetime_line(Some(zone))
     );
     let mut request = ModelRequest::new(vec![Message::system(system), Message::user(user_text)]);
     request.max_tokens = Some(400);

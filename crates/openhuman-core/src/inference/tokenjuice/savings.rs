@@ -1,15 +1,12 @@
 //! Host adapter for compaction savings accounting.
 //!
-//! The aggregate math, the per-model and per-compressor buckets and the
-//! snapshot at `workspace_dir/state/tokenjuice_savings.json` live in the
-//! tinyjuice module (`ConfigureSavings` / `RecordSavings` / `SavingsStats` /
-//! `ResetSavings`). OpenHuman keeps only what is policy: which model the
+//! The aggregate math, the per-model and per-compressor buckets and their
+//! persistence (the `juice.savings` document in the module's storage) live in
+//! the tinyjuice module (`RecordSavings` / `SavingsStats` / `ResetSavings` /
+//! `ImportSavings`). OpenHuman keeps only what is policy: which model the
 //! saving is attributed to and the USD price per input token from
 //! [`crate::agent::cost`].
 //!
-//! The snapshot is deliberately local, not on the storage port: it is one
-//! process-global counter that is cheap to lose. Allowlisted in
-//! `scripts/ci/check-storage-bypass.mjs`.
 
 use std::sync::{Mutex, OnceLock};
 
@@ -25,25 +22,13 @@ fn model_slot() -> &'static Mutex<String> {
     SLOT.get_or_init(|| Mutex::new(crate::config::DEFAULT_MODEL.to_string()))
 }
 
-/// Install the attribution model (host policy) and point the module at the
-/// snapshot location; the module loads a prior snapshot once per path.
-pub async fn configure(
-    client: &tinybus::module::ModuleClient,
-    attribution_model: String,
-    workspace_dir: &std::path::Path,
-) -> Result<(), String> {
+/// Install the attribution model (host policy). The module keeps the totals in
+/// its own `juice.savings` document; a legacy snapshot file is handed over by
+/// [`crate::modules::import_legacy_tinyjuice_savings`].
+pub fn configure(attribution_model: String) {
     if !attribution_model.trim().is_empty() {
         *model_slot().lock().unwrap_or_else(|p| p.into_inner()) = attribution_model;
     }
-    let path = workspace_dir.join("state").join("tokenjuice_savings.json");
-    client
-        .call::<()>(
-            MODULE,
-            methods::CONFIGURE_SAVINGS,
-            (path.to_string_lossy().into_owned(),),
-        )
-        .await
-        .map_err(|e| e.to_string())
 }
 
 /// The model savings are currently attributed to.

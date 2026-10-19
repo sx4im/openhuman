@@ -16,7 +16,7 @@ fn config_with_rules(tmp: &tempfile::TempDir) -> crate::config::Config {
 fn a_session_composes_the_operator_and_definition_layers() {
     let tmp = tempfile::TempDir::new().unwrap();
     let config = config_with_rules(&tmp);
-    let mut definition = crate::agent::registry::agents::load_builtins()
+    let mut definition = crate::agent_registry::agents::load_builtins()
         .unwrap()
         .into_iter()
         .find(|def| def.id == "orchestrator")
@@ -52,7 +52,7 @@ fn a_session_composes_the_operator_and_definition_layers() {
 /// A text-dialect session over the per-thread goal tools under `rules`,
 /// returning its rendered prompt and declared tool names.
 async fn goal_session_prompt(rules: serde_json::Value) -> (String, Vec<String>) {
-    let _ = crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+    let _ = crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
     let action_dir = tempfile::tempdir().expect("tempdir");
     let config = crate::config::Config {
         tool_rules: serde_json::from_value(rules).expect("rules"),

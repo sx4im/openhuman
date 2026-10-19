@@ -1,12 +1,7 @@
 //! Data types shared across the prompt-plumbing pipeline.
 //!
-//! Everything in this file is pure data (structs, enums, traits,
-//! constants). The rendering logic — section implementations,
-//! `SystemPromptBuilder`, `render_subagent_system_prompt` — lives in
-//! the sibling `mod.rs` so type edits don't pull in the whole 2 000-line
-//! renderer.
+//! Data shared by OpenHuman's agent prompt adapters.
 
-use anyhow::Result;
 use std::path::Path;
 use tinyskills::Skill as Workflow;
 use tinytools::Tool;
@@ -315,7 +310,7 @@ pub struct PromptContext<'a> {
     /// Empty for non-master agents.
     pub personality_roster: Vec<PersonalityRosterEntry>,
     /// Pre-loaded global `AGENTS.md` content (`<workspace_dir>/AGENTS.md`),
-    /// injected by [`crate::agent::prompts::sections::AgentsInstructionsSection`].
+    /// injected by [`crate::prompts::sections::AgentsInstructionsSection`].
     /// `None` when the file is absent/empty or the `agents_md_enabled` config
     /// gate is off. Loaded once at system-prompt build time (never re-read per
     /// turn) so the frozen system-prompt prefix / KV-cache contract holds.
@@ -328,120 +323,12 @@ pub struct PromptContext<'a> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PromptSection trait + rendered output
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub trait PromptSection: Send + Sync {
-    fn name(&self) -> &str;
-    fn build(&self, ctx: &PromptContext<'_>) -> Result<String>;
-
-    /// The section's bytes split by cache tier.
-    ///
-    /// Most sections live in exactly one tier, so the default is one part in
-    /// [`Self::tier`]. A section whose body spans tiers (the orchestrator's
-    /// dynamic builder renders identity, per-install context and the user's
-    /// state in one pass) overrides this so the builder can place each slice
-    /// with its peers instead of dragging the stable bytes into the volatile
-    /// tail.
-    fn build_parts(&self, ctx: &PromptContext<'_>) -> Result<Vec<(PromptTier, String)>> {
-        Ok(vec![(self.tier(), self.build(ctx)?)])
-    }
-
-    /// Which cache tier this section's bytes belong to.
-    ///
-    /// Defaults to [`PromptTier::Stable`], which is right for the large
-    /// majority: identity, role, rules, safety, grounding and style are the
-    /// same bytes on every turn of every session. A section must override this
-    /// only if its output can change — and then it **must**, because a volatile
-    /// section rendered inside the stable tier invalidates every byte after it.
-    fn tier(&self) -> PromptTier {
-        PromptTier::Stable
-    }
-}
-
-/// How stable a [`PromptSection`]'s bytes are, which decides where in the
-/// assembled prompt they are emitted.
-///
-/// The prompt is frozen after turn 1 (`session/turn/core.rs`), so within a
-/// session nothing here moves. The tiers matter *across* sessions and to
-/// providers that must be told where to cache: a prefix is reusable only up to
-/// the first byte that differs, so the ordering rule is simply "most stable
-/// first". Put the user's memory near the front — as this builder did until
-/// #5701's successor — and one memory write invalidates the identity, the
-/// rules, the safety contract and the entire tool catalogue behind it.
-///
-/// Hermes reaches the same three-way split from the same reasoning
-/// (`agent/system_prompt.py`'s `stable` / `context` / `volatile`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PromptTier {
-    /// Identical across sessions for a given build and agent: identity, role,
-    /// delegation rules, safety, grounding, writing style.
-    Stable,
-    /// Stable for the life of a session but not across sessions — project
-    /// instructions (`AGENTS.md`) and the resolved workspace.
-    Context,
-    /// Changes whenever the user's state does: memory, profile, the skills
-    /// index, connected integrations, the clock.
-    Volatile,
-}
-
-/// Marker a dynamic prompt builder emits on its own line to say "everything
-/// after this belongs to the `Context` tier".
-///
-/// A [`PromptSource::Dynamic`](tinyagents_definition::PromptSource)
-/// builder returns one string. Splitting it on these markers is how it
-/// declares tiers without a second builder signature, and the markers never
-/// reach the model: [`split_prompt_tiers`] removes them, and a renderer that
-/// bypasses the builder sees an HTML comment the model ignores.
-pub const PROMPT_TIER_CONTEXT_MARKER: &str = "<!--prompt-tier:context-->";
-/// Marker for the start of the `Volatile` tier. See [`PROMPT_TIER_CONTEXT_MARKER`].
-pub const PROMPT_TIER_VOLATILE_MARKER: &str = "<!--prompt-tier:volatile-->";
-
-/// Split a dynamic builder's body on the tier markers.
-///
-/// Text before the first marker is `default_tier` (the tier the section
-/// declares); text after [`PROMPT_TIER_CONTEXT_MARKER`] is `Context` and text
-/// after [`PROMPT_TIER_VOLATILE_MARKER`] is `Volatile`. Markers may appear in
-/// either order and at most once each; empty slices are dropped.
-#[must_use]
-pub fn split_prompt_tiers(body: &str, default_tier: PromptTier) -> Vec<(PromptTier, String)> {
-    let mut parts: Vec<(PromptTier, String)> = Vec::new();
-    let mut tier = default_tier;
-    let mut current = String::new();
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim();
-        let next = if trimmed == PROMPT_TIER_CONTEXT_MARKER {
-            Some(PromptTier::Context)
-        } else if trimmed == PROMPT_TIER_VOLATILE_MARKER {
-            Some(PromptTier::Volatile)
-        } else {
-            None
-        };
-        match next {
-            Some(next_tier) => {
-                if !current.trim().is_empty() {
-                    parts.push((tier, std::mem::take(&mut current)));
-                } else {
-                    current.clear();
-                }
-                tier = next_tier;
-            }
-            None => current.push_str(line),
-        }
-    }
-    if !current.trim().is_empty() {
-        parts.push((tier, current));
-    }
-    parts
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Sub-agent render options (per-definition flags)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Per-definition rendering flags passed into the sub-agent prompt
 /// renderer. Mirrors the `omit_*` fields on
-/// [`crate::agent::harness::host_definition::AgentDefinition`]
+/// [`crate::agent_registry::host_definition::AgentDefinition`]
 /// but inverted into positive-sense `include_*` form.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SubagentRenderOptions {

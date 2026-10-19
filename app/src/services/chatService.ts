@@ -493,7 +493,7 @@ export interface ChatRunModeChangedEvent {
 /**
  * Lowercase variant of the Rust `ArtifactKind` enum surfaced on
  * artifact lifecycle socket events. Mirrors the slugs produced by
- * `ArtifactKind::as_str()` in `crates/openhuman-core/src/agent/artifacts/types.rs`.
+ * `ArtifactKind::as_str()` in `crates/openhuman-core/src/artifacts/types.rs`.
  */
 export type ArtifactKind = 'presentation' | 'document' | 'image' | 'video' | 'other';
 

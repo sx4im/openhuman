@@ -124,7 +124,7 @@ pub(crate) async fn append_to_origin_transcript(
 }
 
 /// The transcript store a web thread's turns were written to: the session
-/// store under [`agent_key_for`](crate::agent::session_store::agent_key_for)
+/// store under [`agent_key_for`](crate::storage::sessions::agent_key_for)
 /// of the job's tenant and the thread's agent, the key the session host
 /// resolved for the same tenant.
 pub(crate) fn origin_transcripts(
@@ -132,8 +132,8 @@ pub(crate) fn origin_transcripts(
     tenant: &crate::core::runtime::Tenant,
     agent_id: &str,
 ) -> std::sync::Arc<dyn tinyagents_session::transcript::TranscriptLocator> {
-    let key = crate::agent::session_store::agent_key_for(tenant, agent_id);
-    crate::agent::session_store::transcripts_or_files(&key, workspace_dir)
+    let key = crate::storage::sessions::agent_key_for(tenant, agent_id);
+    crate::storage::sessions::transcripts_or_files(&key, workspace_dir)
 }
 
 /// Deliver one run's output to the job's origin conversation.

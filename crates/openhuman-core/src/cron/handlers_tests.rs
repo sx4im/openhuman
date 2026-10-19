@@ -44,6 +44,7 @@ fn every_job_kind_has_a_default_handler() {
 
 #[test]
 fn a_later_registration_wins_and_dropping_restores_in_order() {
+    let _kinds = KIND_REGISTRY_TEST_LOCK.blocking_lock();
     let default = kind_handler(&JobType::Flow).unwrap();
     let first: Arc<dyn JobKindHandler> = tagged("first");
     let second: Arc<dyn JobKindHandler> = tagged("second");
@@ -66,6 +67,7 @@ fn a_later_registration_wins_and_dropping_restores_in_order() {
 
 #[tokio::test]
 async fn the_registered_handler_decides_the_outcome() {
+    let _kinds = KIND_REGISTRY_TEST_LOCK.lock().await;
     let handler = tagged("custom");
     let calls = Arc::clone(&handler.calls);
     let _guard = register_kind(JobType::Flow, handler);

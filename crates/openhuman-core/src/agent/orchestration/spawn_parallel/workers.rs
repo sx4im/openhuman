@@ -90,6 +90,7 @@ async fn run_one_parallel_task(
         worktree_action_dir,
         workspace_descriptor,
         run_queue: None,
+        message_run_queue: None,
     };
     let run_result =
         run_subagent_with_parent(live_parent, definition.clone(), prompt.clone(), options).await;
@@ -186,6 +187,7 @@ async fn run_one_parallel_task(
                 status,
                 output: Some(outcome.output),
                 error,
+                failure_cause: outcome.failure_cause.clone(),
                 awaiting_question,
                 checkpoint_path,
                 ownership: task.ownership,
@@ -214,6 +216,7 @@ async fn run_one_parallel_task(
                 status: ParallelAgentStatus::Failed,
                 output: None,
                 error: Some(err.to_string()),
+                failure_cause: None,
                 awaiting_question: None,
                 checkpoint_path: None,
                 ownership: task.ownership,

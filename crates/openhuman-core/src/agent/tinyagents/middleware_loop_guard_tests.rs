@@ -25,7 +25,7 @@ async fn sampling_tool_output_still_hits_the_byte_budget_backstop() {
     let mw = truncation_probe_mw();
     let payload = large_sample_response_json(400);
     assert!(
-        payload.len() > DEFAULT_TOOL_RESULT_BUDGET_BYTES,
+        payload.len() > tinyagents_harness::config::TurnConfig::default().tool_result_budget_bytes,
         "test payload must exceed the shared byte budget: {} bytes",
         payload.len()
     );
@@ -87,11 +87,12 @@ async fn repeated_tool_failure_pauses_only_after_the_threshold() {
         3,
         std::sync::Arc::new(std::sync::Mutex::new(None)),
     );
+    let mut context = ctx();
     // Two identical failures: below the halt threshold. The crate ladder
     // nudges (Redirect) on the second, but must NOT pause (halt) yet.
     for _ in 0..2 {
         let mut r = failing_result("flaky", "boom");
-        mw.after_tool(&mut ctx(), &(), &invocation("flaky", "flaky"), &mut r)
+        mw.after_tool(&mut context, &(), &invocation("flaky", "flaky"), &mut r)
             .await
             .unwrap();
     }
@@ -102,7 +103,7 @@ async fn repeated_tool_failure_pauses_only_after_the_threshold() {
     );
     // Third identical failure exhausts the same-strategy retries → halt.
     let mut r = failing_result("flaky", "boom");
-    mw.after_tool(&mut ctx(), &(), &invocation("flaky", "flaky"), &mut r)
+    mw.after_tool(&mut context, &(), &invocation("flaky", "flaky"), &mut r)
         .await
         .unwrap();
     assert_eq!(
@@ -117,12 +118,13 @@ async fn ordinary_web_fetch_status_ignores_timeout_words_in_body_excerpt() {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, slot.clone());
+    let mut context = ctx();
     let error = "HTTP 404 Not Found from example.com; the page could not be fetched.\nResponse excerpt: request timed out while rendering";
 
     for index in 0..2 {
         let mut result = failing_result("web_fetch", error);
         mw.after_tool(
-            &mut ctx(),
+            &mut context,
             &(),
             &invocation(format!("fetch-{index}"), "web_fetch"),
             &mut result,
@@ -138,7 +140,7 @@ async fn ordinary_web_fetch_status_ignores_timeout_words_in_body_excerpt() {
 
     let mut result = failing_result("web_fetch", error);
     mw.after_tool(
-        &mut ctx(),
+        &mut context,
         &(),
         &invocation("fetch-2", "web_fetch"),
         &mut result,
@@ -260,15 +262,21 @@ async fn halt_on_missing_connection_asks_the_user_instead_of_reporting_back() {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, slot.clone());
+    let mut context = ctx();
     // Three identical not-connected failures → halt.
     for _ in 0..3 {
         let mut r = failing_result(
             "slack_post",
             "Slack is not connected — connect it in Connections.",
         );
-        mw.after_tool(&mut ctx(), &(), &invocation("slack", "slack_post"), &mut r)
-            .await
-            .unwrap();
+        mw.after_tool(
+            &mut context,
+            &(),
+            &invocation("slack", "slack_post"),
+            &mut r,
+        )
+        .await
+        .unwrap();
     }
     let summary = slot
         .lock()
@@ -302,21 +310,32 @@ async fn repeated_tool_failure_nudges_change_of_strategy_before_the_halt() {
         3,
         std::sync::Arc::new(std::sync::Mutex::new(None)),
     );
+    let mut context = ctx();
     // First identical failure: not a loop yet — no steering.
     let mut r = failing_result("read_file", "file not found");
-    mw.after_tool(&mut ctx(), &(), &invocation("read-1", "read_file"), &mut r)
-        .await
-        .unwrap();
+    mw.after_tool(
+        &mut context,
+        &(),
+        &invocation("read-1", "read_file"),
+        &mut r,
+    )
+    .await
+    .unwrap();
     assert!(
         handle.drain().is_empty(),
         "a single failure is never a loop"
     );
     // Second identical failure: the nudge fires, still no halt.
     let mut r = failing_result("read_file", "file not found");
-    mw.after_tool(&mut ctx(), &(), &invocation("read-2", "read_file"), &mut r)
-        .await
-        .unwrap();
-    let nudges = drain_nudge_messages(&mw);
+    mw.after_tool(
+        &mut context,
+        &(),
+        &invocation("read-2", "read_file"),
+        &mut r,
+    )
+    .await
+    .unwrap();
+    let nudges = drain_nudge_messages(&mw, &mut context).await;
     assert_eq!(
         nudges.len(),
         1,
@@ -380,6 +399,7 @@ async fn repeated_validate_workflow_ok_false_trips_the_breaker() {
         3,
         std::sync::Arc::new(std::sync::Mutex::new(None)),
     );
+    let mut context = ctx();
     let mut halted = false;
     // Same invalid graph re-validated repeatedly (same content each time, no
     // `error` field): well within the varied-failure any-failure backstop
@@ -391,7 +411,7 @@ async fn repeated_validate_workflow_ok_false_trips_the_breaker() {
         );
         assert!(!r.is_error, "the tool call itself did not error");
         mw.after_tool(
-            &mut ctx(),
+            &mut context,
             &(),
             &invocation("validate", "validate_workflow"),
             &mut r,
@@ -468,9 +488,10 @@ async fn existing_error_is_some_behavior_is_unchanged_by_body_level_check() {
         3,
         std::sync::Arc::new(std::sync::Mutex::new(None)),
     );
+    let mut context = ctx();
     for _ in 0..2 {
         let mut r = failing_result("flaky", "boom");
-        mw.after_tool(&mut ctx(), &(), &invocation("flaky", "flaky"), &mut r)
+        mw.after_tool(&mut context, &(), &invocation("flaky", "flaky"), &mut r)
             .await
             .unwrap();
     }
@@ -480,7 +501,7 @@ async fn existing_error_is_some_behavior_is_unchanged_by_body_level_check() {
         "no halt before the threshold"
     );
     let mut r = failing_result("flaky", "boom");
-    mw.after_tool(&mut ctx(), &(), &invocation("flaky", "flaky"), &mut r)
+    mw.after_tool(&mut context, &(), &invocation("flaky", "flaky"), &mut r)
         .await
         .unwrap();
     assert_eq!(
@@ -497,11 +518,12 @@ async fn existing_error_is_some_behavior_is_unchanged_by_body_level_check() {
         3,
         std::sync::Arc::new(std::sync::Mutex::new(None)),
     );
+    let mut context2 = ctx();
     for _ in 0..2 {
         let mut r = body_failure_result("validate_workflow", json!({}));
         r = TaToolResult::error(result_text(&r));
         mw2.after_tool(
-            &mut ctx(),
+            &mut context2,
             &(),
             &invocation("validate", "validate_workflow"),
             &mut r,
@@ -517,7 +539,7 @@ async fn existing_error_is_some_behavior_is_unchanged_by_body_level_check() {
     let mut r = body_failure_result("validate_workflow", json!({}));
     r = TaToolResult::error(result_text(&r));
     mw2.after_tool(
-        &mut ctx(),
+        &mut context2,
         &(),
         &invocation("validate", "validate_workflow"),
         &mut r,
@@ -528,5 +550,49 @@ async fn existing_error_is_some_behavior_is_unchanged_by_body_level_check() {
         drain_pause_count(&handle2),
         1,
         "the third identical error+ok:false result halts, same as a plain error"
+    );
+}
+
+#[tokio::test]
+async fn shared_failure_middleware_keeps_distinct_run_contexts_isolated() {
+    let handle = SteeringHandle::allow_all();
+    let middleware = RepeatedToolFailureMiddleware::new(
+        handle.clone(),
+        3,
+        std::sync::Arc::new(std::sync::Mutex::new(None)),
+    );
+    let mut first_run = ctx();
+    let mut second_run = ctx();
+
+    for (context, id) in [(&mut first_run, "first"), (&mut second_run, "second")] {
+        for attempt in 0..2 {
+            let mut result = failing_result("flaky", "same failure");
+            middleware
+                .after_tool(
+                    context,
+                    &(),
+                    &invocation(format!("{id}-{attempt}"), "flaky"),
+                    &mut result,
+                )
+                .await
+                .unwrap();
+        }
+    }
+    assert_eq!(drain_pause_count(&handle), 0);
+
+    let mut result = failing_result("flaky", "same failure");
+    middleware
+        .after_tool(
+            &mut first_run,
+            &(),
+            &invocation("first-third", "flaky"),
+            &mut result,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        drain_pause_count(&handle),
+        1,
+        "only the first run's third failure reaches its own halt threshold"
     );
 }

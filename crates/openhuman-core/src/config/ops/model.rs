@@ -428,7 +428,7 @@ pub async fn apply_model_settings(
 
     complete_byok_route(config, &explicit_role_pins);
 
-    config.save().await.map_err(|e| e.to_string())?;
+    config.save().await.map_err(super::config_save_error)?;
     let snapshot = snapshot_config_json(config)?;
     Ok(Outcome::new(
         snapshot,
@@ -474,7 +474,7 @@ pub async fn apply_memory_settings(
     if let Some(dimensions) = update.embedding_dimensions {
         config.memory.embedding_dimensions = dimensions;
     }
-    config.save().await.map_err(|e| e.to_string())?;
+    config.save().await.map_err(super::config_save_error)?;
     let snapshot = snapshot_config_json(config)?;
     Ok(Outcome::new(
         snapshot,
@@ -533,7 +533,7 @@ pub async fn apply_runtime_settings(
             (None, effort) => config.runtime.reasoning_effort = effort,
         }
     }
-    config.save().await.map_err(|e| e.to_string())?;
+    config.save().await.map_err(super::config_save_error)?;
     let snapshot = snapshot_config_json(config)?;
     Ok(Outcome::new(
         snapshot,
@@ -611,7 +611,7 @@ pub async fn apply_local_ai_settings(
             }
         );
     }
-    config.save().await.map_err(|e| e.to_string())?;
+    config.save().await.map_err(super::config_save_error)?;
     let snapshot = snapshot_config_json(config)?;
     Ok(Outcome::new(
         snapshot,
@@ -650,7 +650,7 @@ pub async fn apply_composio_trigger_settings(
         );
         config.composio.triage_disabled_toolkits = toolkits;
     }
-    config.save().await.map_err(|e| e.to_string())?;
+    config.save().await.map_err(super::config_save_error)?;
     let snapshot = snapshot_config_json(config)?;
     Ok(Outcome::new(
         snapshot,
@@ -685,12 +685,12 @@ pub async fn get_composio_trigger_settings(
     ))
 }
 
-/// Resolve the hosted backend URL through the installed backend transport,
-/// which excludes local or third-party inference overrides that must never
-/// receive OpenHuman session credentials. `None` when no transport is
-/// installed (no hosted backend).
+/// The control-plane URL the host's config enricher resolved onto
+/// `config.resolved_endpoints`. The enricher excludes local or third-party
+/// inference overrides that must never receive OpenHuman session
+/// credentials. `None` when no enricher is registered (no hosted backend).
 pub(crate) fn resolve_backend_api_url(config: &Config) -> Option<String> {
-    crate::backend::base_url(&config.api_url).ok()
+    config.resolved_endpoints.control_plane_url.clone()
 }
 
 /// Resolves the effective backend API URL from configuration or defaults;

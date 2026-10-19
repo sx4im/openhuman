@@ -6,7 +6,7 @@ use super::*;
 async fn a_resumed_thread_keeps_recorded_juice_specs_and_executors_when_repl_is_off() {
     use crate::inference::tokenjuice::repl_tools_for;
 
-    crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins()
+    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins()
         .expect("builtin definitions");
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut active_config = crate::config::Config {
@@ -157,7 +157,7 @@ async fn a_resumed_thread_keeps_recorded_juice_specs_and_executors_when_repl_is_
 async fn resumed_juice_snapshot_does_not_add_live_repl_declarations() {
     use crate::inference::tokenjuice::repl_tools_for;
 
-    crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins()
+    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins()
         .expect("builtin definitions");
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut config = crate::config::Config {
@@ -249,7 +249,7 @@ async fn juice_off_turn_loads_no_module_and_passes_tool_output_through() {
     use tinyagents_harness::context::{RunConfig, RunContext};
     use tinyagents_harness::middleware::{Middleware, ToolInvocationIdentity};
 
-    crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins()
+    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins()
         .expect("builtin definitions");
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut config = crate::config::Config {

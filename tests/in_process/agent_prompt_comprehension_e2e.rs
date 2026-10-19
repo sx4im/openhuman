@@ -34,7 +34,7 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tempfile::tempdir;
 
-use openhuman_core::agent::harness::host_definition::AgentDefinitionRegistry;
+use openhuman_core::agent_registry::host_definition::AgentDefinitionRegistry;
 use openhuman_rpc::server::build_core_http_router;
 
 // ─── Env serialization ──────────────────────────────────────────────────────

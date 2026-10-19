@@ -41,7 +41,7 @@ async fn reap_unless_shared(workspace: &Path, shared: bool) -> usize {
     );
     // The status records live in the storage backend, in the calling
     // tenant's scope: sweep the ones this process's own work wrote there.
-    let store = crate::agent::session_store::status_store_for(workspace);
+    let store = crate::storage::sessions::status_store_for(workspace);
     tinyagents_harness::observability::reap_orphaned_runs(&store).await
 }
 

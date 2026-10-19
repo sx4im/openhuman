@@ -67,7 +67,7 @@ fn a_legacy_workspace_is_adopted_once_and_the_next_process_resumes_in_place() {
                     let history = locator
                         .open_stem(
                             stem,
-                            crate::agent::session_store::splice_fixture::blank_meta(),
+                            crate::storage::sessions::splice_fixture_tests::blank_meta(),
                         )
                         .expect("bind a legacy stem");
                     serde_json::to_value(history.messages().expect("read a legacy root"))

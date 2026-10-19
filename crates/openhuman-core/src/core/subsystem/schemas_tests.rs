@@ -24,6 +24,9 @@ fn schemas_and_controllers_line_up() {
 
 #[tokio::test]
 async fn handler_returns_a_subsystems_array_containing_the_memory_slot() {
+    // The handler loads the process-default config, which reads the workspace
+    // environment other tests point at temp dirs under this lock.
+    let _env = crate::config::TEST_ENV_LOCK.lock().await;
     let value = handle_status(DispatchCtx::process_default(), Map::new())
         .await
         .expect("handler succeeds");

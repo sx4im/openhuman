@@ -41,7 +41,7 @@
 //! [`ServiceSet`], the compiled-and-registered [`DomainSet`] and the API key.
 //! An agent owns everything the core reads through its ambient context:
 //! its `Config` (provider route and model, MCP servers, autonomy tier,
-//! `action_dir`), its [`AgentDefinition`](openhuman_core::agent::harness::host_definition::AgentDefinition)
+//! `action_dir`), its [`AgentDefinition`](openhuman_core::agent_registry::host_definition::AgentDefinition)
 //! (system prompt, tool scope, sandbox mode), its profile (allowlists,
 //! dedicated memory and transcripts), its skills root, its narrowed
 //! `DomainSet` and [`ToolGroups`], its approval settings, sub-agents, MCP
@@ -72,6 +72,7 @@ pub(crate) mod builder;
 mod defaults;
 mod host_agents;
 pub(crate) use host_agents::AgentMap;
+pub(crate) use host_agents::PendingCleanup;
 mod info;
 mod lifecycle;
 mod live_hooks;
@@ -178,7 +179,7 @@ pub enum RuntimeError {
 /// [`crate::Workspace::Ephemeral`], the workspace it lives in.
 ///
 /// Held as `Arc<CoreGuard>` by both `Runtime` and `AgentInner` so its `Drop`
-/// — releasing [`RUNTIME_LIVE`] and removing an ephemeral workspace — runs
+/// — releasing [`RUNTIME_LIVE`] and normally removing an ephemeral workspace — runs
 /// only once the *last* of them goes away. `Agent`s are owned rather than
 /// borrowed from `Runtime`, so a caller can drop the `Runtime` handle while
 /// an `Agent` (or a `Turn` in flight) is still alive; if `Runtime` tore this
@@ -189,9 +190,10 @@ pub enum RuntimeError {
 pub(crate) struct CoreGuard {
     pub(crate) events: Arc<crate::events::EventHub>,
     core: Option<Core>,
-    /// Held for its `Drop`: an ephemeral workspace lives as long as the last
-    /// owner of this guard, or of a deferred cleanup's
-    /// [`workspace_keepalive`](Self::workspace_keepalive).
+    /// Terminal or cancelled agent cleanup must not erase unconfirmed state.
+    preserve_ephemeral_workspace: AtomicBool,
+    /// Held for its `Drop`: an ephemeral workspace lives exactly as long as
+    /// the last owner of this guard.
     workspace: ResolvedWorkspace,
     /// The provider this runtime installed, if any. It is removed only while
     /// it still owns the process slot.
@@ -212,15 +214,12 @@ pub(crate) struct CoreGuard {
 }
 
 impl CoreGuard {
-    /// What a deferred agent cleanup holds to keep an ephemeral workspace's
-    /// files until the MCP module acknowledges its close. Never the guard
-    /// itself: a close that is never acknowledged (no shutdown hook runs in an
-    /// embedded host) would then hold the process slot forever and every later
-    /// `Runtime::builder().build()` would fail with `AlreadyRunning`.
-    pub(crate) fn workspace_keepalive(
-        &self,
-    ) -> Option<Arc<crate::harness::workspace::EphemeralRoot>> {
-        self.workspace._temp.clone()
+    /// Keep the scratch path after an unconfirmed cleanup, while still
+    /// releasing the process slot. Sticky to avoid clearing another failed
+    /// agent's preservation request when an independent retry succeeds.
+    pub(crate) fn preserve_ephemeral_workspace(&self) {
+        self.preserve_ephemeral_workspace
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 }
 
@@ -245,8 +244,8 @@ impl Drop for CoreGuard {
         // Dropping it also stops the background services it started.
         drop(self.core.take());
         if let Some(installed) = self.session_store.take() {
-            if openhuman_core::agent::session_store::clear_if(&installed) {
-                openhuman_core::agent::session_store::restore(self.previous_session_store.take());
+            if openhuman_core::storage::sessions::clear_if(&installed) {
+                openhuman_core::storage::sessions::restore(self.previous_session_store.take());
             }
         }
         drop(
@@ -255,9 +254,14 @@ impl Drop for CoreGuard {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take(),
         );
-        // An ephemeral workspace is removed here unless a deferred agent
-        // cleanup still holds it (see `EphemeralRoot`); either way the process
-        // slot below is released now.
+        if self
+            .preserve_ephemeral_workspace
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            if let Some(root) = &self.workspace._temp {
+                root.preserve();
+            }
+        }
         drop(self.workspace._temp.take());
         RUNTIME_LIVE.store(false, std::sync::atomic::Ordering::Release);
         log::debug!("[embed][runtime] released");
@@ -626,7 +630,7 @@ impl Runtime {
         storage_info: StorageInfo,
         storage_backend: Option<Arc<dyn openhuman_core::storage::StorageBackend>>,
     ) -> Self {
-        let agents: Arc<host_agents::AgentMap> = Arc::new(Mutex::new(HashMap::new()));
+        let agents: Arc<host_agents::AgentMap> = Arc::new(Mutex::new(Default::default()));
         let resolver: Arc<dyn openhuman_core::agent::host_agents::HostAgentResolver> =
             Arc::new(host_agents::RuntimeAgents(Arc::clone(&agents)));
         openhuman_core::agent::host_agents::install(Arc::clone(&resolver));
@@ -635,6 +639,7 @@ impl Runtime {
             guard: Arc::new(CoreGuard {
                 events: crate::events::EventHub::new(256),
                 core: Some(core),
+                preserve_ephemeral_workspace: AtomicBool::new(false),
                 workspace,
                 session_store,
                 previous_session_store,

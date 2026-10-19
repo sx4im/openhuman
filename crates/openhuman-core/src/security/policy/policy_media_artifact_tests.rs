@@ -1,5 +1,5 @@
 use super::*;
-use crate::agent::artifacts::{create_artifact, finalize_artifact, ArtifactKind, FileRoots};
+use crate::artifacts::{create_artifact, finalize_artifact, ArtifactKind, FileRoots};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -77,7 +77,7 @@ async fn ready_media_artifacts_are_readable_but_other_files_are_not() {
         .await
         .is_err());
 
-    crate::agent::artifacts::store::delete_artifact(&workspace, FileRoots::new(files), &image.id)
+    crate::artifacts::store::delete_artifact(&workspace, FileRoots::new(files), &image.id)
         .await
         .unwrap();
     tokio::fs::write(&image_path, b"unrelated replacement")

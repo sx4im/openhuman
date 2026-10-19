@@ -1,4 +1,5 @@
 use super::*;
+use tinyagents_orchestration::subagent::SteerError;
 
 #[tokio::test]
 async fn steer_pushes_into_the_subagent_queue() {

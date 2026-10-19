@@ -22,8 +22,9 @@ impl CoreContext {
             tool_groups: Default::default(),
             components: Default::default(),
             embedder_config: None,
+            latest_embedder_config: None,
             user_skill_roots: true,
-            backend_transport: None,
+            extensions: Default::default(),
             turn_origin: None,
             channel_thread: None,
             session_agent: None,
@@ -59,6 +60,8 @@ impl CoreContext {
         domains: crate::core::runtime::DomainSet,
         config: crate::config::Config,
     ) -> Arc<CoreContext> {
+        let latest_embedder_config = Arc::new(std::sync::Mutex::new(config.clone()));
+        crate::config::Config::bind_context_snapshot(&latest_embedder_config);
         Arc::new(CoreContext {
             host_kind: HostKind::Cli,
             workspace_binding: RwLock::new(Arc::new(RwLock::new(WorkspaceBinding {
@@ -68,8 +71,9 @@ impl CoreContext {
             tool_groups: Default::default(),
             components: Default::default(),
             embedder_config: Some(config),
+            latest_embedder_config: Some(latest_embedder_config),
             user_skill_roots: true,
-            backend_transport: None,
+            extensions: Default::default(),
             turn_origin: None,
             channel_thread: None,
             session_agent: None,

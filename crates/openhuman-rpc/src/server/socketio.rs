@@ -1273,8 +1273,11 @@ fn replay_parked_approval(socket: &SocketRef, thread_id: &str) {
 /// plan review is a live, in-memory park (no SQLite row), but it reaches the
 /// UI the same fire-and-forget way, so the same reconciliation applies.
 fn replay_parked_plan_review(socket: &SocketRef, thread_id: &str) {
-    let Some(row) =
-        crate::core_host::agent::plan_review::gate::global().parked_review_for_thread(thread_id)
+    let Ok(tenant) = crate::core_host::core::runtime::DispatchCtx::ambient().tenant() else {
+        return;
+    };
+    let Some(row) = crate::core_host::agent::plan_review::gate::global()
+        .parked_review_for_thread(&tenant, thread_id)
     else {
         return;
     };

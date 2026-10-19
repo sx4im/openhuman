@@ -23,7 +23,7 @@
 //! What remains idle is time no other bound covers: session checkout before
 //! the run, the persistence plumbing after it, or a harness that went silent
 //! with no call open. The fixed total ceiling still exists (the backstop in
-//! `agent::session_host::turn_backstop`) and still anchors the harness wind-down; it no
+//! `web_chat::turn_guards::backstop`) and still anchors the harness wind-down; it no
 //! longer doubles as the hang detector.
 //!
 //! The clock is [`tokio::time::Instant`], so time the machine spends asleep is
@@ -37,7 +37,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::agent::progress::AgentProgress;
+use crate::progress::AgentProgress;
 
 /// Default idle window for a web-chat turn, in seconds.
 pub(crate) const DEFAULT_TURN_IDLE_SECS: u64 = 900;

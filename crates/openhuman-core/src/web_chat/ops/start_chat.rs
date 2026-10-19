@@ -199,7 +199,7 @@ async fn start_chat_inner(
         })?;
         // Stage where the turn will read: the thread's working folder when
         // one is bound (`run_task` applies the same folder), else action_dir.
-        let workspace = crate::agent::attachments::thread_action_dir(
+        let workspace = crate::attachments::thread_action_dir(
             ctx,
             &config,
             &config.workspace_dir,
@@ -207,11 +207,11 @@ async fn start_chat_inner(
         )
         .await
         .map_err(|error| StartChatError::Other(format!("upload could not be saved: {error}")))?;
-        crate::agent::attachments::stage(
+        crate::attachments::stage(
             &message,
             &thread_id,
             &config,
-            &crate::agent::attachments::AttachmentAccessScope {
+            &crate::attachments::AttachmentAccessScope {
                 external_channel: false,
                 workspace: Some(workspace),
             },
@@ -319,7 +319,7 @@ async fn start_chat_inner(
     // The message here is post-attachment-processing, so a hook sees extracted
     // text and placeholders rather than a multi-megabyte data URI on stdin.
     match crate::hooks::ops::prompt_submitted(
-        tinyagents_runtime::command_hooks::context::TurnIdentity {
+        tinyagents_hooks::command::context::TurnIdentity {
             conversation_id: Some(thread_id.clone()),
             ..Default::default()
         },
@@ -509,7 +509,7 @@ async fn start_chat_inner(
                 client_id: client_id_task.clone(),
                 request_id: Some(request_id_task.clone()),
             };
-            let origin = crate::agent::turn_origin::AgentTurnOrigin::WebChat {
+            let origin = crate::security::turn_origin::AgentTurnOrigin::WebChat {
                 thread_id: thread_id_task.clone(),
                 client_id: client_id_task.clone(),
                 request_id: Some(request_id_task.clone()),

@@ -145,6 +145,18 @@ fn write() -> std::sync::RwLockWriteGuard<'static, Registry> {
     REGISTRY.write().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Serialises the tests that swap a kind handler in the process-wide registry.
+///
+/// A test registers a decorator that hands every other job to the handler it
+/// replaced, reading that handler with [`kind_handler`] before it calls
+/// [`register_kind`]. Two such tests running in parallel can both read the same
+/// handler, so the second one's decorator bypasses the first's and a job lands
+/// on the wrong handler. Hold this for the whole read, register and use, and
+/// declare it before the [`KindRegistration`] so the registration drops first.
+#[cfg(test)]
+pub(crate) static KIND_REGISTRY_TEST_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
+
 /// Keeps a kind handler registered while held; dropping it restores the handler
 /// it replaced, unless a later registration has replaced this one.
 #[must_use = "the handler is unregistered when the registration drops"]

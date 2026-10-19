@@ -5,7 +5,7 @@
 //! pinned on every CI host, not only on a Windows runner.
 
 use super::*;
-use crate::agent::host_runtime::{host_shell_flavor, ShellFlavor};
+use crate::modules::tinybox::host_runtime::{host_shell_flavor, ShellFlavor};
 #[cfg(feature = "modules")]
 use crate::tools::system::shell_support::PYTHON_UTF8_DEFAULTS;
 use std::collections::HashMap;
@@ -208,7 +208,7 @@ fn the_tool_describes_the_shell_its_runtime_spawns() {
 
 #[test]
 fn the_docker_runtime_always_runs_posix_sh() {
-    let docker = crate::agent::host_runtime::create_runtime(
+    let docker = crate::modules::tinybox::host_runtime::create_runtime(
         &crate::config::RuntimeConfig {
             kind: "docker".into(),
             ..crate::config::RuntimeConfig::default()

@@ -307,7 +307,13 @@ pub const PACKS: &[ToolPack] = &[
         ],
         // `planner` and `critic` are workflow-run workers, not chat
         // delegates; inspecting files is their loop, so they keep the family.
-        owners: &["planner", "critic", "image_agent", "video_agent", "vision_agent"],
+        owners: &[
+            "planner",
+            "critic",
+            "image_agent",
+            "video_agent",
+            "vision_agent",
+        ],
         guide: include_str!("guides/coding.md"),
     },
     ToolPack {

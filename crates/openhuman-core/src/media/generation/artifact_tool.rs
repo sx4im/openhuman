@@ -21,7 +21,7 @@
 //!
 //! A run with no context (`execute`/`execute_with_options`, e.g. CLI/tests)
 //! still creates artifacts — the production simply records no
-//! `tool_call_id` and the chat-context bridge in `agent/artifacts/store.rs`
+//! `tool_call_id` and the chat-context bridge in `artifacts/store.rs`
 //! degrades to `thread_id = None` as it already does for every other
 //! producer.
 
@@ -36,8 +36,8 @@ use tinytools::{
 };
 use tokio::io::AsyncWriteExt;
 
-use crate::agent::artifacts::production::Production;
-use crate::agent::artifacts::ArtifactKind;
+use crate::artifacts::production::Production;
+use crate::artifacts::ArtifactKind;
 use crate::security::approval::ApprovalChatContext;
 use crate::tools::host_extensions::tool_call_id;
 use tinyagents_harness::tinyinference_video::ProgressFn;
@@ -57,7 +57,7 @@ const FILE_REFERENCE_FIELDS: [&str; 8] = [
 
 /// Whether a media call references an absolute path under a trusted Files root.
 /// Only these requests need a durable-artifact refresh before tool execution.
-fn has_reusable_files_reference(args: &Value, files: &crate::agent::artifacts::FileRoots) -> bool {
+fn has_reusable_files_reference(args: &Value, files: &crate::artifacts::FileRoots) -> bool {
     for field in FILE_REFERENCE_FIELDS {
         let Some(value) = args.get(field) else {
             continue;
@@ -89,7 +89,7 @@ pub struct MediaArtifactTool<T: Tool> {
     kind: ArtifactKind,
     workspace_dir: PathBuf,
     /// Visible folder each generated file is moved into (#5505).
-    files_dir: crate::agent::artifacts::FileRoots,
+    files_dir: crate::artifacts::FileRoots,
     blobs: Option<Arc<dyn tinystoragedrivers::BlobStore>>,
     allowed_references: Option<super::tools::MediaReferenceAllowlist>,
     /// Builds the inner tool for one call around that call's poll observer.
@@ -111,7 +111,7 @@ impl<T: Tool> MediaArtifactTool<T> {
         inner: T,
         kind: ArtifactKind,
         workspace_dir: impl Into<PathBuf>,
-        files_dir: impl Into<crate::agent::artifacts::FileRoots>,
+        files_dir: impl Into<crate::artifacts::FileRoots>,
     ) -> Self {
         Self {
             inner,
@@ -358,33 +358,29 @@ impl<T: Tool> MediaArtifactTool<T> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let artifacts = match crate::agent::artifacts::store::list_artifacts(
-            &self.workspace_dir,
-            0,
-            usize::MAX,
-            None,
-        )
-        .await
-        {
-            Ok((artifacts, _)) => artifacts,
-            Err(error) => {
-                tracing::warn!(
-                    target: "media_generation",
-                    %error,
-                    "[media_generation] could not refresh reusable artifact paths"
-                );
-                return Err(
+        let artifacts =
+            match crate::artifacts::store::list_artifacts(&self.workspace_dir, 0, usize::MAX, None)
+                .await
+            {
+                Ok((artifacts, _)) => artifacts,
+                Err(error) => {
+                    tracing::warn!(
+                        target: "media_generation",
+                        %error,
+                        "[media_generation] could not refresh reusable artifact paths"
+                    );
+                    return Err(
                     "could not validate previously generated media references; retry the media call"
                         .to_string(),
                 );
-            }
-        };
+                }
+            };
 
         for meta in artifacts.iter().filter(|meta| {
             matches!(&meta.kind, ArtifactKind::Image | ArtifactKind::Video)
-                && matches!(&meta.status, crate::agent::artifacts::ArtifactStatus::Ready)
+                && matches!(&meta.status, crate::artifacts::ArtifactStatus::Ready)
         }) {
-            let Ok(path) = crate::agent::artifacts::resolve_ready_file_meta(
+            let Ok(path) = crate::artifacts::resolve_ready_file_meta(
                 &self.workspace_dir,
                 &self.files_dir,
                 meta,

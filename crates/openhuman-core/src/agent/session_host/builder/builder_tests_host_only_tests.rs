@@ -60,8 +60,8 @@ fn request(tool: &str) -> (RunContext<OpenHumanRunContext>, ToolCall) {
 
 /// The orchestrator's definition is the embed default, and the widest one:
 /// every registered tool, delegation and memory. Host-only must narrow it.
-fn orchestrator_def() -> crate::agent::harness::host_definition::AgentDefinition {
-    let mut def = crate::agent::harness::host_definition::AgentDefinitionRegistry::builtins_only()
+fn orchestrator_def() -> crate::agent_registry::host_definition::AgentDefinition {
+    let mut def = crate::agent_registry::host_definition::AgentDefinitionRegistry::builtins_only()
         .get("orchestrator")
         .cloned()
         .expect("built-in orchestrator");

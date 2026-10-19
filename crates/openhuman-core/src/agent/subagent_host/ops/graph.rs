@@ -38,7 +38,6 @@
 //   spawn's worker thread.
 mod dispatch;
 mod transcript;
-mod worker_mirror;
 
 // Re-exported under the original flat `graph::` path so external callers
 // (`ops/mod.rs`, `ops/runner.rs`, `graph_tests.rs`'s `use super::*`) are
@@ -51,9 +50,11 @@ pub(super) use dispatch::AggregatedUsage;
 
 // Only what `graph_tests.rs`'s `use super::*` still needs directly (the rest
 // of the original flat imports now live with the code that uses them, in
-// `dispatch.rs` / `transcript.rs` / `worker_mirror.rs`).
+// `dispatch.rs` / `transcript.rs` / `threads::worker_mirror`).
 #[cfg(test)]
-use crate::agent::progress::AgentProgress;
+use crate::progress::AgentProgress;
+#[cfg(test)]
+use crate::threads::worker_mirror::{mirror_worker_thread, mirror_worker_thread_from_history};
 #[cfg(test)]
 use std::collections::HashSet;
 #[cfg(test)]
@@ -62,9 +63,6 @@ use std::sync::Arc;
 use tinyagents_session::transcript::TranscriptMessage;
 #[cfg(test)]
 use tinyjuice_bus::types::AgentTokenjuiceCompression;
-#[cfg(test)]
-#[cfg(test)]
-use worker_mirror::{mirror_worker_thread, mirror_worker_thread_from_history};
 
 #[cfg(test)]
 #[path = "graph_tests.rs"]

@@ -32,7 +32,7 @@ fn dummy_definition() -> AgentDefinition {
         delegate_name: None,
         agent_tier: tinyagents_definition::AgentTier::Worker,
         source: DefinitionSource::Builtin,
-        extensions: crate::agent::harness::host_definition::AgentExt {
+        extensions: crate::agent_registry::host_definition::AgentExt {
             omit_identity: true,
             omit_memory_context: true,
             omit_safety_preamble: true,

@@ -327,7 +327,7 @@ impl Drop for SignedOutTestGuard {
 /// background-worker pool to stand down, but the per-runtime `signed_out` flag
 /// can still be `true` from an earlier test that exercised the credentials / 401
 /// paths, and honouring it would make every later caller poll forever (the
-/// `openhuman::agent::triage::evaluator::tests::*` hangs reported after #1516).
+/// `openhuman::triage::evaluator::tests::*` hangs reported after #1516).
 ///
 /// Returns `None` only if the global LLM semaphore has been closed
 /// (never happens in production). Callers can safely treat `None` as "skip the

@@ -16,12 +16,12 @@
 
 use serde_json::json;
 
-use crate::agent::triage::{
-    apply_decision, remote_trigger_origin, run_triage, TriageOutcome, TriggerEnvelope,
-};
-use crate::agent::turn_origin::with_origin;
 use crate::config::Config;
 use crate::platform::llm_gate;
+use crate::security::turn_origin::with_origin;
+use crate::triage::{
+    apply_decision, remote_trigger_origin, run_triage, TriageOutcome, TriggerEnvelope,
+};
 
 use super::types::{EnrichedTask, SourceTarget, TaskSource};
 

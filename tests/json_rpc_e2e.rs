@@ -63,7 +63,7 @@ where
             // execute the full core boot sequence. Hosted turns still need
             // the same built-in definition registry that boot initializes in
             // production, so install it before constructing the router.
-            openhuman_core::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins()
+            openhuman_core::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins()
                 .expect("initialize built-in agent definitions for JSON-RPC E2E");
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -3622,7 +3622,7 @@ async fn json_rpc_thread_turn_state_lifecycle() {
     state.lifecycle = tinyagents_session::turn_state::TurnLifecycle::Streaming;
     state.iteration = 2;
     state.streaming_text = "partial".into();
-    openhuman_core::agent::session_store::turn_states_for(&workspace_dir)
+    openhuman_core::storage::sessions::turn_states_for(&workspace_dir)
         .put(&state)
         .expect("seed snapshot");
 
@@ -3681,7 +3681,7 @@ async fn json_rpc_thread_turn_state_lifecycle() {
     );
     state2.lifecycle = tinyagents_session::turn_state::TurnLifecycle::Completed;
     state2.updated_at = "2999-01-01T00:00:00Z".into();
-    openhuman_core::agent::session_store::turn_states_for(&workspace_dir)
+    openhuman_core::storage::sessions::turn_states_for(&workspace_dir)
         .put(&state2)
         .expect("seed snapshot 2");
 
@@ -3801,9 +3801,8 @@ async fn json_rpc_run_ledger_lifecycle() {
         .await
         .expect("load config");
 
-    openhuman_core::agent::session_store::ledger_sync::upsert_agent_run(
-        &config.workspace_dir,
-        tinyagents_session::run_ledger::AgentRunUpsert {
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = tinyagents_session::run_ledger::AgentRunUpsert {
             id: "sub-run-1".to_string(),
             kind: tinyagents_session::run_ledger::AgentRunKind::WorkerThread,
             parent_run_id: Some("req-run-1".to_string()),
@@ -3822,18 +3821,19 @@ async fn json_rpc_run_ledger_lifecycle() {
             metadata: json!({ "source": "json_rpc_e2e" }),
             started_at: None,
             completed_at: None,
-        },
-    )
+        };
+        async move { ledger.upsert_agent_run(ledger_arg_0).await }
+    })
     .expect("seed run");
 
-    openhuman_core::agent::session_store::ledger_sync::append_run_event(
-        &config.workspace_dir,
-        tinyagents_session::run_ledger::RunEventAppend {
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = tinyagents_session::run_ledger::RunEventAppend {
             run_id: "sub-run-1".to_string(),
             event_type: "subagent_awaiting_user".to_string(),
             payload: json!({ "question": "Which repo should I inspect?" }),
-        },
-    )
+        };
+        async move { ledger.append_run_event(ledger_arg_0).await }
+    })
     .expect("seed event");
 
     let list = post_json_rpc(
@@ -3918,7 +3918,6 @@ async fn json_rpc_agent_work_list_groups_runs_by_bucket() {
         .await
         .expect("load config");
 
-    use openhuman_core::agent::session_store::ledger_sync::upsert_agent_run;
     use tinyagents_session::run_ledger::{AgentRunKind, AgentRunStatus, AgentRunUpsert};
     let seed = |id: &str, status: AgentRunStatus| AgentRunUpsert {
         id: id.to_string(),
@@ -3938,25 +3937,25 @@ async fn json_rpc_agent_work_list_groups_runs_by_bucket() {
         completed_at: None,
     };
     // Two awaiting-user (needs_input), one running (working), one completed.
-    upsert_agent_run(
-        &config.workspace_dir,
-        seed("work-a", AgentRunStatus::AwaitingUser),
-    )
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = seed("work-a", AgentRunStatus::AwaitingUser);
+        async move { ledger.upsert_agent_run(ledger_arg_0).await }
+    })
     .expect("seed a");
-    upsert_agent_run(
-        &config.workspace_dir,
-        seed("work-b", AgentRunStatus::AwaitingUser),
-    )
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = seed("work-b", AgentRunStatus::AwaitingUser);
+        async move { ledger.upsert_agent_run(ledger_arg_0).await }
+    })
     .expect("seed b");
-    upsert_agent_run(
-        &config.workspace_dir,
-        seed("work-c", AgentRunStatus::Running),
-    )
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = seed("work-c", AgentRunStatus::Running);
+        async move { ledger.upsert_agent_run(ledger_arg_0).await }
+    })
     .expect("seed c");
-    upsert_agent_run(
-        &config.workspace_dir,
-        seed("work-d", AgentRunStatus::Completed),
-    )
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = seed("work-d", AgentRunStatus::Completed);
+        async move { ledger.upsert_agent_run(ledger_arg_0).await }
+    })
     .expect("seed d");
 
     let list = post_json_rpc(&rpc_base, 9131, "openhuman.agent_work_list", json!({})).await;
@@ -4046,9 +4045,8 @@ async fn json_rpc_workflow_run_definitions_and_runs_roundtrip() {
     );
 
     // Seed a durable workflow run, then list + get it.
-    openhuman_core::agent::session_store::ledger_sync::upsert_workflow_run(
-        &config.workspace_dir,
-        tinyagents_session::run_ledger::WorkflowRunUpsert {
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = tinyagents_session::run_ledger::WorkflowRunUpsert {
             id: "wf-run-1".to_string(),
             definition_id: "parallel_research_cross_check".to_string(),
             parent_thread_id: Some("thread-wf-1".to_string()),
@@ -4059,8 +4057,9 @@ async fn json_rpc_workflow_run_definitions_and_runs_roundtrip() {
             summary: None,
             started_at: None,
             completed_at: None,
-        },
-    )
+        };
+        async move { ledger.upsert_workflow_run(ledger_arg_0).await }
+    })
     .expect("seed workflow run");
 
     let list = post_json_rpc(
@@ -4244,15 +4243,14 @@ async fn json_rpc_agent_team_coordination_roundtrip() {
     );
 
     // Mark A done directly via the run ledger, then B claims fine.
-    let task_a = openhuman_core::agent::session_store::ledger_sync::get_agent_team_task(
-        &config.workspace_dir,
-        &task_a_id,
-    )
+    let task_a = openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = (&task_a_id).to_string();
+        async move { ledger.get_agent_team_task(&ledger_arg_0).await }
+    })
     .expect("get task A")
     .expect("task A present");
-    openhuman_core::agent::session_store::ledger_sync::upsert_agent_team_task(
-        &config.workspace_dir,
-        tinyagents_session::run_ledger::AgentTeamTaskUpsert {
+    openhuman_core::storage::sessions::with_ledger(&config.workspace_dir, |ledger| {
+        let ledger_arg_0 = tinyagents_session::run_ledger::AgentTeamTaskUpsert {
             id: task_a.id.clone(),
             team_id: task_a.team_id.clone(),
             title: task_a.title.clone(),
@@ -4266,8 +4264,9 @@ async fn json_rpc_agent_team_coordination_roundtrip() {
             source_run_id: task_a.source_run_id.clone(),
             order_index: task_a.order_index,
             created_at: Some(task_a.created_at),
-        },
-    )
+        };
+        async move { ledger.upsert_agent_team_task(ledger_arg_0).await }
+    })
     .expect("mark A done");
 
     let claim_b_ok = post_json_rpc(
@@ -12103,6 +12102,9 @@ fn json_rpc_channel_web_chat_with_speak_reply_invokes_reply_speech() {
 
 async fn json_rpc_channel_web_chat_with_speak_reply_invokes_reply_speech_inner() {
     let _env_lock = json_rpc_e2e_env_lock_async().await;
+    // The hosted `cloud` TTS provider (and its test seam) is registered by the
+    // TinyHumans layer, not built into the core.
+    tinyhumans_boot::boot();
     let tmp = tempdir().expect("tempdir");
     let home = tmp.path();
     let openhuman_home = home.join(".openhuman");
@@ -12113,9 +12115,12 @@ async fn json_rpc_channel_web_chat_with_speak_reply_invokes_reply_speech_inner()
     let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     // Activate the reply_speech test seam so synthesize_reply records and
     // short-circuits instead of calling the hosted backend.
-    let _seam_guard = EnvVarGuard::set(openhuman_core::voice::reply_speech::TEST_SEAM_ENV, "1");
+    let _seam_guard = EnvVarGuard::set(
+        openhuman_tinyhumans::voice::reply_speech::TEST_SEAM_ENV,
+        "1",
+    );
 
-    openhuman_core::voice::reply_speech::test_seam::clear();
+    openhuman_tinyhumans::voice::reply_speech::test_seam::clear();
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -12185,7 +12190,7 @@ async fn json_rpc_channel_web_chat_with_speak_reply_invokes_reply_speech_inner()
     // because the bridge task may finish slightly after chat_done.
     let mut observed: Vec<String> = Vec::new();
     for _ in 0..50 {
-        observed = openhuman_core::voice::reply_speech::test_seam::observed();
+        observed = openhuman_tinyhumans::voice::reply_speech::test_seam::observed();
         if !observed.is_empty() {
             break;
         }

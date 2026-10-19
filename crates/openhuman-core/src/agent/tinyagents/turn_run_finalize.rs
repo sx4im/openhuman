@@ -8,14 +8,15 @@
 
 use std::sync::Arc;
 
+use tinyagents_harness::events::EventSink;
 use tinyagents_harness::middleware::AgentRun;
 use tinyagents_harness::middleware::{ContextCompressionMiddleware, PromptCacheGuardMiddleware};
 use tokio::sync::mpsc::Sender;
 
-use crate::agent::progress::AgentProgress;
 use crate::agent::tinyagents::journal::TurnJournal;
 use crate::agent::tinyagents::observability::{self, OpenhumanEventBridge, SubagentScope};
 use crate::agent::tinyagents::turn_outcome::TinyagentsTurnOutcome;
+use crate::progress::AgentProgress;
 use tinyagents_harness::turn_outcome::{HaltSummarySlot, ToolOutcomeSink};
 use tinyagents_harness::turn_run_finalize::{
     classify_turn_end, log_compaction_provenance, select_turn_text, system_segment_bytes, TurnEnd,
@@ -35,6 +36,8 @@ pub(super) async fn finalize_turn_outcome(
     subagent_scope: &Option<SubagentScope>,
     pause_at_cap: bool,
     turn_journal: Option<&TurnJournal>,
+    event_sink: &EventSink,
+    defer_terminal_to_caller: bool,
     compression_mw: Option<&Arc<ContextCompressionMiddleware>>,
     prompt_cache_guard: &PromptCacheGuardMiddleware,
     turn_completed_sink: Option<Sender<AgentProgress>>,
@@ -47,13 +50,8 @@ pub(super) async fn finalize_turn_outcome(
     resolved_route: Option<tinyinference_llm::model::ResolvedModelRoute>,
     request_base_len: usize,
     dispatch: &crate::core::runtime::DispatchCtx,
+    run_id: tinyagents_harness::ids::RunId,
 ) -> TinyagentsTurnOutcome {
-    // Durable journal: the harness returned a transcript, so stamp the terminal
-    // completed status (best-effort, non-fatal). The event stream carries no
-    // run-terminal event, so this caller-driven write is authoritative.
-    if let Some(journal) = turn_journal {
-        journal.finish_completed().await;
-    }
     // Context-compression provenance (issue #4249, 03.1 item 6): the harness's
     // `AgentEvent::Compressed` projection only carries token deltas, so drain the
     // compression middleware's `records()` here — each carries the full
@@ -163,8 +161,37 @@ pub(super) async fn finalize_turn_outcome(
     // A run the harness stopped (breaker / cap) is traced as stopped, not as a
     // clean completion. No deadline wind-down on this path: only the session
     // turn carries one, and it records the stop through its sidecar.
-    let stop =
-        crate::agent::turn_projection::classify_stop(breaker_halt.as_deref(), false, hit_cap);
+    let stop = crate::agent::session_host::stop_summary::classify_stop_with_cause(
+        breaker_halt.as_deref(),
+        run.failure_cause.clone(),
+        false,
+        hit_cap,
+    );
+    if !defer_terminal_to_caller {
+        if let Some(stop_fact) = stop.clone() {
+            event_sink.emit(tinyagents_harness::events::AgentEvent::TurnStopped {
+                // The event uses a 1-based attempt ordinal, even when the run
+                // stopped before the first model request.
+                turn: (run.model_calls as u32).max(1),
+                stop: stop_fact,
+            });
+        }
+    }
+    let deferred_terminal = if defer_terminal_to_caller {
+        Some(
+            crate::agent::tinyagents::turn_outcome::DeferredTurnTerminal {
+                run_id: run_id.clone(),
+                events: event_sink.clone(),
+                journal: turn_journal.cloned(),
+            },
+        )
+    } else {
+        event_sink.emit(tinyagents_harness::events::AgentEvent::RunFinalized { run_id });
+        if let Some(journal) = turn_journal {
+            journal.finish_completed().await;
+        }
+        None
+    };
     if let Some(stop) = stop.as_ref().filter(|_| turn_completed_sink.is_some()) {
         tracing::debug!(
             model,
@@ -278,6 +305,7 @@ pub(super) async fn finalize_turn_outcome(
     }
 
     TinyagentsTurnOutcome {
+        deferred_terminal,
         text,
         resolved_route,
         history: crate::agent::message_convert::messages_to_history(&run.messages),
@@ -292,6 +320,7 @@ pub(super) async fn finalize_turn_outcome(
         hit_cap,
         wrap_up_injected,
         breaker_halt,
+        failure_cause: run.failure_cause,
         truncated,
         tool_outcomes,
         compaction,

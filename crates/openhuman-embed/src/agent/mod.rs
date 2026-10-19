@@ -5,7 +5,7 @@
 //! [`Runtime::agent`](crate::Runtime::agent) assembled from an
 //! [`AgentSpec`]: its own `Config` (provider route and model, MCP servers,
 //! autonomy tier, `action_dir`), its
-//! [`AgentDefinition`](openhuman_core::agent::harness::host_definition::AgentDefinition)
+//! [`AgentDefinition`](openhuman_core::agent_registry::host_definition::AgentDefinition)
 //! (system prompt, tool scope, sandbox mode), its
 //! derived
 //! [`CoreContext`](openhuman_core::core::runtime::CoreContext) every turn
@@ -19,6 +19,7 @@ mod approvals;
 pub use approval_handler::{ApprovalHandler, ApprovalSubscription};
 mod attachments;
 pub(crate) mod lifecycle;
+pub(crate) mod mcp_cleanup;
 pub use approvals::{ApprovalDecision, Approvals, ApprovalsError, PendingApproval};
 pub use attachments::ToolAttachmentError;
 pub(crate) mod build;
@@ -33,7 +34,7 @@ pub use spec::{AgentSpec, MemoryBinding};
 use std::path::Path;
 use std::sync::Arc;
 
-use openhuman_core::agent::harness::host_definition::AgentDefinition;
+use openhuman_core::agent_registry::host_definition::AgentDefinition;
 use openhuman_core::config::Config;
 use openhuman_core::core::runtime::{CoreContext, CoreRuntime};
 
@@ -107,6 +108,10 @@ pub enum AgentError {
     /// A named built-in definition does not exist.
     #[error("unknown built-in agent definition {0:?}")]
     UnknownDefinition(String),
+    /// The agent is removed, but its original MCP owner still needs cleanup.
+    /// Its id and home remain reserved while detached cleanup retries.
+    #[error("agent MCP cleanup is still pending: {0}")]
+    McpCleanup(#[source] tinybus::module::ModuleCallError),
 }
 
 /// The assembled state behind an [`Agent`], shared by every clone of it and
@@ -135,29 +140,22 @@ pub(crate) struct AgentInner {
     /// The agent's own in-process tools, rebuilt per turn. See
     /// [`AgentSpec::tools`](super::AgentSpec::tools) for why it is a factory.
     pub(crate) host_tools: Option<openhuman_core::agent::HostTools>,
-    pub(crate) hooks: openhuman_core::agent::hooks::HookScope,
+    pub(crate) hooks: tinyagents_hooks::scope::HookScope<
+        openhuman_core::agent::tinyagents::host::OpenHumanRunContext,
+        tinyagents_harness::cost::TurnCost,
+    >,
     pub(crate) lifecycle: lifecycle::Lifecycle,
+    pub(crate) mcp_cleanup: std::sync::Mutex<Option<openhuman_core::mcp::host::AgentMcpCleanup>>,
     /// Built from [`ToolScopeSpec::HostOnly`]: every turn's session is built
     /// from the host tools alone.
     pub(crate) host_only: bool,
 }
 
 impl AgentInner {
-    /// Releases what the core keeps for this agent: parked approvals are
-    /// denied with `resolution`, its state slots are cleared, cached MCP
-    /// cleanup is scheduled, and its context leaves the registry. Runs once.
+    /// Denies parked approvals, clears state slots and deregisters the context.
+    /// Captures the original MCP owner's cleanup without creating a client;
+    /// explicit removal awaits it and final drop schedules it. Runs once.
     pub(crate) fn teardown(&self, resolution: &str) {
-        self.teardown_with_cleanup(resolution, true);
-    }
-
-    /// Tears down host state without scheduling a separate close task. The
-    /// removal owner uses this when it transfers cleanup to a deferred
-    /// close-and-purge callback.
-    pub(crate) fn teardown_without_mcp_cleanup(&self, resolution: &str) {
-        self.teardown_with_cleanup(resolution, false);
-    }
-
-    fn teardown_with_cleanup(&self, resolution: &str, schedule_mcp_cleanup: bool) {
         if !self.lifecycle.begin_teardown() {
             return;
         }
@@ -169,22 +167,11 @@ impl AgentInner {
         );
         self.deny_approvals(resolution);
         self.ctx.agent_state().clear();
-        if schedule_mcp_cleanup {
-            // Keep an ephemeral runtime workspace alive until an outstanding
-            // module close is acknowledged. The cleanup callback is retained
-            // by the path reservation if close needs a later retry, so it
-            // holds only the workspace, never the runtime's process slot.
-            let workspace = self._runtime_guard.workspace_keepalive();
-            let keep_workspace = Arc::new(move || {
-                let _ = &workspace;
-                true
-            });
-            openhuman_core::mcp::host::schedule_agent_close_with_cleanup(
-                &self.config.workspace_dir,
-                &self.id,
-                keep_workspace,
-            );
-        }
+        *self
+            .mcp_cleanup
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            openhuman_core::mcp::host::take_agent_cleanup(&self.config.workspace_dir, &self.id);
         openhuman_core::core::runtime::AgentContextRegistry::deregister(&self.id, &self.ctx);
         log::debug!("[embed][agent] teardown complete id={}", self.id);
     }
@@ -217,23 +204,14 @@ impl AgentInner {
 impl Drop for AgentInner {
     fn drop(&mut self) {
         self.teardown("agent_dropped");
-        // Keep the weak registry slot as the id reservation while teardown
-        // drops user-owned state. Its destructors may block or re-enter the
-        // runtime, so do not hold the registry mutex across teardown.
-        let mut agents = self.registry.lock().unwrap_or_else(|e| e.into_inner());
-        if agents
-            .get(&self.id)
-            .is_some_and(|current| std::ptr::eq(current.as_ptr(), self))
-        {
-            agents.remove(&self.id);
-        }
+        self.defer_cleanup(false);
     }
 }
 
 /// A handle to one agent on a runtime.
 ///
 /// Cheap to clone; every clone drives the same agent. The id is released for
-/// reuse once the last clone is dropped. Dropping an agent does **not** remove
+/// reuse after the last clone's MCP cleanup completes. Dropping an agent does **not** remove
 /// its directories — its transcripts and memory persist with the runtime's
 /// workspace.
 #[derive(Clone)]
@@ -305,12 +283,16 @@ impl Agent {
     }
 
     /// Add, replace, or remove an agent-local post-turn hook by name.
-    pub fn post_turn_hook(&self, name: &str, hook: Option<Arc<dyn crate::seams::PostTurnHook>>) {
+    pub fn post_turn_hook(&self, name: &str, hook: Option<Arc<dyn crate::seams::LearningSink>>) {
         self.inner.overrides.post_turn_hook(name, hook);
     }
 
     /// Add, replace, or remove an agent-local tool hook by name.
-    pub fn tool_hook(&self, name: &str, hook: Option<Arc<dyn crate::seams::ToolHook>>) {
+    pub fn tool_hook(
+        &self,
+        name: &str,
+        hook: Option<Arc<dyn crate::seams::ToolHook<crate::seams::OpenHumanRunContext>>>,
+    ) {
         self.inner.overrides.tool_hook(name, hook);
     }
 
@@ -346,9 +328,9 @@ impl Agent {
         &self.inner.layout.skills
     }
 
-    /// `<workspace>/agents/<id>/session_raw/` — where this agent's transcripts
-    /// are written. Conversations it wrote earlier into the workspace's shared
-    /// `session_raw/` stay readable and are copied here when resumed.
+    /// `<workspace>/agents/<id>/session_raw/`, the legacy JSONL import
+    /// directory associated with this agent. New transcripts use the runtime's
+    /// session-store provider and are not necessarily written to this path.
     pub fn transcripts_dir(&self) -> &Path {
         &self.inner.layout.transcripts
     }

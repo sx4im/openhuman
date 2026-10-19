@@ -387,6 +387,9 @@ async fn set_and_clear_api_key_credential() {
 // directory the key was stored beside.
 #[tokio::test]
 async fn clearing_the_session_preserves_a_coexisting_api_key() {
+    // Reaches the connector module, whose route is process-wide: hold the module
+    // lock (before TEST_ENV_LOCK, the established order) for the whole test.
+    let _module = crate::integrations::composio::module_client::module_guard().await;
     let _env_guard = crate::config::TEST_ENV_LOCK.lock().await;
     let tmp = TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join("workspace")).unwrap();
@@ -471,6 +474,9 @@ async fn clearing_the_session_preserves_a_coexisting_api_key() {
 // let an unrelated leftover key silently become the effective one.
 #[tokio::test]
 async fn clearing_the_session_preserves_the_active_key_over_a_stale_destination_key() {
+    // Reaches the connector module, whose route is process-wide: hold the module
+    // lock (before TEST_ENV_LOCK, the established order) for the whole test.
+    let _module = crate::integrations::composio::module_client::module_guard().await;
     let _env_guard = crate::config::TEST_ENV_LOCK.lock().await;
     let tmp = TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join("workspace")).unwrap();
@@ -559,6 +565,9 @@ async fn clearing_the_session_preserves_the_active_key_over_a_stale_destination_
 // location and leave it clearable/resurrectable later.
 #[tokio::test]
 async fn clearing_without_a_kind_removes_a_user_scoped_api_key_at_its_source() {
+    // Reaches the connector module, whose route is process-wide: hold the module
+    // lock (before TEST_ENV_LOCK, the established order) for the whole test.
+    let _module = crate::integrations::composio::module_client::module_guard().await;
     let _env_guard = crate::config::TEST_ENV_LOCK.lock().await;
     let tmp = TempDir::new().unwrap();
     std::fs::create_dir_all(tmp.path().join("workspace")).unwrap();

@@ -10,7 +10,7 @@ pub(super) struct AgentParts {
     policy: Option<Arc<crate::security::SecurityPolicy>>,
     approvals_disabled: bool,
     /// `None` resolves through the process registry.
-    definitions: Option<Arc<crate::agent::harness::host_definition::AgentDefinitionRegistry>>,
+    definitions: Option<Arc<crate::agent_registry::host_definition::AgentDefinitionRegistry>>,
     /// Shared by every turn context derived from the same agent context.
     state: Arc<super::super::agent_scope::AgentScopedState>,
 }
@@ -72,7 +72,7 @@ impl CoreContext {
     /// The sub-agent catalogue of the agent this context was derived for.
     pub fn definitions(
         &self,
-    ) -> Option<Arc<crate::agent::harness::host_definition::AgentDefinitionRegistry>> {
+    ) -> Option<Arc<crate::agent_registry::host_definition::AgentDefinitionRegistry>> {
         self.agent.definitions.clone()
     }
 

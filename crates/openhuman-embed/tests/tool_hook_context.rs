@@ -6,22 +6,30 @@ use common::{
     chat_completion, offline_config, route, runtime, scripted_provider, stub_backend,
     tool_call_completion,
 };
-use openhuman_embed::seams::{ToolHook, ToolHookContext};
+use openhuman_embed::seams::{OpenHumanRunContext, ToolHook, ToolHookContext};
 use openhuman_embed::{Access, AgentDefinitionSpec, AgentSpec, Runtime, ToolScopeSpec, Workspace};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
 struct Capture(Arc<Mutex<Vec<Value>>>);
 #[async_trait::async_trait]
-impl ToolHook for Capture {
+impl ToolHook<OpenHumanRunContext> for Capture {
     fn name(&self) -> &str {
         "context-probe"
     }
-    async fn before_tool(&self, ctx: &ToolHookContext) -> anyhow::Result<()> {
+    async fn before_tool(
+        &self,
+        _: &OpenHumanRunContext,
+        ctx: &ToolHookContext,
+    ) -> anyhow::Result<()> {
         self.0.lock().unwrap().push(serde_json::to_value(ctx)?);
         Ok(())
     }
-    async fn after_tool(&self, ctx: &ToolHookContext) -> anyhow::Result<()> {
+    async fn after_tool(
+        &self,
+        _: &OpenHumanRunContext,
+        ctx: &ToolHookContext,
+    ) -> anyhow::Result<()> {
         self.0.lock().unwrap().push(serde_json::to_value(ctx)?);
         Ok(())
     }

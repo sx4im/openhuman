@@ -75,7 +75,7 @@ fn profiles_keep_a_nonempty_readonly_permission_map_without_operator_grants() {
 #[test]
 fn host_only_admission_does_not_authorize_supervised_mutation_or_unknown_channels() {
     fn allow(_: &crate::seams::ToolHookContext) -> crate::permission::PermissionFuture<'_> {
-        Box::pin(async { crate::seams::ToolHookDecision::Proceed })
+        Box::pin(async { crate::seams::ToolHookDecision::default() })
     }
     let config = SaasConfig::new("/srv/openhuman");
     let options = ProfileHostOptions {

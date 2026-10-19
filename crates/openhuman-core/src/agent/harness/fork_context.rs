@@ -13,9 +13,9 @@
 //! Stashed in `Arc`s so cloning into a child costs a refcount bump
 //! rather than a full copy.
 
-use crate::agent::progress::AgentProgress;
 use crate::agent::tinyagents::TurnModelSource;
 use crate::config::AgentConfig;
+use crate::progress::AgentProgress;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -115,7 +115,7 @@ pub struct ParentExecutionContext {
     pub channel: String,
 
     /// Active Composio integrations the parent has fetched.
-    pub connected_integrations: Vec<crate::agent::prompts::ConnectedIntegration>,
+    pub connected_integrations: Vec<crate::integrations::ConnectedIntegration>,
 
     /// The parent's active tool-call format (Native / PFormat / Json).
     /// Sub-agents render their system prompts with this format so the

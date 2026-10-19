@@ -8,9 +8,10 @@
 //! finalize the run into a [`TinyagentsTurnOutcome`].
 
 use std::collections::{BTreeSet, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
+use tinyagents_harness::runtime::AgentHarness;
 use tinyagents_harness::runtime::{AgentInvocation, AgentTurnRequest, InvocationRuntime};
 use tinyagents_harness::store::{InMemoryStore as ToolResultArtifactIndexStore, StoreRegistry};
 use tinyagents_harness::turn_policy::effective_max_iterations;
@@ -27,14 +28,15 @@ use crate::agent::tinyagents::tool_registration::capability_diagnostics;
 use crate::agent::tinyagents::turn_middleware::{
     install_turn_middleware, TurnMiddlewareInputs, TurnWiring,
 };
-use crate::agent::tinyagents::turn_models::TurnModels;
 use crate::agent::tinyagents::turn_outcome::TinyagentsTurnOutcome;
 use crate::agent::tinyagents::turn_plan::{
     enforce_registry_diagnostics, turn_models_for_plan, turn_run_policy, OpenHumanTurnPlanner,
 };
 use crate::agent::tinyagents::turn_run_error::map_turn_run_error;
 use crate::agent::tinyagents::turn_run_finalize::finalize_turn_outcome;
+use crate::agent::tinyagents::NativeSubagentRunContext;
 use crate::agent::tinyagents::{journal, routes, steering_forwarder};
+use crate::inference::turn_models::TurnModels;
 use tinyagents_harness::events::EventSink;
 use tinyagents_harness::observability::turn_observer;
 use tinyagents_harness::run_queue::RunQueue;
@@ -48,9 +50,12 @@ use super::ToolPolicyEnforcement;
 /// are attached through an [`InvocationRuntime`] and [`AgentInvocation`] for
 /// each root.  That prevents concurrent sessions from replacing one another's
 /// security or workspace state on a shared harness.
-#[path = "turn_exec_hosted.rs"]
-mod turn_exec_hosted;
-use turn_exec_hosted::{root_hosted_harness, PrecomposedRootContext};
+static ROOT_HOSTED_HARNESS: LazyLock<AgentHarness<(), OpenHumanRunContext>> =
+    LazyLock::new(AgentHarness::new);
+
+fn root_hosted_harness() -> &'static AgentHarness<(), OpenHumanRunContext> {
+    &ROOT_HOSTED_HARNESS
+}
 
 #[cfg(test)]
 #[path = "turn_exec_tests.rs"]
@@ -96,6 +101,7 @@ pub(crate) struct TurnSpec<'a> {
     pub subagent_scope: Option<SubagentScope>,
     pub context_window: Option<u64>,
     pub run_queue: Option<Arc<RunQueue<crate::agent::queued_turn::QueuedTurn>>>,
+    pub message_run_queue: Option<tinyagents_harness::run_queue::RunQueueHandle>,
     pub early_exit_tools: &'a [&'a str],
     pub pause_at_cap: bool,
     pub max_output_tokens: Option<u32>,
@@ -109,7 +115,14 @@ impl TurnSpec<'_> {
     /// Plan the turn with [`OpenHumanTurnPlanner`] and drive it on the runtime
     /// `TurnDriver` (channel/CLI and sub-agent routes).
     pub(crate) async fn run(self) -> Result<TinyagentsTurnOutcome> {
-        Box::pin(drive_turn(self, None)).await
+        Box::pin(drive_turn(self, None, None)).await
+    }
+
+    pub(crate) async fn run_with_native_subagent(
+        self,
+        native: NativeSubagentRunContext,
+    ) -> Result<TinyagentsTurnOutcome> {
+        Box::pin(drive_turn(self, None, Some(native))).await
     }
 
     /// Drive a hosted root turn: the same plan, executed through
@@ -124,7 +137,7 @@ impl TurnSpec<'_> {
     ) -> Result<TinyagentsTurnOutcome> {
         self.subagent_scope = None;
         self.deterministic_cacheable = false;
-        Box::pin(drive_turn(self, Some((hosted_base, agent_id)))).await
+        Box::pin(drive_turn(self, Some((hosted_base, agent_id)), None)).await
     }
 }
 
@@ -134,6 +147,7 @@ async fn drive_turn(
         Arc<crate::agent::tinyagents::host::OpenHumanHostBase>,
         String,
     )>,
+    native_subagent: Option<NativeSubagentRunContext>,
 ) -> Result<TinyagentsTurnOutcome> {
     let TurnSpec {
         mut run_context,
@@ -147,6 +161,7 @@ async fn drive_turn(
         subagent_scope,
         context_window,
         run_queue,
+        message_run_queue,
         early_exit_tools,
         pause_at_cap,
         max_output_tokens,
@@ -168,11 +183,7 @@ async fn drive_turn(
     // Wrap concrete routes before the invocation-local hosted resolver captures them.
     let turn_models = turn_models.with_budget(run_context.model_budget.as_ref());
     let hosted_model_resolver = hosted_root.as_ref().map(|_| {
-        Arc::new(
-            crate::agent::tinyagents::turn_models::TurnModelResolver::from_turn_models(
-                &turn_models,
-            ),
-        ) as Arc<dyn tinyagents_harness::host::ModelResolver<()>>
+        Arc::new(turn_models.resolver()) as Arc<dyn tinyagents_harness::host::ModelResolver<()>>
     });
     // The host security adapter must see the exact same `Arc`-shared instances
     // the registration resolves against, so retain only the cheap Arc clone for
@@ -194,7 +205,7 @@ async fn drive_turn(
         deterministic_cacheable,
         is_local,
         run_context.tool_dialect,
-        crate::agent::tinyagents::reasoning::turn_reasoning_for(
+        crate::inference::reasoning::turn_reasoning_for(
             &run_context,
             hosted_root.as_ref().map(|(base, _)| base.config.as_ref()),
             max_output_tokens,
@@ -251,11 +262,15 @@ async fn drive_turn(
     // runtime/session already created. Retain that root config id here instead
     // of manufacturing a second literal `agent_turn` root. The driver adds the
     // `scope:root` / `scope:subagent` tag.
-    let mut config = run_context
-        .root_run_config(if is_subagent {
-            "openhuman-subagent"
-        } else {
-            "openhuman-agent-turn"
+    let mut config = native_subagent
+        .as_ref()
+        .map(|native| native.config.clone())
+        .unwrap_or_else(|| {
+            run_context.root_run_config(if is_subagent {
+                "openhuman-subagent"
+            } else {
+                "openhuman-agent-turn"
+            })
         })
         .with_max_model_calls(max_iterations)
         .with_max_tool_calls(run_context.tool_call_limit_for(max_iterations))
@@ -273,6 +288,7 @@ async fn drive_turn(
     if let Some(cap) = max_output_tokens {
         config = config.with_max_turn_output_tokens(cap);
     }
+    let journal_run_id = config.run_id.clone();
 
     tracing::info!(
         model,
@@ -297,6 +313,12 @@ async fn drive_turn(
     run_context.tool_result_artifact_index = tool_result_artifact_index.clone();
     run_context.tool_outcomes = Some(tool_outcome_sink.clone());
     let mut ctx = run_context.clone().into_tinyagents(config);
+    if native_subagent.is_some() {
+        // The prepared child context carries the parent's sink. Never attach
+        // child model/tool records to it: those records have run-local offsets
+        // and the parent run id. Emit the lifecycle link through that sink.
+        ctx.events = EventSink::with_stream_id(journal_run_id.as_str());
+    }
     let run_instance_id = ctx.instance_id();
     // Assemble the run's store registry: the tool-result artifact index (when
     // present) and — behind the default-ON session dual-write flag — the
@@ -314,15 +336,15 @@ async fn drive_turn(
     // `session_kv_store` self-gates on the dual-write flag (config default ON +
     // env kill switch), returning `None` when disabled or unresolvable.
     if let Some(session_kv) =
-        crate::agent::session_import::live::session_kv_store(&run_context.dispatch_ctx()).await
+        crate::storage::import::live::session_kv_store(&run_context.dispatch_ctx()).await
     {
         stores.get_or_insert_with(StoreRegistry::new).register(
-            crate::agent::session_import::live::TINYAGENTS_SESSION_KV_STORE,
+            crate::storage::import::live::TINYAGENTS_SESSION_KV_STORE,
             session_kv,
         );
         tracing::debug!(
             "[session-store] registered session kv store on RunContext.stores under '{}'",
-            crate::agent::session_import::live::TINYAGENTS_SESSION_KV_STORE
+            crate::storage::import::live::TINYAGENTS_SESSION_KV_STORE
         );
     }
     if let Some(stores) = stores {
@@ -349,16 +371,20 @@ async fn drive_turn(
     // with it (`with_stream_id`), so every persisted observation's `event_id` is
     // the restart-stable `{run_id}-evt-{offset}` a late-attach replay
     // reconstructs the timeline from (05.1). The same id keys the journal + status.
-    let journal_run_id = tinyagents_harness::observability::mint_run_id();
-    if let Some(scope) = &subagent_scope {
-        if let Some(slot) = &scope.journal_run_id {
-            *slot
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some(journal_run_id.as_str().to_string());
-        }
-    }
     let sink = EventSink::with_stream_id(journal_run_id.as_str());
+    if let Some(native) = &native_subagent {
+        *native
+            .child_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink.clone());
+        native
+            .parent_events
+            .emit(tinyagents_harness::events::AgentEvent::SubAgentRunStarted {
+                name: native.name.clone(),
+                depth: native.depth,
+                run_id: journal_run_id.clone(),
+            });
+    }
     // Attach the event bridge for EVERY turn — including an unobserved
     // (`on_progress = None`) background/cron turn (#4467, item 3). The bridge's
     // `record_usage` feeds the global cost tracker on each `UsageRecorded` event
@@ -409,10 +435,18 @@ async fn drive_turn(
         model,
         journal_run_id.clone(),
         journal_thread_id,
+        ctx.config.lineage.parent_run_id.clone(),
+        ctx.config.lineage.root_run_id.clone(),
     )
     .await;
+    if let Some(native) = &native_subagent {
+        *native
+            .child_journal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = turn_journal.clone();
+    }
     if !is_subagent {
-        if let Some(crate::agent::turn_origin::AgentTurnOrigin::WebChat {
+        if let Some(crate::security::turn_origin::AgentTurnOrigin::WebChat {
             request_id: Some(request_id),
             ..
         }) = run_context.origin.as_ref()
@@ -452,7 +486,9 @@ async fn drive_turn(
         // Forwards mid-flight steers from the session's run queue, drains
         // residual (delivered-but-unapplied) steers back into it when the turn
         // ends — also on cancellation (issue #4456).
-        steering: run_queue.map(steering_forwarder::queue_feed),
+        steering: message_run_queue
+            .map(steering_forwarder::message_queue_feed)
+            .or_else(|| run_queue.map(steering_forwarder::queue_feed)),
         registrar: is_subagent
             .then(|| Arc::new(steering_forwarder::SharedSteeringRegistrar) as Arc<_>),
         thread_label: Some(steer_thread_label),
@@ -507,6 +543,7 @@ async fn drive_turn(
         &mut prepared.harness,
         &steering,
         TurnMiddlewareInputs {
+            provider_id: provider_id.clone(),
             model: model.to_string(),
             tool_sets,
             allowed,
@@ -523,10 +560,7 @@ async fn drive_turn(
             hosted_security_gate,
             pause_at_cap,
             run_mode: run_context.thread_id.as_deref().map(|thread_id| {
-                crate::agent::tinyagents::run_mode::handle_for_thread(
-                    &run_context.dispatch_ctx(),
-                    thread_id,
-                )
+                crate::threads::run_mode::handle_for_thread(&run_context.dispatch_ctx(), thread_id)
             }),
             memory_turn: run_context.memory_turn.clone(),
             summarizer_model,
@@ -538,7 +572,9 @@ async fn drive_turn(
                 .parent
                 .as_ref()
                 .filter(|_| todo_registered)
-                .map(|parent| crate::agent::todos::ops::store(&parent.workspace_dir)),
+                .map(|parent| {
+                    crate::storage::sessions::stores_or_ephemeral(&parent.workspace_dir).kv
+                }),
         },
     );
     if let Some(scope) = run_context.response_shape.clone() {
@@ -591,16 +627,11 @@ async fn drive_turn(
                     tool_policy: tool_policy
                         .as_ref()
                         .map(|policy| Arc::new(policy.session.clone())),
-                    model_resolver: hosted_model_resolver,
+                    model_resolver: hosted_model_resolver
+                        .expect("hosted root retained its selected model resolver"),
                 },
                 &run_context,
             );
-        // The root session has already assembled its exact system prompt,
-        // learned context and history before this graph runs.  Keep those bytes
-        // as the hosted request rather than composing/recalling a second copy;
-        // the host still owns definition resolution, security, model routing,
-        // budgets, progress and outcome classification for this invocation.
-        host_bundle.capabilities.context = Arc::new(PrecomposedRootContext);
         host_bundle.capabilities.memory = None;
         host_bundle.capabilities.experience = None;
         // Session finalization owns the full-fidelity hook payload (including
@@ -672,13 +703,15 @@ async fn drive_turn(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
-    Ok(finalize_turn_outcome(
+    let outcome = finalize_turn_outcome(
         run,
         model,
         max_iterations,
         &subagent_scope,
         pause_at_cap,
         turn_journal.as_ref(),
+        &sink,
+        defer_turn_completed_to_caller || native_subagent.is_some(),
         compression_mw.as_ref(),
         prompt_cache_guard.as_ref(),
         turn_completed_sink,
@@ -691,6 +724,8 @@ async fn drive_turn(
         resolved_route,
         request_base_len,
         &run_context.dispatch_ctx(),
+        journal_run_id,
     )
-    .await)
+    .await;
+    Ok(outcome)
 }

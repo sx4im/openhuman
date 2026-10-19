@@ -20,7 +20,7 @@
 //! `channels_prompt.rs` documents. Only an identity change produces new
 //! bytes, which is the whole point.
 
-use crate::agent::context::channels_prompt::{
+use crate::channels::prompt::{
     build_system_prompt_with_identity, render_project_context, ProjectContextPlacement,
     PromptIdentityOverride,
 };

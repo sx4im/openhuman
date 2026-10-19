@@ -436,7 +436,7 @@ pub(super) fn register_domain_subscribers(
             // global-bus subscriber settles `agent_runs` from
             // `DomainEvent::Subagent{Completed,Failed}`, preventing rows from
             // leaking as perpetual `running` timeline entries on thread reopen.
-            crate::agent::orchestration::run_ledger_finalize::register_run_ledger_finalize_subscriber(&config);
+            crate::agent_runs::register_subagent_finalize_subscriber(&config);
         }
     } else {
         log::debug!(

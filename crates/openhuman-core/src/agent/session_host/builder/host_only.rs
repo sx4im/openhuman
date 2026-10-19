@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::agent::harness::host_definition::AgentDefinition;
+use crate::agent_registry::host_definition::AgentDefinition;
 use tinyagents_harness::context::RunContext;
 use tinyagents_harness::middleware::{PolicyDecision, ToolCallPolicy};
 use tinyinference_llm::tool::ToolCall;
@@ -99,7 +99,7 @@ impl ToolCallPolicy<OpenHumanRunContext> for HostOnlyToolPolicy {
 /// The visible set of a host-only belt before the host's names are merged in:
 /// explicitly zero tools (an empty set would mean "no filter").
 pub(super) fn empty_belt() -> HashSet<String> {
-    HashSet::from([crate::agent::harness::host_definition::NO_TOOLS_SENTINEL.to_string()])
+    HashSet::from([crate::agent_registry::host_definition::NO_TOOLS_SENTINEL.to_string()])
 }
 
 /// The session gate: on a host-only belt, [`HostOnlyToolPolicy`] over the

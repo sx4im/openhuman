@@ -26,8 +26,7 @@ fn reported_root_usage_preserves_children_and_session_context_without_double_cou
                 output_tokens: 8,
                 cached_input_tokens: 4,
                 charged_amount_usd: 0.003,
-                cost_source: openhuman_core::agent::turn_projection::failure_usage(&report)
-                    .cost_source,
+                cost_source: tinyagents_harness::cost::CostSource::Charged,
             },
         }],
         ..Default::default()
@@ -49,8 +48,7 @@ fn reported_root_usage_preserves_children_and_session_context_without_double_cou
         assert_eq!(usage.subagents.len(), 1);
     }
     captured.as_mut().unwrap().subagents[0].usage.cost_source =
-        openhuman_core::agent::turn_projection::failure_usage(&ResponseUsage::default())
-            .cost_source;
+        tinyagents_harness::cost::CostSource::Unknown;
     overlay_response_usage(&mut captured, &report);
     assert_eq!(captured.as_ref().unwrap().cost_usd, None);
     assert_eq!(captured.as_ref().unwrap().input_tokens, 30);

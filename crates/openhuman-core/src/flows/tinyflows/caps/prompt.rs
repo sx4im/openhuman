@@ -65,7 +65,7 @@ pub(crate) fn model_response_to_completion_value(
             .map(crate::agent::tinyagents::ta_call_to_oh_call)
             .collect::<Vec<_>>(),
         "usage": usage_to_json(
-            &crate::agent::tinyagents::model::usage_info_from_response(response)
+            &crate::inference::provider::model::usage_info_from_response(response)
         ),
         "reasoning_content": tinyagents_runtime::transcript::reasoning_from_content(
             &response.message.content

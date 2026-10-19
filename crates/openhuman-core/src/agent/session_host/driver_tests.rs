@@ -228,17 +228,20 @@ fn final_call_tokens_prefer_the_newest_call_that_reached_the_provider() {
     };
     let loop_last = Some((90_000, 400));
 
-    assert_eq!(final_call_tokens(loop_last, None, None), (90_000, 400));
     assert_eq!(
-        final_call_tokens(loop_last, Some(&call(95_000, 300)), None),
+        grounded_close::final_call_tokens(loop_last, None, None),
+        (90_000, 400)
+    );
+    assert_eq!(
+        grounded_close::final_call_tokens(loop_last, Some(&call(95_000, 300)), None),
         (95_000, 300)
     );
     assert_eq!(
-        final_call_tokens(loop_last, Some(&call(0, 300)), None),
+        grounded_close::final_call_tokens(loop_last, Some(&call(0, 300)), None),
         (0, 300)
     );
     assert_eq!(
-        final_call_tokens(
+        grounded_close::final_call_tokens(
             loop_last,
             Some(&call(95_000, 300)),
             Some(&call(96_000, 200))
@@ -247,14 +250,14 @@ fn final_call_tokens_prefer_the_newest_call_that_reached_the_provider() {
     );
     // A close that recorded no provider usage did not make the final call.
     assert_eq!(
-        final_call_tokens(
+        grounded_close::final_call_tokens(
             loop_last,
             Some(&grounded_close::RepairUsage::default()),
             None
         ),
         (90_000, 400)
     );
-    assert_eq!(final_call_tokens(None, None, None), (0, 0));
+    assert_eq!(grounded_close::final_call_tokens(None, None, None), (0, 0));
 }
 
 #[test]

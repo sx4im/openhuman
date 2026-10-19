@@ -1,8 +1,9 @@
-use super::{ArchetypeDelegationTool, DelegationTarget, SpawnSubagentTool, SpawnWorkerThreadTool};
-use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+use super::{ArchetypeDelegationTool, DelegationTarget, SpawnSubagentTool};
 use crate::agent::harness::ParentExecutionContext;
-use crate::agent::prompts::ConnectedIntegration;
+use crate::agent_registry::host_definition::AgentDefinitionRegistry;
+use crate::integrations::ConnectedIntegration;
 use crate::threads::store as conversations;
+use crate::tools::implementations::threads::SpawnWorkerThreadTool;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::json;
@@ -20,7 +21,6 @@ const WORKER_THREAD_CANARY: &str = "tool-e2e-worker-thread-canary";
 
 #[tokio::test]
 async fn spawn_subagent_tool_runs_child_agent_e2e() {
-    let _ = AgentDefinitionRegistry::init_global_builtins();
     let workspace = tempfile::TempDir::new().expect("workspace");
     let provider = Arc::new(ScriptedModel::new(vec![(
         SPAWN_SUBAGENT_CANARY,
@@ -51,13 +51,24 @@ async fn spawn_subagent_tool_runs_child_agent_e2e() {
     assert_eq!(result.output(), "spawn-subagent-child-answer");
     assert!(provider.saw(SPAWN_SUBAGENT_CANARY));
     assert!(provider.saw("parent supplied context"));
+    let jobs = crate::core::runtime::slot_for::<
+        tinyagents_orchestration::subagent::SubAgentJobRegistry,
+    >(&live.data.dispatch_ctx());
+    assert!(
+        jobs.list().iter().any(|job| {
+            job.agent == "task_manager_agent"
+                && job.output.as_deref() == Some("spawn-subagent-child-answer")
+                && job.status == tinyagents_orchestration::subagent::SubAgentJobStatus::Completed
+        }),
+        "spawn_subagent must register its real target and terminal state in shared Jobs"
+    );
 }
 
 /// A child the harness stops early (failure breaker / iteration cap) is not a
 /// finished delegation: the parent's tool result must be a failure, so its own
 /// failure policy and its trace see it, and the `SubagentCompleted` progress
 /// event must say how the child was stopped.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn spawn_subagent_reports_a_stopped_child_as_a_failed_tool_result() {
     let _ = AgentDefinitionRegistry::init_global_builtins();
     let workspace = tempfile::TempDir::new().expect("workspace");
@@ -65,9 +76,11 @@ async fn spawn_subagent_reports_a_stopped_child_as_a_failed_tool_result() {
     let parent = parent_context(workspace.path(), Arc::new(LoopingToolModel), vec![]);
     // The live parent run a real turn hands the tool, with the turn's
     // progress channel on the child's run context.
-    let live = super::live_parent_run_context("stopped-child-test", parent);
-    let mut run_context = live.data.child();
-    run_context.progress = Some(progress_tx);
+    let mut live = super::live_parent_run_context("stopped-child-test", parent);
+    // The shared driver derives its child context from the live parent, so
+    // install the observer there as a real harness turn would.
+    live.data.progress = Some(progress_tx.clone());
+    let run_context = live.data.child();
     // Boxed: the inline spawn future is too large for a test thread's
     // stack (the trait `execute` path boxes it the same way).
     let tool = SpawnSubagentTool::new();
@@ -98,7 +111,7 @@ async fn spawn_subagent_reports_a_stopped_child_as_a_failed_tool_result() {
 
     let mut stop = None;
     while let Ok(event) = progress_rx.try_recv() {
-        if let crate::agent::progress::AgentProgress::SubagentCompleted { stop: s, .. } = event {
+        if let crate::progress::AgentProgress::SubagentCompleted { stop: s, .. } = event {
             stop = Some(s);
         }
     }
@@ -158,6 +171,19 @@ async fn archetype_delegation_tool_runs_child_agent_e2e() {
         "an async delegation that fell back to blocking must disclose that no worker exists: {output}"
     );
     assert!(provider.saw(ARCHETYPE_DELEGATION_CANARY));
+
+    let jobs = crate::core::runtime::slot_for::<
+        tinyagents_orchestration::subagent::SubAgentJobRegistry,
+    >(&live.data.dispatch_ctx());
+    let completed = jobs.list();
+    assert!(
+        completed.iter().any(|job| {
+            job.agent == "task_manager_agent"
+                && job.output.as_deref() == Some("archetype-delegation-child-answer")
+                && job.status == tinyagents_orchestration::subagent::SubAgentJobStatus::Completed
+        }),
+        "blocking delegation must register its real target and terminal state in shared Jobs"
+    );
 }
 
 #[tokio::test]
@@ -306,6 +332,7 @@ async fn continue_subagent_resumes_idle_durable_session_e2e() {
             task_title: "Durable resume task".into(),
             worker_thread_id: None,
             task_id: "sub-earlier-task".into(),
+            lifecycle_key: None,
         },
         None,
     )
@@ -527,6 +554,55 @@ struct ScriptedModel {
     seen: Mutex<Vec<String>>,
 }
 
+struct PauseThenAnswerModel {
+    calls: std::sync::atomic::AtomicUsize,
+    seen: Mutex<Vec<String>>,
+}
+
+impl PauseThenAnswerModel {
+    fn saw(&self, needle: &str) -> bool {
+        self.seen
+            .lock()
+            .iter()
+            .any(|payload| payload.contains(needle))
+    }
+}
+
+#[async_trait]
+impl ChatModel<()> for PauseThenAnswerModel {
+    fn profile(&self) -> Option<&ModelProfile> {
+        static PROFILE: std::sync::OnceLock<ModelProfile> = std::sync::OnceLock::new();
+        Some(PROFILE.get_or_init(|| {
+            let mut profile = ModelProfile::default();
+            profile.tool_calling = true;
+            profile.parallel_tool_calls = true;
+            profile
+        }))
+    }
+
+    async fn invoke(
+        &self,
+        _state: &(),
+        request: ModelRequest,
+    ) -> tinyinference_llm::Result<ModelResponse> {
+        use std::sync::atomic::Ordering;
+        let flattened = flatten_messages(&request.messages);
+        self.seen.lock().push(flattened);
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            let mut response = ModelResponse::assistant("");
+            response.message.tool_calls = vec![tinyinference_llm::tool::ToolCall::new(
+                "pause-call",
+                "ask_user_clarification",
+                json!({"question": "which file should I inspect?"}),
+            )];
+            response.finish_reason = Some("tool_calls".into());
+            Ok(response)
+        } else {
+            Ok(ModelResponse::assistant("paused-child-resumed-answer"))
+        }
+    }
+}
+
 impl ScriptedModel {
     fn new(responses: Vec<(&'static str, &'static str)>) -> Self {
         Self {
@@ -611,3 +687,12 @@ impl ChatModel<()> for LoopingToolModel {
         Ok(response)
     }
 }
+
+#[path = "tools_e2e_driver_tests.rs"]
+mod driver_tests;
+
+#[path = "tools_e2e_continuation_tests.rs"]
+mod continuation_tests;
+
+#[path = "tools_e2e_workspace_owner_tests.rs"]
+mod workspace_owner_tests;

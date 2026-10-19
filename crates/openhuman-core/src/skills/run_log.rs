@@ -17,7 +17,7 @@ use serde_json::Value;
 use tokio::sync::mpsc::Receiver;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::progress::AgentProgress;
+use crate::progress::AgentProgress;
 
 // Layout, writers-by-timestamp and readers live in `tinyskills::run_log`;
 // the host keeps event formatting, the cancel registry and the drain.

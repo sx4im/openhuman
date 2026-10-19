@@ -2,7 +2,7 @@
 //! (issue #4249).
 //!
 //! Historically these ran in the in-house engine's tool/prompt plumbing
-//! (`agent_tool_exec`, `ContextManager`). The tinyagents turn path bypassed
+//! (`agent_tool_exec`, the session context adapter). The tinyagents turn path bypassed
 //! them, so they were effectively dead on the live loop. Re-expressing them as
 //! [`Middleware`](tinyagents_harness::middleware::Middleware) hooks restores the
 //! behaviour and makes the graph the single place cross-cutting context
@@ -26,7 +26,6 @@
 
 pub(crate) mod approval;
 pub(crate) mod credential_scrub;
-pub(crate) mod embedder_hooks;
 pub(crate) mod failure_policy;
 pub(crate) mod fetched_site;
 pub(crate) mod memory_pack;

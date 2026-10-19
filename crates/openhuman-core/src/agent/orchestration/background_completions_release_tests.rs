@@ -37,7 +37,7 @@ async fn release_all_closes_every_router_and_the_log_stays_replayable() {
 
     assert!(release_all().await >= 1);
     assert!(
-        !state().routers.contains_key(w),
+        !state().stores.contains_key(&super::router_scope(w)),
         "the router (and its log handle) is dropped"
     );
     assert!(
@@ -78,7 +78,7 @@ async fn release_all_gives_up_waiting_after_the_drain_window() {
         released >= 1,
         "stragglers are dropped once the window passes"
     );
-    assert!(!state().routers.contains_key(w));
+    assert!(!state().stores.contains_key(&super::router_scope(w)));
 }
 
 #[tokio::test]

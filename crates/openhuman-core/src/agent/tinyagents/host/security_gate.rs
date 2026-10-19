@@ -231,7 +231,7 @@ impl OpenHumanSecurityGate {
 
     /// The origin of the turn this gate authorizes for: the run's own context
     /// when it carries one, else the calling task's turn scope.
-    fn turn_origin(&self) -> Option<crate::agent::turn_origin::AgentTurnOrigin> {
+    fn turn_origin(&self) -> Option<crate::security::turn_origin::AgentTurnOrigin> {
         DispatchCtx::from_weak(self.dispatch.as_ref()).turn_origin_or_scoped()
     }
 
@@ -536,8 +536,8 @@ impl OpenHumanSecurityGate {
         if matches!(
             self.turn_origin(),
             Some(
-                crate::agent::turn_origin::AgentTurnOrigin::TrustedAutomation {
-                    source: crate::agent::turn_origin::TrustedAutomationSource::Cron,
+                crate::security::turn_origin::AgentTurnOrigin::TrustedAutomation {
+                    source: crate::security::turn_origin::TrustedAutomationSource::Cron,
                     ..
                 }
             )

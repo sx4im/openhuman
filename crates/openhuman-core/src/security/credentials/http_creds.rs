@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::security::secret_storage::SecretStore;
 
-const STORE_FILENAME: &str = "http-credentials.json";
+pub(crate) const STORE_FILENAME: &str = "http-credentials.json";
 /// The HTTP credentials file a store over `state_dir` keeps.
 pub(crate) fn store_file(state_dir: &Path) -> PathBuf {
     state_dir.join(STORE_FILENAME)
@@ -190,6 +190,11 @@ struct PersistedHttpCredential {
     secret: String,
     created_at: String,
     updated_at: String,
+}
+
+/// Whether `bytes` parse as the persisted HTTP-credentials document.
+pub(crate) fn is_persisted_document(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<PersistedHttpCredentials>(bytes).is_ok()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -439,7 +444,7 @@ impl HttpCredentialsStore {
 /// The secret the store lives in on a storage backend
 /// ([`crate::storage::secrets`]): the same JSON as the file, encrypted as one
 /// secret in the acting agent's scope.
-const STORAGE_SECRET_NAME: &str = "file:http-credentials.json";
+pub(crate) const STORAGE_SECRET_NAME: &str = "file:http-credentials.json";
 
 fn parse_scheme(raw: &str) -> Option<HttpCredentialScheme> {
     match raw.trim().to_ascii_lowercase().as_str() {

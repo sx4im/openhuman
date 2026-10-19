@@ -1,7 +1,7 @@
 //! Unit tests for [`super::TurnStateMirror`].
 
 use super::*;
-use crate::agent::progress::AgentProgress;
+use crate::progress::AgentProgress;
 use tempfile::tempdir;
 
 fn fresh(thread_id: &str) -> (tempfile::TempDir, TurnStateMirror) {

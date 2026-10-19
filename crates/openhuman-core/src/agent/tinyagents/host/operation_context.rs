@@ -1,7 +1,7 @@
 //! The immutable authority view the run exposes to shared tools through the
 //! harness's typed state-view seam, and the readers tools use on it.
 
-use crate::agent::turn_origin::AgentTurnOrigin;
+use crate::security::turn_origin::AgentTurnOrigin;
 use tinyagents_definition::SandboxMode;
 
 use std::{sync::Arc, time::Duration};
@@ -188,7 +188,7 @@ pub(crate) fn sandbox_mode_for_tool(
 /// Reads the run's approval context from the explicit tool carrier. Direct tool
 /// dispatch (CLI, JSON-RPC, tests) has none, so a tool called that way sees the
 /// non-interactive default.
-pub(crate) fn approval_for_tool(
+pub fn approval_for_tool(
     context: Option<&dyn tinytools::ToolRunContext>,
 ) -> crate::security::approval::ApprovalTurnContext {
     context

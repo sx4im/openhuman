@@ -18,9 +18,13 @@
 use std::sync::Arc;
 
 use tinyagents_harness::ids::TaskId;
-use tinyagents_harness::run_queue::{ForwardEvent, ForwardEventSink, QueuedMessage, RunQueue};
+use tinyagents_harness::run_queue::{
+    ForwardEvent, ForwardEventSink, QueuedMessage, RunQueue, RunQueueHandle,
+};
 use tinyagents_harness::steering::SteeringHandle;
-use tinyagents_runtime::turn_driver::{RunQueueFeed, SteeringFeed, SteeringRegistrar};
+use tinyagents_runtime::turn_driver::{
+    MessageRunQueueFeed, RunQueueFeed, SteeringFeed, SteeringRegistrar,
+};
 
 use crate::agent::queued_turn::{text_preview, QueuedTurn};
 use crate::core::bus::BUS;
@@ -86,6 +90,12 @@ pub(super) fn queue_feed(queue: Arc<RunQueue<QueuedTurn>>) -> Arc<dyn SteeringFe
     Arc::new(RunQueueFeed::new(queue, event_bus_sink()))
 }
 
+/// Feed the driver's native message queue while preserving host event
+/// projection for delivered and requeued messages.
+pub(super) fn message_queue_feed(queue: RunQueueHandle) -> Arc<dyn SteeringFeed> {
+    Arc::new(MessageRunQueueFeed::new(queue, event_bus_sink()))
+}
+
 /// Publishes a delegated child's steering handle in the process-wide registry.
 pub(super) struct SharedSteeringRegistrar;
 
@@ -109,15 +119,15 @@ impl SteeringRegistrar for SharedSteeringRegistrar {
 /// interactive/channel parent turn reads the turn origin.
 pub(super) fn thread_label(
     subagent_scope: Option<&crate::agent::tinyagents::observability::SubagentScope>,
-    origin: Option<&crate::agent::turn_origin::AgentTurnOrigin>,
+    origin: Option<&crate::security::turn_origin::AgentTurnOrigin>,
 ) -> String {
     subagent_scope
         .map(|s| s.task_id.clone())
         .or_else(|| match origin {
-            Some(crate::agent::turn_origin::AgentTurnOrigin::WebChat { thread_id, .. }) => {
+            Some(crate::security::turn_origin::AgentTurnOrigin::WebChat { thread_id, .. }) => {
                 Some(thread_id.clone())
             }
-            Some(crate::agent::turn_origin::AgentTurnOrigin::ExternalChannel {
+            Some(crate::security::turn_origin::AgentTurnOrigin::ExternalChannel {
                 reply_target,
                 ..
             }) => Some(reply_target.clone()),

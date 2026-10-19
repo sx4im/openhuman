@@ -1,10 +1,11 @@
 use super::*;
 use crate::agent::harness::fork_context::ParentExecutionContext;
-use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+use crate::agent_registry::host_definition::AgentDefinitionRegistry;
 use crate::config::AgentConfig;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use tinyagents_harness::run_queue::RunQueue;
 use tinytools::{ToolCallOptions, ToolRunContext};
 use tinytools_agent::dialect::ToolCallFormat;
 
@@ -65,6 +66,7 @@ async fn late_registration_refusal_aborts_the_worker_and_settles_its_durable_ses
                 task_title: "late refusal".into(),
                 worker_thread_id: None,
                 task_id: "late-refusal-task".into(),
+                lifecycle_key: None,
             },
             None,
         )
@@ -528,7 +530,7 @@ async fn errors_clearly_when_no_parent_thread_for_delivery() {
     // back here. Verified callable under the product feature profile:
     // `delegate_<agent_id>` tools are generated in
     // `tools/orchestrator_tools.rs:116`, and they accept `blocking`
-    // (`archetype_delegation.rs:115` declares it, `:245` reads it) — so the
+    // (`archetype_delegation_host.rs:115` declares it, `:245` reads it) — so the
     // guidance names a real tool family with a real argument, not a route the
     // model cannot take.
     assert!(out.contains("blocking: true"), "{out}");

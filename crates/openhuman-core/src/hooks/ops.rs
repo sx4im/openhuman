@@ -11,10 +11,10 @@ use crate::core::runtime::DispatchCtx;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tinyagents_runtime::command_hooks::context::{
+use tinyagents_hooks::command::context::{
     build_input, set_host_context, HostContext, TurnIdentity,
 };
-use tinyagents_runtime::command_hooks::types::{
+use tinyagents_hooks::command::types::{
     CompactPayload, HookEvent, HookPayload, PromptPayload, SessionPayload, SubagentPayload,
     TextPayload,
 };
@@ -32,9 +32,9 @@ pub async fn init(ctx: &DispatchCtx, config: &crate::config::schema::Config) {
     });
 
     if !settings.enabled {
-        super::bridge::ConfiguredHookBridge::uninstall();
+        crate::agent::hooks::replace_embedder_tool_hook("configured_hooks", None);
         super::host::engine()
-            .install(tinyagents_runtime::command_hooks::HookConfig::default())
+            .install(tinyagents_hooks::command::HookConfig::default())
             .await;
         log::info!("[hooks] disabled by configuration");
         return;
@@ -52,10 +52,13 @@ pub async fn init(ctx: &DispatchCtx, config: &crate::config::schema::Config) {
     if loaded.is_empty() {
         // Nothing configured: keep the bridge out of the harness entirely so an
         // unconfigured host pays not even a task-local lookup per tool call.
-        super::bridge::ConfiguredHookBridge::uninstall();
+        crate::agent::hooks::replace_embedder_tool_hook("configured_hooks", None);
         return;
     }
-    super::bridge::ConfiguredHookBridge::install();
+    let hook: std::sync::Arc<
+        dyn tinyagents_hooks::tool::ToolHook<crate::agent::tinyagents::host::OpenHumanRunContext>,
+    > = super::host::engine().clone();
+    crate::agent::hooks::replace_embedder_tool_hook("configured_hooks", Some(hook));
 }
 
 fn workspace_roots(config: &crate::config::schema::Config) -> Vec<PathBuf> {
@@ -103,7 +106,7 @@ pub async fn session_ended(identity: TurnIdentity, reason: &str, duration_ms: Op
     }
     if let Some(session_id) = session_id {
         engine.forget_session(&session_id).await;
-        tinyagents_runtime::command_hooks::followup::forget(&session_id).await;
+        tinyagents_hooks::command::followup::forget(&session_id).await;
     }
 }
 

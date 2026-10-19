@@ -1,6 +1,6 @@
 //! The shell that runs `command` hooks, as selected by TinyBox.
 //!
-//! The hook engine (`tinyagents_runtime::command_hooks`) spawns the hook process
+//! The hook engine (`tinyagents_hooks::command`) spawns the hook process
 //! itself and asks its host for a synchronous `fn(&str) -> Command`. The host
 //! does not choose the shell: it asks TinyBox's `SelectShell` once, at the async
 //! boundary where hooks are (re)loaded, and the factory only fills the hook's

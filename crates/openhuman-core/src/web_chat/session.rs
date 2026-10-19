@@ -547,7 +547,7 @@ async fn bind_transcript_store(
             return;
         }
     };
-    let rule_key = crate::agent::session_store::agent_key_for(&tenant, target_agent_id);
+    let rule_key = crate::storage::sessions::agent_key_for(&tenant, target_agent_id);
     let key = crate::threads::store::bind_transcript_key(
         ctx,
         &config.workspace_dir,
@@ -559,7 +559,7 @@ async fn bind_transcript_store(
         log::info!(
             "[web-channel] thread={thread_id} keeps its recorded transcript store (chat agent changed since it was written)"
         );
-        agent.set_session_history_locator(crate::agent::session_store::transcripts_or_files(
+        agent.set_session_history_locator(crate::storage::sessions::transcripts_or_files(
             &key,
             &config.workspace_dir,
         ));

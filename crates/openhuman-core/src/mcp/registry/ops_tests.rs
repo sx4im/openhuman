@@ -205,7 +205,7 @@ fn refusals_name_only_tools_on_every_listing_belt() {
         "the unknown-id refusal names the status tool"
     );
 
-    let belts: Vec<_> = crate::agent::registry::agents::load_builtins()
+    let belts: Vec<_> = crate::agent_registry::agents::load_builtins()
         .expect("built-ins load")
         .into_iter()
         .filter_map(|def| {

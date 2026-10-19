@@ -203,7 +203,7 @@ async fn a_blank_thread_id_is_refused() {
 /// recorded with the thread, not the one the current config would derive.
 #[tokio::test]
 async fn changing_the_chat_agent_does_not_strand_an_existing_threads_turns() {
-    let _ = crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+    let _ = crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
     let dir = tempfile::tempdir().unwrap();
     let before = ctx_with_chat_agent(dir.path(), None, None);
     let after = ctx_with_chat_agent(dir.path(), None, Some("planner"));

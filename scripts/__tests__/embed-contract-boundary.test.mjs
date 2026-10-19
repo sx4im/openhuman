@@ -67,7 +67,7 @@ test('native injection allowances reject expanded or core compatibility exports'
     { 'crates/openhuman-core/src/agent/host_overrides.rs': 'pub use tinyagents_harness::cancel::CancellationToken;\n' },
     { 'crates/openhuman-embed/src/lib.rs': 'pub use tinytools::{PermissionLevel, Tool, ToolExposure, ToolResult, ToolRegistry};\n' },
     { 'crates/openhuman-core/src/tools/mod.rs': 'pub use tinytools::{PermissionLevel, Tool, ToolExposure, ToolResult};\n' },
-    { 'crates/openhuman-core/src/agent/session_store/mod.rs': 'pub use tinyagents_session::port::{AgentStores, SessionStoreProvider};\n' },
+    { 'crates/openhuman-core/src/storage/sessions/mod.rs': 'pub use tinyagents_session::port::{AgentStores, SessionStoreProvider};\n' },
     { 'crates/openhuman-embed/src/budget.rs': 'pub use tinyinference_llm::model::budget::{Budget, BudgetExceeded, BudgetSnapshot, CallBudget, Spend, SpendLimits, BudgetedModel};\n' },
   ]) {
     const result = check(files);
@@ -88,7 +88,7 @@ test("Embed preserves native persisted codecs without admitting core facades", (
   const allowed = check({ "crates/openhuman-embed/src/lib.rs": codecs });
   assert.equal(allowed.status, 0, allowed.output);
   for (const files of [
-    { "crates/openhuman-core/src/agent/session_store/mod.rs": codecs },
+    { "crates/openhuman-core/src/storage/sessions/mod.rs": codecs },
     { "crates/openhuman-embed/src/lib.rs": codecs.replace("AgentEvent, HarnessRunStatus", "AgentEvent, HarnessRunStatus, UnreviewedType") },
   ]) {
     const rejected = check(files);

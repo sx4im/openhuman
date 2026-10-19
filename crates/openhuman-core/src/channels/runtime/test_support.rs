@@ -6,7 +6,6 @@ use super::dispatch::{
 };
 pub use super::startup::test_support::resolve_yuanbao_app_secret_for_test;
 use crate::agent::bus::{AgentTurnRequest, AgentTurnResponse, AGENT_RUN_TURN_METHOD};
-use crate::agent::progress::AgentProgress;
 use crate::channels::context::{ChannelRuntimeContext, CHANNEL_MESSAGE_TIMEOUT_SECS};
 use crate::channels::Channel;
 use crate::channels::ChannelSystemPrompt;
@@ -14,6 +13,7 @@ use crate::config::{MultimodalConfig, MultimodalFileConfig, ReliabilityConfig};
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
 use crate::inference::provider::ProviderRuntimeOptions;
+use crate::progress::AgentProgress;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -287,7 +287,7 @@ pub async fn run_dispatch_harness(options: DispatchHarnessOptions) -> DispatchHa
         .get()
         .expect("bus initialised")
         .receiver();
-    let _ = crate::agent::harness::host_definition::AgentDefinitionRegistry::init_global_builtins();
+    let _ = crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global_builtins();
 
     let handler_roles = Arc::new(Mutex::new(Vec::new()));
     let handler_text = Arc::new(Mutex::new(String::new()));

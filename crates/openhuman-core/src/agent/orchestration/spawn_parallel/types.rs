@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tinytools::WorkspaceDescriptor;
 
-use crate::agent::harness::host_definition::AgentDefinition;
+use crate::agent_registry::host_definition::AgentDefinition;
 
 /// One worker admitted by the `spawn_parallel_agents` tool.
 ///
@@ -74,6 +74,9 @@ pub(crate) struct ParallelAgentResult {
     pub(crate) output: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
+    /// Typed terminal cause retained for incomplete-result projections.
+    #[serde(skip)]
+    pub(crate) failure_cause: Option<tinyagents_harness::no_progress::ClassifiedStopCause>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) awaiting_question: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -115,12 +115,13 @@ fn attached_tools_survive_clones_and_session_resume() {
                     ))]))
                 )
                 .is_err());
-            agent
+            let first = agent
                 .turn("first user")
                 .session("continuing")
                 .send()
                 .await
                 .unwrap();
+            assert_eq!(first.session_id, "continuing");
             clone
                 .turn("second user")
                 .session("continuing")

@@ -82,9 +82,9 @@ fn endpoint_references() -> &'static Mutex<HashMap<String, EndpointReference>> {
 /// callback arrives over the bus with no run context of its own.
 fn x402_request_owner_matches(
     request: &AuthorizeX402PaymentRequest,
-    origin: Option<&crate::agent::turn_origin::AgentTurnOrigin>,
+    origin: Option<&crate::security::turn_origin::AgentTurnOrigin>,
 ) -> bool {
-    let Some(crate::agent::turn_origin::AgentTurnOrigin::WebChat {
+    let Some(crate::security::turn_origin::AgentTurnOrigin::WebChat {
         thread_id,
         client_id,
         ..
@@ -641,14 +641,9 @@ impl WalletHost {
             .load_config()
             .await
             .map_err(callback_error)?;
-        let client =
-            crate::web3::client::CryptoClient::from_config(&config).map_err(callback_error)?;
-        let data = match request {
-            WalletBackendRequest::Routes => client.routes().await,
-            WalletBackendRequest::SwapTransaction { body } => client.swap_tx(&body).await,
-            WalletBackendRequest::BridgeTransaction { body } => client.bridge_tx(&body).await,
-        }
-        .map_err(callback_error)?;
+        let data = super::wallet_backend::call_wallet_backend(config, request.into())
+            .await
+            .map_err(callback_error)?;
         Ok(HostResponse::WalletBackend(WalletBackendResponse { data }))
     }
 

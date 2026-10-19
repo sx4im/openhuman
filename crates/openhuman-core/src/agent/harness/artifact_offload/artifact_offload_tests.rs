@@ -146,6 +146,35 @@ async fn an_action_dir_inside_workspace_dir_is_never_materialized() {
 }
 
 #[tokio::test]
+async fn explicit_workspace_policy_blocks_unguarded_offload_before_writing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let workspace_dir = dir.path().to_path_buf();
+    let action_dir = workspace_dir.join("action");
+    std::fs::create_dir_all(&action_dir).expect("action dir");
+    let policy = policy_with(action_dir.clone(), workspace_dir);
+    // A caller may pass a writer whose own ArtifactPathPolicy is absent or
+    // different from the explicit policy argument.
+    let unguarded = ArtifactOffload::new(memory_blobs(), "worker", "task");
+    let big = "x".repeat(10_000);
+
+    let (text, artifact) = offload_oversized_result(
+        big.clone(),
+        &unguarded,
+        DEFAULT_OFFLOAD_THRESHOLD_BYTES,
+        &action_dir,
+        Some(&policy),
+    )
+    .await;
+
+    assert_eq!(text, big, "the inline payload must survive the refusal");
+    assert!(artifact.is_none());
+    assert!(
+        !action_dir.join("outputs").exists(),
+        "authorization must happen before an artifact is stored or materialized"
+    );
+}
+
+#[tokio::test]
 async fn a_wired_writer_redacts_before_the_bytes_reach_disk() {
     // `new_artifact_offload` always installs the redactor, so no call site can
     // produce an unredacted writer by omission.

@@ -1,7 +1,7 @@
 //! The session-store key a thread's transcripts were written under.
 //!
 //! A thread's transcripts live in the session store of the agent key the
-//! session host wrote them under (`agent::session_store::agent_key_for`:
+//! session host wrote them under (`storage::sessions::agent_key_for`:
 //! `<profile>~<agent>` for a SaaS profile, else the agent, else the chat
 //! agent). That key follows `[agent] chat_agent_id`, so after an operator
 //! changes the chat agent, a reader that re-derives the key from the current
@@ -16,15 +16,16 @@ use serde_json::{json, Value};
 use tinystoragedrivers::{CollectionSpec, ErrorKind, Filter, Precondition};
 
 use super::backend::ConversationStore;
+use super::storage_schema::{spec, TRANSCRIPT_KEYS as COLLECTION};
 use crate::storage::documents::Repo;
+use crate::storage::schema_support::key_of;
 use crate::storage::{self};
 
 const DOMAIN: &str = "threads::transcript_key";
-const COLLECTION: &str = "threads_transcript_keys";
 const LOG_PREFIX: &str = "[conversations:transcript-key]";
 
 fn collections() -> Vec<CollectionSpec> {
-    vec![CollectionSpec::new(COLLECTION)]
+    vec![spec()]
 }
 
 impl ConversationStore {
@@ -38,7 +39,7 @@ impl ConversationStore {
     /// The key `thread_id`'s transcripts were first written under, if recorded.
     pub fn transcript_key(&self, thread_id: &str) -> Result<Option<String>, String> {
         let repo = self.key_repo()?;
-        let id = thread_id.to_string();
+        let id = key_of(thread_id).map_err(|e| format!("{LOG_PREFIX} {e}"))?;
         let doc = repo
             .run(|docs| async move { docs.get(COLLECTION, &id).await })
             .map_err(|e| format!("{LOG_PREFIX} read: {e:#}"))?;
@@ -49,7 +50,8 @@ impl ConversationStore {
     /// recorded, and returns the key in effect (the first one recorded).
     pub fn record_transcript_key(&self, thread_id: &str, key: &str) -> Result<String, String> {
         let repo = self.key_repo()?;
-        let (id, wanted) = (thread_id.to_string(), key.to_string());
+        let id = key_of(thread_id).map_err(|e| format!("{LOG_PREFIX} {e}"))?;
+        let wanted = key.to_string();
         let recorded = repo
             .run(|docs| async move {
                 let body: Value = json!({ "key": wanted });
@@ -80,7 +82,7 @@ impl ConversationStore {
     /// Forgets `thread_id`'s recorded key (the thread was deleted).
     pub(super) fn forget_transcript_key(&self, thread_id: &str) {
         let outcome = self.key_repo().and_then(|repo| {
-            let id = thread_id.to_string();
+            let id = key_of(thread_id).map_err(|e| e.to_string())?;
             repo.run(|docs| async move { docs.delete(COLLECTION, &id, Precondition::None).await })
                 .map(|_| ())
                 .map_err(|e| format!("{e:#}"))

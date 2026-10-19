@@ -78,7 +78,7 @@ struct Shape {
     connections: Vec<(String, bool)>,
 }
 
-fn shapes(integrations: Vec<crate::agent::prompts::ConnectedIntegration>) -> Vec<Shape> {
+fn shapes(integrations: Vec<crate::integrations::ConnectedIntegration>) -> Vec<Shape> {
     let mut out: Vec<Shape> = integrations
         .into_iter()
         .map(|i| {

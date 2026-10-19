@@ -87,6 +87,11 @@ pub struct SubagentRunOptions {
             tinyagents_harness::run_queue::RunQueue<crate::agent::queued_turn::QueuedTurn>,
         >,
     >,
+
+    /// Native TinyAgents message queue for a driver-backed delegated run.
+    /// Generic Jobs/Message controls inject full user messages here; this is
+    /// converted to the runtime feed by the host's graph adapter.
+    pub message_run_queue: Option<tinyagents_harness::run_queue::RunQueueHandle>,
 }
 
 /// Terminal status of a sub-agent run.
@@ -146,6 +151,9 @@ pub struct SubagentRunOutcome {
     pub output: String,
     /// How many LLM round-trips were performed during the run.
     pub iterations: usize,
+    /// Typed failure cause for a classified terminal halt. Kept alongside the
+    /// display status so later projections preserve class and operation.
+    pub failure_cause: Option<tinyagents_harness::no_progress::ClassifiedStopCause>,
     /// Total wall-clock duration of the run.
     pub elapsed: Duration,
     /// Which execution mode was used (Typed vs. Fork).

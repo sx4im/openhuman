@@ -26,14 +26,14 @@ use super::types::{
     AgentSnapshot, SpawnAgentRequest, SpawnAgentResponse, WaitAgentOptions, WaitAgentResponse,
 };
 use crate::agent::harness::fork_context::ParentExecutionContext;
-use crate::agent::harness::host_definition::{AgentDefinition, AgentDefinitionRegistry};
-use crate::agent::progress::AgentProgress;
 use crate::agent::subagent_host::{
     run_subagent, SubagentRunError, SubagentRunOptions, SubagentRunOutcome, SubagentRunStatus,
 };
 use crate::agent::tinyagents::host::steering::shared_steering_registry;
+use crate::agent_registry::host_definition::{AgentDefinition, AgentDefinitionRegistry};
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
+use crate::progress::AgentProgress;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -44,7 +44,7 @@ use tinyagents_tasks::{
     OrchestrationTaskStatus,
 };
 use tokio::sync::{mpsc, watch};
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 #[derive(Debug, Error)]
 pub enum OrchestrationError {
@@ -65,12 +65,6 @@ pub enum OrchestrationError {
 /// Soft cap on live children per session. Terminal entries are only swept when
 /// the table grows past this, matching [`super::running_subagents`].
 const REGISTRY_SOFT_CAP: usize = 256;
-
-/// Chunk length for an unbounded `wait_agents`. The crate's `wait` takes a
-/// concrete deadline, so a `timeout_ms: None` request loops over these until a
-/// terminal status lands — which preserves the old "wait forever" contract
-/// without inventing a fake far-future instant.
-const UNBOUNDED_WAIT_CHUNK: Duration = Duration::from_secs(3600);
 
 /// Product metadata retained alongside each detached child's executor handles.
 ///
@@ -193,27 +187,30 @@ impl AgentOrchestrationSession {
             });
         }
 
-        let deadline = options
-            .timeout_ms
-            .map(|ms| Instant::now() + Duration::from_millis(ms));
+        let timeout = options.timeout_ms.map(Duration::from_millis);
+        let task_ids: Vec<_> = options
+            .orchestration_ids
+            .iter()
+            .cloned()
+            .map(TaskId::new)
+            .collect();
+        let items = self
+            .registry
+            .wait_many(&task_ids, &self.session_id, timeout)
+            .await
+            .map_err(|failure| self.lookup_error(failure.task_id.as_str(), failure.error))?;
         let mut agents = Vec::with_capacity(options.orchestration_ids.len());
         let mut completed = true;
 
-        for id in &options.orchestration_ids {
-            let task_id = TaskId::new(id.clone());
-            // Metadata is only retained while the entry is live, so capture it
-            // before `wait` prunes a terminal child.
-            let metadata = self
-                .registry
-                .snapshot(&task_id, &self.session_id)
-                .map_err(|err| self.lookup_error(id, err))?
-                .metadata;
-
-            let state = self.wait_one(&task_id, deadline).await?;
+        for item in items {
+            let state = match item.outcome {
+                DetachedTaskWaitOutcome::Terminal(state)
+                | DetachedTaskWaitOutcome::TimedOut(state) => state,
+            };
             if !state.is_terminal() {
                 completed = false;
             }
-            agents.push(snapshot_of(id, &metadata, &state));
+            agents.push(snapshot_of(item.task_id.as_str(), &item.metadata, &state));
         }
 
         Ok(WaitAgentResponse { completed, agents })
@@ -251,34 +248,6 @@ impl AgentOrchestrationSession {
             self.session_id,
             cancelled.len()
         );
-    }
-
-    /// Wait one child to a terminal status, honouring the shared `deadline`.
-    async fn wait_one(
-        &self,
-        task_id: &TaskId,
-        deadline: Option<Instant>,
-    ) -> Result<ChildState, OrchestrationError> {
-        loop {
-            let slice = match deadline {
-                Some(deadline) => deadline.saturating_duration_since(Instant::now()),
-                None => UNBOUNDED_WAIT_CHUNK,
-            };
-            let outcome = self
-                .registry
-                .wait(task_id, &self.session_id, slice)
-                .await
-                .map_err(|err| self.lookup_error(task_id.as_str(), err))?;
-            match outcome {
-                DetachedTaskWaitOutcome::Terminal(state) => return Ok(state),
-                DetachedTaskWaitOutcome::TimedOut(state) => {
-                    if deadline.is_some() {
-                        return Ok(state);
-                    }
-                    // Unbounded wait: the chunk expired, keep waiting.
-                }
-            }
-        }
     }
 
     /// Every child snapshot still live in this session's registry, ordered by
@@ -402,6 +371,7 @@ impl AgentOrchestrationSession {
             // cooperative `CancellationToken` and an `AbortHandle` below, which
             // is what `abort_all` uses.
             run_queue: None,
+            message_run_queue: None,
         };
 
         let session = self.clone();
@@ -413,7 +383,7 @@ impl AgentOrchestrationSession {
         // carried across the same boundary the parent execution context
         // already is. Without the origin the spawned agent's external-effect
         // tools reach the approval gate unlabelled and are refused.
-        let handle = tokio::spawn(crate::agent::turn_origin::propagate(async move {
+        let handle = tokio::spawn(crate::security::turn_origin::propagate(async move {
             mark_running(&task_status_tx);
             // The parent rides `options.run_context.parent`, built above.
             let result = run_subagent(&definition, &prompt, options).await;

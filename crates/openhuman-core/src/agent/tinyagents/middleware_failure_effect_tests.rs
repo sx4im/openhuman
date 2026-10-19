@@ -23,15 +23,16 @@ fn harness_timeout(tool: &str) -> String {
 
 async fn run_call(
     mw: &RepeatedToolFailureMiddleware,
+    context: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
     id: &str,
     tool: &str,
     args: serde_json::Value,
     error: &str,
 ) {
     let mut call = TaToolCall::new(id, tool, args);
-    mw.before_tool(&mut ctx(), &(), &mut call).await.unwrap();
+    mw.before_tool(context, &(), &mut call).await.unwrap();
     let mut result = failing_result(tool, error);
-    mw.after_tool(&mut ctx(), &(), &invocation(id, tool), &mut result)
+    mw.after_tool(context, &(), &invocation(id, tool), &mut result)
         .await
         .unwrap();
 }
@@ -173,9 +174,11 @@ async fn a_read_only_use_skill_timeout_does_not_end_the_turn() {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, slot.clone());
+    let mut context = ctx();
     let args = serde_json::json!({"skill": "composio", "tool": "composio_list_tools", "args": {}});
     run_call(
         &mw,
+        &mut context,
         "skill-1",
         "use_skill",
         args.clone(),
@@ -184,6 +187,7 @@ async fn a_read_only_use_skill_timeout_does_not_end_the_turn() {
     .await;
     run_call(
         &mw,
+        &mut context,
         "skill-2",
         "use_skill",
         args.clone(),
@@ -194,6 +198,7 @@ async fn a_read_only_use_skill_timeout_does_not_end_the_turn() {
     assert!(slot.lock().unwrap().is_none());
     run_call(
         &mw,
+        &mut context,
         "skill-3",
         "use_skill",
         args,
@@ -210,8 +215,10 @@ async fn a_side_effecting_use_skill_timeout_still_stops_at_once() {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, slot.clone());
+    let mut context = ctx();
     run_call(
         &mw,
+        &mut context,
         "send-1",
         "use_skill",
         serde_json::json!({"skill": "gmail", "tool": "gmail_send_email", "args": {}}),
@@ -247,8 +254,10 @@ async fn a_missing_shell_command_nudges_with_the_host_os_then_stops() {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 3, slot.clone());
+    let mut context = ctx();
     run_call(
         &mw,
+        &mut context,
         "sh-1",
         "shell",
         serde_json::json!({"command": "ls -la | jq ."}),
@@ -256,7 +265,7 @@ async fn a_missing_shell_command_nudges_with_the_host_os_then_stops() {
     )
     .await;
     assert_eq!(drain_pause_count(&handle), 0, "first miss must not halt");
-    let nudges = mw.take_pending_nudges();
+    let nudges = drain_nudge_messages(&mw, &mut context).await;
     assert_eq!(nudges.len(), 1, "{nudges:?}");
     assert!(nudges[0].contains(std::env::consts::OS), "{nudges:?}");
     assert!(nudges[0].contains("not available"), "{nudges:?}");
@@ -267,6 +276,7 @@ async fn a_missing_shell_command_nudges_with_the_host_os_then_stops() {
 
     run_call(
         &mw,
+        &mut context,
         "sh-2",
         "shell",
         serde_json::json!({"command": "jq . file.json"}),
@@ -309,9 +319,11 @@ async fn failures_of_different_use_skill_tools_do_not_share_a_budget() {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mw = RepeatedToolFailureMiddleware::new(handle.clone(), 8, slot.clone());
+    let mut context = ctx();
     for (id, inner) in [("a", "tool_alpha"), ("b", "tool_beta"), ("c", "tool_gamma")] {
         run_call(
             &mw,
+            &mut context,
             id,
             "use_skill",
             serde_json::json!({"skill": "pack", "tool": inner, "args": {}}),
@@ -330,6 +342,7 @@ async fn failures_of_different_use_skill_tools_do_not_share_a_budget() {
     for id in ["a2", "a3"] {
         run_call(
             &mw,
+            &mut context,
             id,
             "use_skill",
             serde_json::json!({"skill": "pack", "tool": "tool_alpha", "args": {}}),

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use tinyagents_harness::CancellationToken;
 use tinytools::WorkspaceDescriptor;
 
-use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+use crate::agent_registry::host_definition::AgentDefinitionRegistry;
 
 use super::collect::{
     collect_spawn_parallel_results, project_spawn_parallel_result, SpawnParallelGraphOutcome,

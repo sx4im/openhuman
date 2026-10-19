@@ -14,7 +14,7 @@ impl NamedToolScope for tinyagents_definition::ToolScope {
         }
     }
 }
-use crate::agent::registry::types::{AgentRegistryEntry, AgentRegistrySource, AgentSubagentPolicy};
+use crate::agent_registry::types::{AgentRegistryEntry, AgentRegistrySource, AgentSubagentPolicy};
 
 fn builtins() -> OpenHumanDefinitionRegistry {
     OpenHumanDefinitionRegistry::builtins_only()
@@ -128,8 +128,8 @@ async fn delegates_for_drops_tier_illegal_children() {
 
 #[tokio::test]
 async fn a_worker_parent_authorizes_nothing() {
-    // `validate_tier_hierarchy` hard-fails a worker that lists any agent
-    // id, so the authorized set must be empty rather than the raw list.
+    // The upstream definition set rejects worker-to-agent delegation, and the
+    // runtime registry still must not authorize any worker children.
     let registry = registry_of(vec![
         synthetic("leaf", AgentTier::Worker, &["a_worker"]),
         synthetic("a_worker", AgentTier::Worker, &[]),
@@ -151,15 +151,11 @@ async fn a_worker_parent_authorizes_nothing() {
 }
 
 #[tokio::test]
-async fn authorized_delegates_agree_with_boot_time_validation() {
-    // Cross-check against the host's own boot validator over the real
-    // built-in set: every id `delegates_for` returns must be one
-    // `validate_tier_hierarchy` accepts (it accepts the whole builtin
-    // catalogue, so nothing may be dropped there).
+async fn authorized_delegates_are_declared_by_builtins() {
+    // The upstream DefinitionSet validates the built-in hierarchy during
+    // loading. This test checks the host registry's authorization view.
     let builtin_defs =
-        crate::agent::registry::agents::load_builtins().expect("built-in TOML must parse");
-    crate::agent::registry::agents::validate_tier_hierarchy(&builtin_defs)
-        .expect("built-ins satisfy the hierarchy");
+        crate::agent_registry::agents::load_builtins().expect("built-in TOML must parse");
 
     let registry = builtins();
     for def in &builtin_defs {

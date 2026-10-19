@@ -1,35 +1,40 @@
 //! The live OpenHuman composition over `tinyagents_runtime::Session`.
 //!
-//! The mutex is intentionally narrow: it carries host preparation and
-//! finalization observations only. Generic model history, transcript rows,
-//! prefix reconciliation, tool snapshots, resume and persistence remain inside
-//! the runtime session.
+//! Host hooks carry product state; `tinyagents_runtime` owns history,
+//! transcripts, prefixes, snapshots, resume, and persistence.
 
-#[path = "runtime_session_attachment_input.rs"]
-mod attachment_input;
-mod memory_ingest;
 mod permanent;
 mod post_commit;
+#[path = "runtime_session/prelude.rs"]
+mod prelude;
+#[path = "runtime_session/prompt_surface.rs"]
+mod prompt_surface;
+#[path = "runtime_session_usage.rs"]
+mod usage;
+pub(super) use usage::{account_committed_turn_against_goal, holistic_last_turn_usage};
+#[path = "../../memory/lifecycle/session_hooks.rs"]
+mod session_hooks;
 mod tool_rules;
 mod transcript;
 #[path = "runtime_session_turn.rs"]
 mod turn;
 pub(super) use turn::begin_turn_resume;
 
+type ActiveTerminalSidecar = std::sync::Arc<
+    std::sync::Mutex<crate::agent::tinyagents::host::run_context::SessionTurnSidecar>,
+>;
+
 use std::sync::Arc;
 
 use anyhow::Result;
 use tinyagents_graph::goals::ThreadGoalStatus;
+use tinyagents_harness::multimodal::markers::extract_image_placeholders_in_text;
 use tinyagents_runtime::{
     CommitReceipt, ResumePreparation, SessionBuilder, SessionTerminal, ToolSnapshot,
     TranscriptTarget, TurnPreparation,
 };
 use tinyinference_llm::message::Message;
 
-use super::announcement_notes::{
-    integration_announcement_note, mcp_announcement_note, skill_announcement_note,
-    skill_retraction_note,
-};
 use super::types::OpenHumanSessionHost;
 use crate::agent::{
     message_convert::{user_message_from_text, user_text_with_markers},
@@ -37,6 +42,10 @@ use crate::agent::{
         driver::OpenHumanSessionDriver, OpenHumanSessionHooks, OpenHumanTranscriptCodec,
     },
     tinyagents::{host::OpenHumanRunContext, middleware::turn_context::TurnContextMiddleware},
+};
+use crate::integrations::announcement_notes::{
+    integration_announcement_note, mcp_announcement_note, skill_announcement_note,
+    skill_retraction_note,
 };
 
 #[path = "runtime_session_progress.rs"]
@@ -51,6 +60,7 @@ pub(super) struct OpenHumanSessionState {
     terminals: Vec<SessionTerminal>,
     pub(super) last_turn_hit_cap: bool,
     pub(super) last_turn_usage: Option<crate::agent::tinyagents::host::LastTurnUsage>,
+    pub(super) last_turn_iterations: u32,
     pub(super) context_middleware: Option<TurnContextMiddleware>,
     required_output: Option<tinyagents_harness::config::RequiredOutput>,
     pub(crate) pending_turn_overrides: super::types::TurnOverrides,
@@ -59,9 +69,8 @@ pub(super) struct OpenHumanSessionState {
     pub(super) reply_language_directive: Option<String>,
     pub(super) time_zone: Option<String>,
     prelude: Option<OpenHumanTurnPrelude>,
-    /// The previous turn's deferred post-commit work (thread-goal
-    /// accounting). The next turn awaits it before loading the goal
-    /// (`post_commit::await_pending`).
+    active_terminal_sidecar: Option<ActiveTerminalSidecar>,
+    /// Previous turn's deferred goal accounting, awaited before the next turn.
     pending_post_commit: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -73,7 +82,8 @@ struct OpenHumanTurnPrelude {
     config: crate::config::AgentConfig,
     /// Host prompt/utilisation state, shared by the runtime hooks. It is not
     /// generic conversation state and the runtime never persists it.
-    context: Arc<std::sync::Mutex<crate::agent::context::ContextManager>>,
+    prompt_builder: Arc<crate::agent::prompts::SystemPromptBuilder>,
+    context_config: crate::config::ContextConfig,
     tool_policy: Arc<
         dyn tinyagents_harness::middleware::ToolCallPolicy<
             crate::agent::tinyagents::host::OpenHumanRunContext,
@@ -97,13 +107,13 @@ struct OpenHumanTurnPrelude {
     workspace_descriptor: Option<tinytools::WorkspaceDescriptor>,
     session_key: String,
     session_parent_prefix: Option<String>,
-    on_progress: Option<tokio::sync::mpsc::Sender<crate::agent::progress::AgentProgress>>,
+    on_progress: Option<tokio::sync::mpsc::Sender<crate::progress::AgentProgress>>,
     run_queue:
         Option<Arc<tinyagents_harness::run_queue::RunQueue<crate::agent::queued_turn::QueuedTurn>>>,
     host_env: crate::agent::turn_env::HostTurnEnv,
     allowed_subagent_ids: std::collections::HashSet<String>,
     sandbox_mode: tinyagents_definition::SandboxMode,
-    definition: Option<Arc<crate::agent::harness::host_definition::AgentDefinition>>,
+    definition: Option<Arc<crate::agent_registry::host_definition::AgentDefinition>>,
     runtime_config: Option<Arc<crate::config::Config>>,
     /// This session's tool-rule layers; see `tool_rules.rs`.
     tool_rules: Arc<tinytools::ToolRuleSet>,
@@ -160,7 +170,7 @@ struct OpenHumanTurnPreludeMutable {
     announced_skills: std::collections::HashSet<String>,
     pending_skill_announcement: Vec<String>,
     pending_skill_retraction: Vec<String>,
-    connected_integrations: Vec<crate::agent::prompts::ConnectedIntegration>,
+    connected_integrations: Vec<crate::integrations::ConnectedIntegration>,
     connected_integrations_initialized: bool,
     connected_integrations_authoritative: bool,
     /// A cold hydration seeded the announced sets; later ones diff instead.
@@ -182,367 +192,14 @@ struct OpenHumanTurnPreludeMutable {
     /// committed turn can be handed to memory.
     pending_user_text: Option<String>,
     /// The in-flight turn's memory identity and index, from pre-turn to
-    /// commit (`memory_ingest`).
-    pending_memory_turn: Option<memory_ingest::PendingMemoryTurn>,
+    /// commit (`memory::lifecycle::session_hooks`).
+    pending_memory_turn: Option<session_hooks::PendingMemoryTurn>,
 }
-
-impl OpenHumanTurnPrelude {
-    #[allow(clippy::type_complexity)]
-    fn current_tool_source(
-        &self,
-    ) -> (
-        Arc<Vec<Box<dyn tinytools::Tool>>>,
-        Arc<Vec<Box<dyn tinytools::Tool>>>,
-        tinytools::ToolPolicySession,
-        String,
-    ) {
-        let surface = self
-            .tool_surface
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        (
-            surface.tools.clone(),
-            surface.synthesized_tools.clone(),
-            surface.tool_policy_session.clone(),
-            surface.event_channel.clone(),
-        )
-    }
-
-    /// The session's deferred set for this turn; see
-    /// `OpenHumanRunContext::deferred_tool_names`.
-    fn current_deferred_tool_names(&self) -> std::collections::HashSet<String> {
-        self.tool_surface
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .deferred_tool_names
-            .clone()
-    }
-
-    fn replace_tool_surface(&self, surface: OpenHumanTurnToolSurface) {
-        *self
-            .tool_surface
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = surface;
-    }
-
-    async fn prepare(&self, cold: bool) -> Result<TurnPreparation> {
-        let tools = {
-            let surface = self
-                .tool_surface
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            // The snapshot is the declaration set the session grants — the
-            // driver reads it back as the harness allowlist — so it carries
-            // the deferred tools beside the advertised ones. The harness
-            // still advertises only the `Direct` registrations and reaches
-            // the rest through its `tool_search` bridge.
-            ToolSnapshot::new(
-                surface
-                    .visible_tool_specs
-                    .iter()
-                    .chain(
-                        surface
-                            .tool_specs
-                            .iter()
-                            .filter(|spec| surface.deferred_tool_names.contains(&spec.name)),
-                    )
-                    .filter(|spec| {
-                        self.thread_id.is_some()
-                            || !crate::agent::tinyagents::tool_registration::is_thread_goal_tool(
-                                &spec.name,
-                            )
-                    })
-                    .map(|spec| spec.as_ref().clone())
-                    .collect(),
-            )
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?
-        };
-        let prefix = if cold {
-            let tiered = self.build_system_prompt_tiered()?;
-            Some(super::prefix_snapshot::tiered_prefix_snapshot(&tiered))
-        } else {
-            None
-        };
-        Ok(TurnPreparation {
-            prefix,
-            tools: Some(tools),
-        })
-    }
-
-    fn build_system_prompt_tiered(&self) -> Result<crate::agent::prompts::TieredPrompt> {
-        use crate::agent::prompts::{PromptContext, PromptTool};
-        let surface = self
-            .tool_surface
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let withheld = self.rule_withheld_tools(&surface);
-        let specs = surface
-            .visible_tool_specs
-            .iter()
-            .filter(|spec| !withheld.contains(&spec.name))
-            .filter(|spec| {
-                self.thread_id.is_some()
-                    || !crate::agent::tinyagents::tool_registration::is_thread_goal_tool(&spec.name)
-            })
-            .map(|spec| spec.as_ref().clone())
-            .collect::<Vec<_>>();
-        let instructions = self.tool_dispatcher.prompt_instructions(&specs);
-        let tool_refs = surface
-            .tools
-            .iter()
-            .chain(surface.synthesized_tools.iter())
-            .filter(|tool| {
-                self.thread_id.is_some()
-                    || !crate::agent::tinyagents::tool_registration::is_thread_goal_tool(
-                        tool.name(),
-                    )
-            })
-            .map(|tool| tool.as_ref())
-            .collect::<Vec<_>>();
-        let mut prompt_tools = PromptTool::from_tool_refs(tool_refs.iter().copied());
-        prompt_tools.retain(|tool| !surface.permanent_tool_names.contains(tool.name.as_ref()));
-        prompt_tools.retain(|tool| !withheld.contains(tool.name.as_ref()));
-        let mut visible_tool_names = surface.tool_policy_session.visible_tool_names_for_prompt();
-        visible_tool_names.retain(|name| !withheld.contains(name));
-        visible_tool_names.retain(|name| !surface.permanent_tool_names.contains(name));
-        if self.thread_id.is_none() {
-            visible_tool_names.retain(|name| {
-                !crate::agent::tinyagents::tool_registration::is_thread_goal_tool(name)
-            });
-        }
-        crate::agent::prompts::swap_deferred_for_discovery_bridge(
-            &mut prompt_tools,
-            &mut visible_tool_names,
-            &surface.deferred_tool_names,
-        );
-        let agents_md = if self.config.agents_md_enabled {
-            crate::agent::prompts::load_agents_md_layers(&self.workspace_dir, &self.action_dir)
-        } else {
-            Default::default()
-        };
-        let mutable = self
-            .mutable
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let context = PromptContext {
-            workspace_dir: &self.workspace_dir,
-            model_name: &self.model_name,
-            agent_id: &self.agent_definition_name,
-            tools: &prompt_tools,
-            workflows: &mutable.workflows,
-            dispatcher_instructions: &instructions,
-            visible_tool_names: &visible_tool_names,
-            tool_call_format: self.tool_dispatcher.tool_call_format(),
-            connected_integrations: &mutable.connected_integrations,
-            connected_identities_md: self.connected_identities_md(),
-            user_identity: crate::security::credentials::identity::peek_credential_user_identity(),
-            personality_roster: vec![],
-            agents_md_global: agents_md.global,
-            agents_md_local: agents_md.local,
-        };
-        self.context
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .build_system_prompt_tiered(&context)
-    }
-
-    #[cfg(test)]
-    fn synthesized_tool_names_for_test(&self) -> std::collections::HashSet<String> {
-        self.tool_surface
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .synthesized_tool_names
-            .clone()
-    }
-
-    fn drain_host_events(&self) -> bool {
-        let mut mutable = self
-            .mutable
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if mutable.composio_events.is_none() {
-            mutable.composio_events = crate::core::bus::BUS.get().map(|bus| bus.receiver());
-        }
-        if mutable.skill_events.is_none() {
-            mutable.skill_events = crate::core::bus::BUS.get().map(|bus| bus.receiver());
-        }
-        let drain = |receiver: &mut Option<
-            tinybus::events::EventReceiver<crate::core::events::DomainEvent>,
-        >| {
-            let Some(receiver) = receiver.as_mut() else {
-                return false;
-            };
-            let mut skills_changed = false;
-            loop {
-                use tinybus::TryRecvError;
-                match receiver.try_recv() {
-                    Ok(crate::core::events::DomainEvent::WorkflowsChanged { .. }) => {
-                        skills_changed = true
-                    }
-                    Ok(crate::core::events::DomainEvent::ComposioIntegrationsChanged {
-                        ..
-                    })
-                    | Ok(_) => {}
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Lagged(_)) => {
-                        skills_changed = true;
-                        break;
-                    }
-                    Err(TryRecvError::Closed) => break,
-                }
-            }
-            skills_changed
-        };
-        let composio_skills_changed = drain(&mut mutable.composio_events);
-        composio_skills_changed | drain(&mut mutable.skill_events)
-    }
-
-    /// Assemble every dynamic, host-owned user-turn addition after the runtime
-    /// has selected/resumed its transcript.  The returned message is then the
-    /// sole input which `Session` appends to generic history.
-    async fn enrich_request(
-        &self,
-        original_user_message: &str,
-        turn: &super::types::TurnInputs,
-        run_context: &mut OpenHumanRunContext,
-    ) -> String {
-        let mut context = String::new();
-
-        let active_goal = if turn.overrides.suppress_active_goal {
-            None
-        } else {
-            let loaded = crate::agent::goals::runtime::load_for_thread(
-                &self.workspace_dir,
-                self.thread_id.as_deref(),
-            )
-            .await;
-            match loaded {
-                Some(goal) if matches!(goal.status, ThreadGoalStatus::Paused) => {
-                    crate::agent::goals::runtime::resume_for_thread(
-                        &self.workspace_dir,
-                        self.thread_id.as_deref(),
-                    )
-                    .await
-                    .unwrap_or(Some(goal))
-                }
-                other => other,
-            }
-        };
-        if let Some(goal) = &active_goal {
-            if let Some(block) = tinyagents_graph::goals::active_goal_context_block(goal) {
-                context.push_str(&block);
-            }
-            if let Some(hook) = crate::agent::goals::runtime::GoalBudgetStopHook::for_goal(
-                &self.workspace_dir,
-                goal,
-            ) {
-                run_context.stop_hooks.push(Arc::new(hook));
-            }
-        }
-        // Build the roster from this turn's *effective* visible tool set
-        // (snapshotted under the tool-surface lock, then released), not the
-        // definition's static scope: a hide or named restriction can narrow what
-        // this turn can call, and the roster must not advertise a control it cannot invoke.
-        let turn_fleet = {
-            let visible = self
-                .tool_surface
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .visible_tool_names
-                .clone();
-            if visible.is_empty() {
-                crate::agent::orchestration::fleet_tools::FleetToolSet::for_parent(
-                    &self.agent_definition_id,
-                )
-            } else {
-                crate::agent::orchestration::fleet_tools::FleetToolSet::from_visible_tool_names(
-                    &visible,
-                )
-            }
-        };
-        if let Some(block) =
-            crate::agent::orchestration::running_subagents::active_subagents_context_block(
-                &self.dispatch_ctx(),
-                &self.event_session_id,
-                &self.workspace_dir,
-                &turn_fleet,
-            )
-        {
-            context.push_str(&block);
-        }
-
-        let mut enriched = if context.is_empty() {
-            original_user_message.to_string()
-        } else {
-            format!("{context}{original_user_message}")
-        };
-        {
-            let mut mutable = self
-                .mutable
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            mutable.last_memory_context = (!context.is_empty()).then_some(context);
-        }
-        run_context.response_shape = turn.response_shape.clone();
-        run_context.attach_parent(self.parent_context(run_context.parent.as_ref()));
-        self.apply_pending_announcements(&mut enriched);
-        run_context.attachment_placeholders = Arc::new(
-            crate::agent::multimodal::extract_image_placeholders_in_text(original_user_message),
-        );
-        run_context.dispatch = Some(Arc::new(
-            crate::agent::tinyagents::host::TurnDispatchState::new(
-                crate::agent::tinyagents::agent_turn_wall_clock_ms_for(
-                    self.runtime_config
-                        .as_deref()
-                        .is_some_and(crate::agent::tinyagents::chat_provider_is_local),
-                )
-                .map(std::time::Duration::from_millis),
-            ),
-        ));
-        run_context.sandbox_mode = Some(self.sandbox_mode);
-        // Same pin as `SessionDriver::run_turn`: the harness speaks the dialect
-        // the prompt was composed for, so a text dialect keeps its schemas off
-        // the wire and renders the catalogue itself (`ToolsSection` no longer
-        // does), and a code call is recovered against the positional registry.
-        run_context.tool_dialect = tinyagents_harness::dialect::dispatcher_for_format(
-            self.tool_dispatcher.tool_call_format(),
-        );
-        format!("{}\n\n{enriched}", turn.preamble())
-    }
-
-    fn apply_pending_announcements(&self, enriched: &mut String) {
-        let mut mutable = self
-            .mutable
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for note in [
-            integration_announcement_note(&std::mem::take(
-                &mut mutable.pending_integration_announcement,
-            )),
-            mcp_announcement_note(&std::mem::take(&mut mutable.pending_mcp_announcement)),
-            skill_announcement_note(&std::mem::take(&mut mutable.pending_skill_announcement)),
-            skill_retraction_note(&std::mem::take(&mut mutable.pending_skill_retraction)),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            *enriched = format!("{note}\n\n{enriched}");
-        }
-    }
-
-    async fn finalize_after_durable_commit(&self, receipt: &CommitReceipt<OpenHumanRunContext>) {
-        self.memory_post_turn(receipt);
-    }
-}
-
-#[path = "runtime_session_usage.rs"]
-mod usage;
-pub(super) use usage::{account_committed_turn_against_goal, holistic_last_turn_usage};
 
 impl OpenHumanSessionHost {
     pub(super) fn update_runtime_prelude_progress(
         &mut self,
-        tx: Option<tokio::sync::mpsc::Sender<crate::agent::progress::AgentProgress>>,
+        tx: Option<tokio::sync::mpsc::Sender<crate::progress::AgentProgress>>,
     ) {
         if let Some(prelude) = self
             .runtime_state
@@ -602,26 +259,17 @@ impl OpenHumanSessionHost {
         if self.runtime_session.is_some() {
             return Ok(());
         }
-        let (
-            tool_result_budget_bytes,
-            tokenjuice_compaction_enabled,
-            microcompact_keep_recent,
-            autocompact_enabled,
-            compaction,
-        ) = {
-            let context = self
-                .context
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            (
-                context.tool_result_budget_bytes(),
-                context.compaction_enabled(),
-                context.microcompact_keep_recent(),
-                context.autocompact_enabled(),
-                context.compaction(),
-            )
+        let context_config = &self.context_config;
+        let tool_result_budget_bytes = context_config.tool_result_budget_bytes;
+        let tokenjuice_compaction_enabled = context_config.compaction_enabled;
+        let microcompact_keep_recent = if context_config.microcompact_enabled {
+            context_config.microcompact_keep_recent
+        } else {
+            0
         };
-        let artifact_store = super::artifact_wiring::build_artifact_store(
+        let autocompact_enabled = context_config.enabled && context_config.autocompact_enabled;
+        let compaction = context_config.compaction_settings();
+        let artifact_store = crate::artifacts::artifact_wiring::build_artifact_store(
             &self.workspace_dir,
             &self.event_session_id,
         );
@@ -657,15 +305,9 @@ impl OpenHumanSessionHost {
             self.hosted_base.clone(),
             self.agent_definition_id.clone(),
         ));
-        // A thread-bound root session addresses its transcript by durable
-        // identity, so a restart appends to the conversation's own file rather
-        // than minting a new stem and resuming whichever one happens to be
-        // newest. Everything else — sub-agents, unthreaded CLI turns — keeps
-        // the stem path, where a fresh transcript per run is correct.
-        // The builder's initial binding and the per-turn resume hook must
-        // share one locator allocation. The runtime compares locator identity
-        // once a durable transcript is bound; separately constructed locators
-        // for the same workspace reject the first turn after a cold resume.
+        // Thread-bound roots resume their deterministic transcript; other
+        // turns keep the per-run stem path. Reuse one locator for the initial
+        // binding and each resume because the runtime compares locator identity.
         let session_locator = self.session_locator();
         let resume_target = match self.session.clone() {
             Some(session) => TranscriptTarget::for_session(
@@ -691,84 +333,7 @@ impl OpenHumanSessionHost {
                 .required_output
                 .as_ref()
                 .map(crate::agent::tinyagents::config::required_output_from);
-            state.prelude = Some(OpenHumanTurnPrelude {
-                config: self.config.clone(),
-                context: self.context.clone(),
-                tool_policy: self.tool_policy.clone(),
-                tool_dispatcher: self.tool_dispatcher.clone(),
-                workspace_dir: self.workspace_dir.clone(),
-                action_dir: self.action_dir.clone(),
-                model_name: self.model_name.clone(),
-                agent_definition_name: self.agent_definition_name.clone(),
-                omit_memory_context: self.omit_memory_context,
-                thread_id: self.thread_id.clone(),
-                agent_definition_id: self.agent_definition_id.clone(),
-                event_session_id: self.event_session_id.clone(),
-                event_channel: self.event_channel.clone(),
-                subagent_tool_ceiling_names: self.subagent_tool_ceiling_names.clone(),
-                turn_model_source: self.turn_model_source.clone(),
-                temperature: self.temperature,
-                workspace_descriptor: self.workspace_descriptor.clone(),
-                session_key: self.session_key.clone(),
-                session_parent_prefix: self.session_parent_prefix.clone(),
-                on_progress: self.on_progress.clone(),
-                run_queue: self.run_queue.clone(),
-                host_env: self.host_env.clone(),
-                allowed_subagent_ids: self
-                    .resolved_definition()
-                    .map(|definition| definition.allowed_subagent_ids().into_iter().collect())
-                    .unwrap_or_default(),
-                sandbox_mode: self
-                    .resolved_definition()
-                    .map(|definition| definition.sandbox_mode)
-                    .unwrap_or(tinyagents_definition::SandboxMode::None),
-                definition: self.resolved_definition(),
-                runtime_config: self.runtime_config.clone(),
-                tool_rules: self.session_tool_rules(),
-                tool_surface: Arc::new(std::sync::Mutex::new(OpenHumanTurnToolSurface {
-                    tools: self.tools.clone(),
-                    synthesized_tools: self.synthesized_tools.clone(),
-                    tool_specs: self.tool_specs.clone(),
-                    durable_tool_specs: self.durable_tool_specs.clone(),
-                    visible_tool_specs: self.visible_tool_specs.clone(),
-                    visible_tool_names: self.visible_tool_names.clone(),
-                    deferred_tool_names: self.deferred_tool_names.clone(),
-                    permanent_tool_names: self.permanent_tool_names.clone(),
-                    discovery_enabled: self.discovery_enabled,
-                    requested_deferred_tools: self.requested_deferred_tools.clone(),
-                    auto_include_new_synthesized_tools: true,
-                    synthesized_tool_names: self.synthesized_tool_names.clone(),
-                    tool_policy_session: self.tool_policy_session.clone(),
-                    event_session_id: self.event_session_id.clone(),
-                    event_channel: self.event_channel.clone(),
-                    agent_definition_name: self.agent_definition_name.clone(),
-                })),
-                mutable: Arc::new(std::sync::Mutex::new(OpenHumanTurnPreludeMutable {
-                    last_memory_context: self.last_memory_context.clone(),
-                    announced_integrations: self.announced_integrations.clone(),
-                    pending_integration_announcement: self.pending_integration_announcement.clone(),
-                    announced_mcp_servers: self.announced_mcp_servers.clone(),
-                    pending_mcp_announcement: self.pending_mcp_announcement.clone(),
-                    #[cfg(feature = "mcp")]
-                    mcp_tools: prelude_integrations::McpToolCatalog::default(),
-                    announced_skills: self.announced_skills.clone(),
-                    pending_skill_announcement: self.pending_skill_announcement.clone(),
-                    pending_skill_retraction: self.pending_skill_retraction.clone(),
-                    connected_integrations: self.connected_integrations.clone(),
-                    connected_integrations_initialized: self.connected_integrations_initialized,
-                    // Builder-provided integrations are not yet verified this session.
-                    connected_integrations_authoritative: false,
-                    integration_announcements_seeded: false,
-                    recorded_integration_actions: Vec::new(),
-                    recorded_repl_tools: Vec::new(),
-                    recorded_tool_snapshot_adopted: false,
-                    workflows: self.workflows.clone(),
-                    composio_events: None,
-                    skill_events: None,
-                    pending_user_text: None,
-                    pending_memory_turn: None,
-                })),
-            });
+            state.prelude = Some(self.create_turn_prelude(false));
         }
         let hooks = Arc::new(OpenHumanSessionHooks::new(
             {
@@ -802,11 +367,14 @@ impl OpenHumanSessionHost {
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .request_base_len = request_base_len;
-                        let prelude = state
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            .prelude
-                            .clone();
+                        let (prelude, pending_post_commit) = {
+                            let mut state = state
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            state.active_terminal_sidecar =
+                                Some(options.run_context.data.session_sidecar.clone());
+                            (state.prelude.clone(), state.pending_post_commit.take())
+                        };
                         let prelude = prelude.ok_or({
                             tinyagents_runtime::RuntimeError::MissingDependency(
                                 "OpenHumanTurnPrelude",
@@ -814,11 +382,6 @@ impl OpenHumanSessionHost {
                         })?;
                         // The previous turn's goal accounting was deferred past
                         // its completion; settle it before this turn reads the goal.
-                        let pending_post_commit = state
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            .pending_post_commit
-                            .take();
                         post_commit::await_pending(pending_post_commit).await;
                         let new_session = !view.resumed && view.history.is_empty();
                         prelude
@@ -968,11 +531,10 @@ impl OpenHumanSessionHost {
                 move |terminal| {
                     let state = state.clone();
                     Box::pin(async move {
-                        state
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            .terminals
-                            .push(terminal);
+                        let sidecar = post_commit::take_terminal_sidecar(&state, terminal.clone());
+                        if let Some(sidecar) = sidecar {
+                            post_commit::finalize_deferred_terminal(&sidecar, &terminal).await;
+                        }
                         Ok(())
                     })
                 }
@@ -1057,7 +619,7 @@ pub(super) mod tool_surface;
 mod juice_tests;
 
 mod parent_snapshot;
-#[path = "prelude_integrations.rs"]
+#[path = "../../integrations/prelude_integrations.rs"]
 mod prelude_integrations;
 
 #[cfg(test)]

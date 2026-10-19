@@ -22,7 +22,8 @@ pub(crate) async fn authorize_shell_command(
             .await
         {
             Ok(analysis) => analysis,
-            Err(_) => {
+            Err(e) => {
+                tracing::warn!(error = %e, "[cron:shell] command analysis unavailable");
                 #[cfg(test)]
                 {
                     if !config.modules.enabled {

@@ -38,6 +38,7 @@
 //! crate::core::events::DomainEvent::ComposioTriggerReceived
 
 pub mod action_tool;
+mod auth_probe;
 pub mod bus;
 pub mod catalog;
 pub mod client;
@@ -48,6 +49,7 @@ pub(crate) mod direct_auth;
 pub mod execute_dispatch;
 pub(crate) mod file_store;
 mod file_store_documents;
+pub(crate) use file_store_documents::migrate_legacy_state;
 pub mod googlecalendar_args;
 pub mod identity;
 pub mod identity_store;
@@ -55,13 +57,16 @@ pub mod module_client;
 pub mod ops;
 pub(crate) mod processing;
 pub mod schemas;
+#[cfg(test)]
+pub(crate) mod test_backend_route;
 pub mod tools;
 pub(crate) mod trigger_history;
 pub mod types;
 
-pub use crate::agent::prompts::types::ConnectedIntegration;
+pub use crate::agent::prompts::ConnectedIntegration;
 pub use crate::integrations::composio::contract::ProviderUserProfile;
 pub use action_tool::ComposioActionTool;
+pub(crate) use auth_probe::user_is_signed_in_to_composio;
 pub use bus::{
     register_composio_trigger_subscriber, ComposioConfigChangedSubscriber,
     ComposioConnectionCreatedSubscriber, ComposioTriggerSubscriber,

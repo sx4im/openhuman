@@ -10,8 +10,8 @@
 //!
 //! [`CoreContext`]: crate::core::runtime::CoreContext
 
-use crate::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::core::runtime::DispatchCtx;
+use crate::security::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 
 use super::types::UsageScope;
 

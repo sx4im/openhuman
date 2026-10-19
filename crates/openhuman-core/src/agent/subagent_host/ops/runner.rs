@@ -9,12 +9,10 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use crate::agent::harness::artifact_offload::offload_run_result;
 use crate::agent::harness::fork_context::ParentExecutionContext;
-use crate::agent::harness::host_definition::{AgentDefinition, AgentDefinitionRegistry};
-use crate::agent::prompts::{
-    render_subagent_system_prompt_with_format, PromptContext, SubagentRenderOptions,
-};
+use crate::agent::prompts::render_subagent_system_prompt_with_format;
+use crate::agent::prompts::{PromptContext, SubagentRenderOptions};
+use crate::agent::session_host::dedup_visible_tool_specs;
 use crate::agent::subagent_host::definition_iter_cap;
 use crate::agent::subagent_host::tool_prep::{
     filter_tool_indices, is_subagent_spawn_tool, load_prompt_source, subagent_prompt_protocol,
@@ -23,23 +21,18 @@ use crate::agent::subagent_host::types::{
     SubagentMode, SubagentRunError, SubagentRunOptions, SubagentRunOutcome,
 };
 use crate::agent::tinyagents::budget::MAX_SPAWN_DEPTH;
+use crate::agent_registry::host_definition::{AgentDefinition, AgentDefinitionRegistry};
 use crate::inference::provider::AGENT_TURN_MAX_OUTPUT_TOKENS;
 use tinyagents_definition::{
     validate_tier_transition, AgentTier, IterationPolicy, PromptSource,
     SandboxMode as AgentSandboxMode,
 };
-use tinyagents_harness::artifacts::{
-    effective_offload_threshold, extract_artifact_paths, note_artifact_handoff,
-    DEFAULT_OFFLOAD_THRESHOLD_BYTES, HANDOFF_STAGE_RECORDED,
-};
 use tinyagents_harness::context::{current_run_depth, with_run_depth, RunConfig, RunDepth};
 use tinytools::{SandboxMode as TinyagentsSandboxMode, ToolSpec, WorkspaceDescriptor};
 use tinytools_std::file_state::with_file_state_agent_id;
 
-use super::prompt::{
-    append_artifact_offload_contract, append_subagent_role_contract, dedup_tool_specs_by_name,
-};
-use super::provider::{resolve_subagent_source, user_is_signed_in_to_composio};
+use super::prompt::compose_subagent_system_prompt;
+use super::provider::resolve_subagent_source;
 
 /// Runtime spawn-hierarchy gate decision for one delegation hop.
 ///
@@ -92,30 +85,20 @@ pub(super) fn tier_gate_decision(
     Ok(())
 }
 
-#[path = "runner_result_cap.rs"]
-mod result_cap;
-use result_cap::apply_max_result_chars;
-
 /// Run a sub-agent based on its definition and a task prompt.
 ///
-/// This is the primary entry point for agent delegation. It performs the following:
-/// 1. Generates a unique `task_id` if one wasn't provided.
-/// 2. Asks the turn's
-///    explicit root-turn dispatch guard
-///    whether a delegation can still succeed, and refuses before spending
-///    anything if it cannot (#5804).
-/// 3. Reads the parent's explicit [`ParentExecutionContext`] from its run
-///    carrier.
-/// 4. Dispatches to `run_typed_mode`.
+/// Creates a task id, checks the root-turn dispatch budget, reads the parent's
+/// [`ParentExecutionContext`], then dispatches to `run_typed_mode`.
 ///
 /// On success returns a [`SubagentRunOutcome`] whose `output` is the
 /// final assistant text. On failure the error is suitable for stringifying
 /// into a `tool_result` block — including the two dispatch refusals, whose
-/// messages tell the model to summarise rather than delegate again.
-pub(crate) async fn run_subagent_direct(
+/// messages direct the model to summarize rather than delegate again.
+pub(crate) async fn run_subagent_direct_with_native_context(
     definition: &AgentDefinition,
     task_prompt: &str,
     mut options: SubagentRunOptions,
+    native: crate::agent::tinyagents::NativeSubagentRunContext,
 ) -> Result<SubagentRunOutcome, SubagentRunError> {
     // Unconditionally heap-allocate the entire run_subagent body so
     // every caller doesn't have to carry this future's state inline.
@@ -256,7 +239,7 @@ pub(crate) async fn run_subagent_direct(
         // forbids never reaches a user script, and before config load so a
         // denied spawn has no side effects at all.
         if let Err(reason) = crate::hooks::ops::subagent_starting(
-            tinyagents_runtime::command_hooks::context::TurnIdentity {
+            tinyagents_hooks::command::context::TurnIdentity {
                 conversation_id: Some(parent.session_id.clone()),
                 session_id: Some(parent.session_id.clone()),
                 agent_id: Some(parent.agent_definition_id.clone()),
@@ -331,6 +314,7 @@ pub(crate) async fn run_subagent_direct(
                     &parent_for_subagent,
                     &task_id,
                     &loaded_config,
+                    native,
                 ))
                 .await
             })
@@ -369,16 +353,20 @@ pub(crate) async fn run_subagent_direct(
             usage: outcome.usage,
         });
 
-        // #3883: offload an oversized worker result to `action_dir/outputs/`
-        // BEFORE the cap below truncates it, so the parent receives a path plus
-        // an abstract and the full-fidelity body survives on disk instead of
-        // being cut. A refused or failed offload is soft: the inline payload
-        // continues on to the cap and the summarizer detour exactly as before.
-        Box::pin(offload_outcome_artifacts(&mut outcome, definition, &options, &task_id)).await;
-
-        // Truncate result to the definition's cap if set (shared with the
-        // deterministic memory fast path via `apply_max_result_chars`).
-        apply_max_result_chars(&mut outcome.output, definition.max_result_chars, &definition.id);
+        // The owner policy makes the generic byte-overflow decision and calls
+        // this host's authorized artifact store. Project its opaque reference
+        // into the product pointer before applying the independent character
+        // cap, preserving the existing full-output-first behavior.
+        if let Some(error) = super::runner_artifacts::apply_subagent_result_policies(
+            &mut outcome,
+            definition,
+            &options,
+            &task_id,
+        )
+        .await
+        {
+            tracing::debug!(task_id = %task_id, error = %error, "[artifact] sub-agent result policy fell back to inline output");
+        }
 
         tracing::info!(
             agent_id = %definition.id,
@@ -394,115 +382,6 @@ pub(crate) async fn run_subagent_direct(
         Ok(outcome)
     })
     .await
-}
-
-/// Apply the filesystem-offload convention to a finished sub-agent run (#3883).
-///
-/// Writes an oversized result to `action_dir/outputs/` and swaps `output` for a
-/// path + abstract, then records every `[artifact]` pointer the outgoing payload
-/// carries — the harness-written one and any the worker authored itself by
-/// following the prompt contract — onto `SubagentRunOutcome::artifact_paths`, so
-/// the parent receives the paths structurally, not only as prose.
-///
-/// Every failure is soft. With no resolvable action root (or a refused target)
-/// the outcome is left untouched and the summarizer detour plus
-/// `tool_result_budget_bytes` truncation stay in charge as the fallback.
-async fn offload_outcome_artifacts(
-    outcome: &mut SubagentRunOutcome,
-    definition: &AgentDefinition,
-    options: &SubagentRunOptions,
-    task_id: &str,
-) {
-    // Pointers the WORKER authored itself (prompt contract) are read first: the
-    // harness may be about to replace `output` wholesale with its own pointer,
-    // which would otherwise drop them. They also have to survive the early
-    // returns below, so a run with no resolvable action root still reports the
-    // paths its child wrote by hand.
-    let mut paths = extract_artifact_paths(&outcome.output);
-
-    // A worktree-isolated worker offloads into its own checkout; everyone else
-    // uses the live policy's action root, which is the same root a parent's
-    // relative read resolves the returned path against.
-    let policy = crate::security::live_policy::effective_in(&options.run_context.dispatch_ctx());
-    let Some(action_dir) = options
-        .worktree_action_dir
-        .clone()
-        .or_else(|| policy.as_ref().map(|p| p.action_dir.clone()))
-    else {
-        tracing::debug!(
-            task_id = %task_id,
-            agent_id = %outcome.agent_id,
-            worker_authored_paths = paths.len(),
-            "[artifact] no resolvable action_dir — skipping offload (summarizer/truncation backstop applies)"
-        );
-        outcome.artifact_paths = paths;
-        note_artifact_handoff(
-            HANDOFF_STAGE_RECORDED,
-            &outcome.agent_id,
-            task_id,
-            &outcome.artifact_paths,
-        );
-        return;
-    };
-
-    // A read-only tier means this run may not mutate the disk at all, so the
-    // harness does not persist on its behalf either. The result stays inline and
-    // the summarizer / truncation backstops handle it, exactly as before #3883.
-    if policy
-        .as_ref()
-        .is_some_and(|p| p.autonomy == crate::security::AutonomyLevel::ReadOnly)
-    {
-        tracing::debug!(
-            task_id = %task_id,
-            agent_id = %outcome.agent_id,
-            "[artifact] readonly autonomy tier — skipping offload (summarizer/truncation backstop applies)"
-        );
-        outcome.artifact_paths = paths;
-        note_artifact_handoff(
-            HANDOFF_STAGE_RECORDED,
-            &outcome.agent_id,
-            task_id,
-            &outcome.artifact_paths,
-        );
-        return;
-    }
-
-    // Offload at the tighter of the global default and this agent's own result
-    // cap, so a definition capped below the default (flow_memory_agent at 4 000
-    // chars) gets its full body on disk instead of truncated by
-    // `apply_max_result_chars` immediately after.
-    let threshold =
-        effective_offload_threshold(DEFAULT_OFFLOAD_THRESHOLD_BYTES, definition.max_result_chars);
-
-    // The parent that receives the pointer resolves relative paths against ITS
-    // action root, so the stored artifact is materialised there (also for a
-    // worktree-isolated worker) and the handed-back `outputs/…` path opens.
-    let (output, _artifact) = offload_run_result(
-        std::mem::take(&mut outcome.output),
-        policy,
-        action_dir,
-        outcome.agent_id.clone(),
-        task_id,
-        threshold,
-    )
-    .await;
-    outcome.output = output;
-
-    // Merge: the harness pointer (if it fired) plus any worker-authored pointer
-    // read before the swap. `extract_artifact_paths` already de-duplicates
-    // within a payload; dedupe across the two sources here.
-    for path in extract_artifact_paths(&outcome.output) {
-        if !paths.contains(&path) {
-            paths.push(path);
-        }
-    }
-    outcome.artifact_paths = paths;
-    note_artifact_handoff(
-        HANDOFF_STAGE_RECORDED,
-        &outcome.agent_id,
-        task_id,
-        &outcome.artifact_paths,
-    );
 }
 
 fn workspace_descriptor_for_subagent(
@@ -534,8 +413,7 @@ fn workspace_descriptor_for_subagent(
 /// `Config::load_or_init()` is **not cached** — it re-resolves the config dirs
 /// and re-reads `config.toml` on every call. `run_typed_mode` needed it in six
 /// places, so a single sub-agent spawn used to hit the disk six times and could
-/// observe six *different* configs if the file changed mid-spawn. One snapshot
-/// is both cheaper and more coherent.
+/// observe six *different* configs if the file changed mid-spawn.
 ///
 /// The error is captured as a `String` rather than dropped to `Option` so the
 /// sites that log it can say why the config was unavailable; every site
@@ -562,6 +440,7 @@ async fn run_typed_mode(
     parent: &ParentExecutionContext,
     task_id: &str,
     config: &LoadedConfig,
+    native: crate::agent::tinyagents::NativeSubagentRunContext,
 ) -> Result<SubagentRunOutcome, SubagentRunError> {
     let started = Instant::now();
 
@@ -591,11 +470,11 @@ async fn run_typed_mode(
     // once the OAuth handshake reaches ACTIVE/CONNECTED, so this call
     // returns the fresh list almost for free on the warm path. Fall back
     // to the parent's frozen list when the live fetch returns empty.
-    let live_integrations: Vec<crate::agent::prompts::ConnectedIntegration> = {
+    let live_integrations: Vec<crate::integrations::ConnectedIntegration> = {
         let signed_in = config
             .as_ref()
             .ok()
-            .map(|cfg| user_is_signed_in_to_composio(cfg))
+            .map(|cfg| crate::integrations::composio::user_is_signed_in_to_composio(cfg))
             .unwrap_or(false);
         if !signed_in {
             parent.connected_integrations.clone()
@@ -703,8 +582,7 @@ async fn run_typed_mode(
         .iter()
         .map(|&i| parent.all_tools[i].name().to_string())
         .collect();
-    let filtered_specs = crate::agent::session_host::dedup_visible_tool_specs(filtered_specs);
-    let filtered_specs = dedup_tool_specs_by_name(&definition.id, filtered_specs);
+    let filtered_specs = dedup_visible_tool_specs(filtered_specs);
 
     tracing::debug!(
         agent_id = %definition.id,
@@ -721,7 +599,7 @@ async fn run_typed_mode(
         definition.extensions.omit_safety_preamble,
     );
 
-    let connected_integrations_for_prompt: Vec<crate::agent::prompts::ConnectedIntegration> =
+    let connected_integrations_for_prompt: Vec<crate::integrations::ConnectedIntegration> =
         live_integrations
             .iter()
             .filter(|ci| ci.connected)
@@ -748,7 +626,7 @@ async fn run_typed_mode(
             Some(dir) => crate::agent::prompts::load_agents_md_layers(&parent.workspace_dir, &dir),
             None => {
                 // No resolvable project dir — still surface the workspace layer.
-                crate::agent::prompts::AgentsMdContent {
+                tinyagents_harness::context::AgentsMdContent {
                     global: crate::agent::prompts::load_agents_md(&parent.workspace_dir),
                     local: None,
                 }
@@ -759,7 +637,7 @@ async fn run_typed_mode(
             agent_id = %definition.id,
             "[agents_md] disabled by config; skipping AGENTS.md injection for subagent"
         );
-        crate::agent::prompts::AgentsMdContent::default()
+        tinyagents_harness::context::AgentsMdContent::default()
     };
 
     let prompt_ctx = PromptContext {
@@ -802,18 +680,19 @@ async fn run_typed_mode(
         }
     };
 
-    let system_prompt = append_subagent_role_contract(system_prompt, &definition.id);
-    // #3883: only agents that actually hold a file-write tool are told to
-    // offload. `visible_tool_names` is this sub-agent's real, post-filter tool
-    // surface, so the contract can never advertise a tool the child cannot call.
-    let system_prompt =
-        append_artifact_offload_contract(system_prompt, &definition.id, &visible_tool_names);
+    let system_prompt = compose_subagent_system_prompt(
+        system_prompt,
+        &definition.id,
+        &visible_tool_names,
+        task_prompt,
+        options.run_context.spawn_depth,
+    );
 
     // ── Build the user message (with optional context prefix) ──────────
     // Shared one-line stamp (#3602), in the user's zone like the main agent's.
     // On the user message: sub-agent system prompts are byte-stable for caching.
     let zone = config.as_ref().ok().map(|c| c.time_zone());
-    let now_str = crate::agent::prompts::current_datetime_line(zone.as_deref());
+    let now_str = crate::prompts::current_datetime_line(zone.as_deref());
 
     let mut context_parts: Vec<&str> = Vec::new();
     if !definition.extensions.omit_memory_context {
@@ -912,7 +791,7 @@ async fn run_typed_mode(
         );
     }
 
-    let (output, iterations, agg_usage, early_exit_tool, hit_cap, breaker_halt) =
+    let (output, iterations, agg_usage, early_exit_tool, hit_cap, breaker_halt, failure_cause) =
         super::graph::run_subagent_via_graph(
             subagent_source.clone(),
             &model,
@@ -923,7 +802,7 @@ async fn run_typed_mode(
             filtered_specs.clone(),
             allowed_names,
             definition_iter_cap(&options.run_context, definition),
-            options.run_queue.clone(),
+            (options.run_queue.clone(), options.message_run_queue.clone()),
             parent.on_progress.clone(),
             &definition.id,
             task_id,
@@ -948,6 +827,7 @@ async fn run_typed_mode(
             // The spawn-wide config snapshot supplies the `[context]`
             // knobs the graph used to load for itself.
             config.as_ref().ok().map(|c| c.as_ref()),
+            Some(native),
         )
         .await?;
 
@@ -1030,6 +910,7 @@ async fn run_typed_mode(
         elapsed: started.elapsed(),
         mode: SubagentMode::Typed,
         status,
+        failure_cause,
         final_history: history,
         usage,
         // Filled in by `run_subagent` once the offload step has had its say, so
@@ -1039,7 +920,3 @@ async fn run_typed_mode(
             tinyagents_orchestration::subagent::SubagentPersistenceDisposition::TerminalExisting,
     })
 }
-
-#[cfg(test)]
-#[path = "runner_result_cap_tests.rs"]
-mod result_cap_tests;

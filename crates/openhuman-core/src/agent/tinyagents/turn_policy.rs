@@ -137,12 +137,18 @@ pub(crate) fn run_policy_for_provider(
 ) -> RunPolicy {
     run_policy(&TurnPolicyOptions {
         max_model_calls: max_iterations,
-        max_tool_calls: crate::agent::stop_hooks::tool_call_limit(max_iterations, tool_call_cap),
+        max_tool_calls: tool_call_limit(max_iterations, tool_call_cap),
         max_depth: MAX_SPAWN_DEPTH,
         local_provider,
         response_cache_enabled,
         overrides: env_overrides(),
     })
+}
+
+/// Default per-turn tool budget, narrowed by an explicit host cap.
+pub(crate) fn tool_call_limit(max_iterations: usize, cap: Option<usize>) -> usize {
+    let default = max_iterations.saturating_mul(8).max(8);
+    cap.map_or(default, |cap| default.min(cap))
 }
 
 /// True when `name` is a sub-agent spawn/delegation tool that a **child** run

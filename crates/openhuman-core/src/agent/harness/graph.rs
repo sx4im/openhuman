@@ -32,10 +32,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::mpsc::Sender;
 
-use crate::agent::progress::AgentProgress;
 use crate::agent::tinyagents::TurnModelSource;
 use crate::agent::tinyagents::TurnSpec;
 use crate::config::{MultimodalConfig, MultimodalFileConfig};
+use crate::progress::AgentProgress;
 use tinyagents_session::transcript::TranscriptMessage;
 use tinytools::Tool;
 
@@ -56,7 +56,7 @@ pub(crate) async fn run_channel_turn_via_graph(
     multimodal: MultimodalConfig,
     multimodal_files: MultimodalFileConfig,
     on_progress: Option<Sender<AgentProgress>>,
-    origin: Option<crate::agent::turn_origin::AgentTurnOrigin>,
+    origin: Option<crate::security::turn_origin::AgentTurnOrigin>,
     sandbox_mode: tinyagents_definition::SandboxMode,
     approval: crate::security::approval::ApprovalTurnContext,
     memory_identity: crate::memory::scope::MemoryIdentity,
@@ -116,15 +116,15 @@ pub(crate) async fn run_channel_turn_via_graph(
                 .expect("config loaded for a marker-bearing history row");
             let workspace = Some(config.action_dir.clone());
             attachment_workspace = workspace.clone();
-            let scope = crate::agent::attachments::AttachmentAccessScope {
+            let scope = crate::attachments::AttachmentAccessScope {
                 external_channel: matches!(
                     origin.as_ref(),
-                    Some(crate::agent::turn_origin::AgentTurnOrigin::ExternalChannel { .. })
+                    Some(crate::security::turn_origin::AgentTurnOrigin::ExternalChannel { .. })
                 ),
                 workspace: workspace.clone(),
             };
             row.content =
-                crate::agent::attachments::stage(&row.content, "channel", config, &scope).await?;
+                crate::attachments::stage(&row.content, "channel", config, &scope).await?;
             row.parts = None;
         }
     }
@@ -168,6 +168,7 @@ pub(crate) async fn run_channel_turn_via_graph(
         context_window,
         // No mid-flight steering on the channel path.
         run_queue: None,
+        message_run_queue: None,
         // Same pause as the chat path: a channel turn's continuation is the
         // user's next message, so ending the turn on the question is the whole
         // mechanism. Without this the model answers its own question (see
@@ -180,7 +181,7 @@ pub(crate) async fn run_channel_turn_via_graph(
         // the standard per-turn budget).
         max_output_tokens: Some(crate::inference::provider::AGENT_TURN_MAX_OUTPUT_TOKENS),
         // Context middlewares: cache-align + default tool-result byte cap (the
-        // channel path has no session `ContextManager` to source config from).
+        // channel path has no session context config to source from).
         context_mw:
             crate::agent::tinyagents::middleware::turn_context::TurnContextMiddleware::defaults(),
         // Channel/CLI path carries its own gating; no session `.tool_policy()`.
@@ -249,7 +250,7 @@ fn seed_channel_attachments(
         .map(crate::agent::message_convert::chat_message_to_message)
     {
         context.attachment_placeholders =
-            Arc::new(crate::agent::attachments::image_references(&input, &[]));
+            Arc::new(crate::attachments::image_references(&input, &[]));
     }
 }
 

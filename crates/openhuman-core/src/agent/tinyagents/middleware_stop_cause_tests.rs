@@ -9,7 +9,8 @@ use crate::agent::session_host::turn_checkpoint::CheckpointToolResult;
 use crate::agent::tinyagents::middleware::repeated_failure::RepeatedToolFailureMiddleware;
 use tinyagents_harness::middleware::is_repeat_call_exempt;
 use tinyagents_harness::middleware::library::{
-    RepeatProgressMiddleware, REPEAT_GUARD_BLOCKED, REPEAT_GUARD_HALTED, REPEAT_GUARD_METADATA_KEY,
+    RepeatProgressMiddleware, DEFAULT_CLEARED_PLACEHOLDER, REPEAT_GUARD_BLOCKED,
+    REPEAT_GUARD_HALTED, REPEAT_GUARD_METADATA_KEY,
 };
 use tinyinference_llm::message::{AssistantMessage, ContentBlock};
 use tinyinference_llm::model::ModelResponse;
@@ -121,7 +122,15 @@ fn response_with(calls: &[TaToolCall]) -> ModelResponse {
 /// stamped with the guard's marker. A `grep` returns something new every
 /// round. Stops at the first pause and returns the rendered stop kind and
 /// summary.
-async fn re_read_until_stopped(batch: &[(&str, &str)], rounds: usize) -> (StopReasonKind, String) {
+async fn re_read_until_stopped(
+    batch: &[(&str, &str)],
+    rounds: usize,
+) -> (
+    StopReasonKind,
+    String,
+    String,
+    Option<tinyagents_harness::no_progress::ClassifiedStopCause>,
+) {
     let handle = SteeringHandle::allow_all();
     let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let guard = RepeatProgressMiddleware::new(
@@ -130,7 +139,7 @@ async fn re_read_until_stopped(batch: &[(&str, &str)], rounds: usize) -> (StopRe
         Arc::new(is_repeat_call_exempt),
     )
     .with_read_only(Arc::new(|name: &str| matches!(name, "file_read" | "grep")))
-    .with_cleared_placeholder(CLEARED_PLACEHOLDER);
+    .with_cleared_placeholder(DEFAULT_CLEARED_PLACEHOLDER);
     let breaker = RepeatedToolFailureMiddleware::new(handle.clone(), 3, slot.clone());
     let mut ctx = ctx();
     let mut records = Vec::new();
@@ -194,7 +203,9 @@ async fn re_read_until_stopped(batch: &[(&str, &str)], rounds: usize) -> (StopRe
                 .after_agent(&mut ctx, &(), &mut AgentRun::new())
                 .await
                 .unwrap();
-            return summary_from(&slot, &records);
+            let (kind, summary) = summary_from(&slot, &records);
+            let note = slot.lock().unwrap().clone().unwrap();
+            return (kind, summary, note, ctx.take_halted_by_guard_cause());
         }
     }
     panic!("the repeated reads never stopped the run");
@@ -212,8 +223,12 @@ async fn a_not_found_stop_inside_a_repeat_loop_is_summarised_as_repeating() {
         ("file_read", "src/main.rs"),
         ("file_read", "src/lbi.rs"),
     ];
-    let (kind, summary) = re_read_until_stopped(&batch, 12).await;
+    let (kind, summary, note, cause) = re_read_until_stopped(&batch, 12).await;
     assert_eq!(kind, StopReasonKind::RepeatingStep, "{summary}");
+    let cause = cause.expect("typed repeat-loop stop cause");
+    assert_eq!(cause.class, "repeating_step");
+    assert_eq!(cause.operation, "file_read");
+    assert_eq!(cause.summary, note);
     assert!(
         summary.contains("kept repeating the same step"),
         "{summary}"
@@ -233,8 +248,12 @@ async fn a_repeat_guard_stop_at_admission_keeps_its_note_over_a_sibling_failure(
         ("file_read", "src/lbi.rs"),
         ("file_read", "src/lib.rs"),
     ];
-    let (kind, summary) = re_read_until_stopped(&batch, 12).await;
+    let (kind, summary, note, cause) = re_read_until_stopped(&batch, 12).await;
     assert_eq!(kind, StopReasonKind::RepeatingStep, "{summary}");
+    let cause = cause.expect("repeat guard owns a typed stop cause");
+    assert_eq!(cause.class, "repeating_step");
+    assert_eq!(cause.operation, "file_read");
+    assert_eq!(cause.summary, note);
 }
 
 /// A mistyped read re-issued unchanged stops the run before the guard's
@@ -273,6 +292,13 @@ async fn a_refusal_later_in_the_batch_relabels_a_repeat_loop_stop() {
         .await
         .unwrap();
     records.push(record("file_read", &refused));
+    let cause = ctx
+        .take_halted_by_guard_cause()
+        .expect("host latch exposes its typed relabel");
+    let note = slot.lock().unwrap().clone().unwrap();
+    assert_eq!(cause.class, "repeating_step");
+    assert_eq!(cause.operation, "file_read");
+    assert_eq!(cause.summary, note);
     breaker
         .after_agent(&mut ctx, &(), &mut AgentRun::new())
         .await
@@ -283,6 +309,62 @@ async fn a_refusal_later_in_the_batch_relabels_a_repeat_loop_stop() {
     let note = slot.lock().unwrap().clone().unwrap();
     assert!(note.contains("`file_read`"), "{note}");
     assert!(note.contains("No such file or directory"), "{note}");
+}
+
+#[tokio::test]
+async fn successful_progress_restores_the_typed_cause_after_repeat_relabel() {
+    let handle = SteeringHandle::allow_all();
+    let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let breaker = RepeatedToolFailureMiddleware::new(handle, 3, slot.clone());
+    let mut ctx = ctx();
+
+    for id in ["typo-0", "typo-1"] {
+        let mut call = TaToolCall::new(id, "file_read", json!({ "path": "src/lbi.rs" }));
+        breaker.before_tool(&mut ctx, &(), &mut call).await.unwrap();
+        let mut result = failing_result("file_read", MISTYPED_PATH);
+        breaker
+            .after_tool(&mut ctx, &(), &invocation(id, "file_read"), &mut result)
+            .await
+            .unwrap();
+    }
+
+    let mut refused = TaToolResult::error(
+        "Blocked: this exact call has already returned the identical result 4 times and was \
+         not executed again.",
+    );
+    refused.metadata = Some(json!({ REPEAT_GUARD_METADATA_KEY: REPEAT_GUARD_BLOCKED }));
+    breaker
+        .after_tool(
+            &mut ctx,
+            &(),
+            &invocation("reread", "file_read"),
+            &mut refused,
+        )
+        .await
+        .unwrap();
+    let relabelled = ctx
+        .take_halted_by_guard_cause()
+        .expect("refusal relabels the current typed cause");
+    assert_eq!(relabelled.class, "repeating_step");
+    assert_eq!(relabelled.operation, "file_read");
+
+    let mut success = tool_result("file_read", "contents restored");
+    breaker
+        .after_tool(
+            &mut ctx,
+            &(),
+            &invocation("read-success", "file_read"),
+            &mut success,
+        )
+        .await
+        .unwrap();
+    let restored = ctx
+        .take_halted_by_guard_cause()
+        .expect("progress restores the original typed cause");
+    let note = slot.lock().unwrap().clone().unwrap();
+    assert_eq!(restored.class, "not_found");
+    assert_eq!(restored.operation, "file_read");
+    assert_eq!(restored.summary, note);
 }
 
 /// One mistyped read among reads that keep returning something new is a

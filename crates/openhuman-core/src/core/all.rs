@@ -370,20 +370,20 @@ fn build_registered_controllers() -> Vec<GroupedController> {
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::all_agent_registered_controllers(),
+        crate::agent_runs::all_agent_registered_controllers(),
     );
     // Read-only agent run replay + status over the durable journal/status seams
     // (agent_run_events / agent_run_status / agent_runs_active).
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::tinyagents::replay::all_agent_replay_registered_controllers(),
+        crate::agent_runs::replay::all_agent_replay_registered_controllers(),
     );
     // User-facing agent registry: defaults, enablement, custom agents, tool policy.
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::registry::all_agent_registry_registered_controllers(),
+        crate::agent_registry::all_agent_registry_registered_controllers(),
     );
     // System and process health monitoring
     push(
@@ -444,19 +444,19 @@ fn build_registered_controllers() -> Vec<GroupedController> {
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::plan_review::all_plan_review_registered_controllers(),
+        crate::plan_review::all_plan_review_registered_controllers(),
     );
     // Per-thread Plan/Build run mode (agent.set_run_mode / agent.get_run_mode)
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::tinyagents::run_mode::all_registered_controllers(),
+        crate::threads::run_mode::all_registered_controllers(),
     );
     // Agent-generated artifact storage, retrieval, and lifecycle management
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::artifacts::all_artifacts_registered_controllers(),
+        crate::artifacts::all_artifacts_registered_controllers(),
     );
     // Read-only command palette listing: built-ins merged with skills.list /
     // flows.list (C5). Tagged `Agent` rather than a new `DomainGroup` variant
@@ -668,6 +668,9 @@ fn build_registered_controllers() -> Vec<GroupedController> {
         DomainGroup::Desktop,
         crate::desktop::notifications::all_notifications_registered_controllers(),
     );
+    // Storage layout v1 -> v2 migration, status and restore
+    #[rustfmt::skip]
+    push(&mut controllers, DomainGroup::Config, crate::storage::layout::schemas::all_registered_controllers());
     // Mobile device pairing and management
     push(
         &mut controllers,
@@ -678,43 +681,19 @@ fn build_registered_controllers() -> Vec<GroupedController> {
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::session_db::all_session_db_registered_controllers(),
+        crate::sessions::all_session_db_registered_controllers(),
     );
     // One-time legacy session import into TinyAgents stores
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::session_import::all_session_import_registered_controllers(),
+        crate::storage::import::all_session_import_registered_controllers(),
     );
-    // Background agent command center — read-only grouped view over the run ledger
+    // Background agent command center, workflow runs, teams, worktrees, and subagent controls.
     push(
         &mut controllers,
         DomainGroup::Agent,
-        crate::agent::orchestration::all_command_center_registered_controllers(),
-    );
-    // Durable dynamic workflow runs — definitions + read surface over the run ledger
-    push(
-        &mut controllers,
-        DomainGroup::Agent,
-        crate::agent::orchestration::all_workflow_run_registered_controllers(),
-    );
-    // Durable agent-team coordination — teams, members, dependency-aware task claiming, messaging
-    push(
-        &mut controllers,
-        DomainGroup::Agent,
-        crate::agent::orchestration::all_agent_team_registered_controllers(),
-    );
-    // Git-worktree isolation manager — list / status / diff / remove worker worktrees (#3376)
-    push(
-        &mut controllers,
-        DomainGroup::Agent,
-        crate::agent::orchestration::all_worktree_registered_controllers(),
-    );
-    // User-driven cancel of detached background sub-agents (#3711)
-    push(
-        &mut controllers,
-        DomainGroup::Agent,
-        crate::agent::orchestration::all_subagent_control_registered_controllers(),
+        crate::agent_runs::all_orchestration_registered_controllers(),
     );
     // SaaS operator plane: provision and inspect user profiles.
     push(
@@ -804,12 +783,14 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         "agent" => Some("Per-thread agent run-mode control (Plan vs Build)."),
         "ai" => Some("Agent-generated artifact storage, retrieval, and lifecycle management."),
         "app_state" => Some("Expose core-owned app shell state for frontend polling."),
-        "profiles" => Some("SaaS operator plane: provision and inspect the profile serving each user."),
+        "profiles" => {
+            Some("SaaS operator plane: provision and inspect the profile serving each user.")
+        }
         "auth" => Some("Manage app session and provider credentials."),
         "agent_experience" => Some("Local procedural experience capture and retrieval for agents."),
         "channels" => Some("Channel definitions, connections, and lifecycle management."),
         "composio" => Some(
-            "Composio OAuth integrations proxied via the backend — toolkits, connections, tools, and actions."
+            "Composio OAuth integrations proxied via the backend — toolkits, connections, tools, and actions.",
         ),
         "config" => Some("Read and update persisted runtime configuration."),
         "connectivity" => Some(
@@ -817,9 +798,9 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         ),
         "cron" => Some("Manage scheduled jobs and run history."),
         "flows" => Some("Create, store, and run automation workflows."),
-        "dashboard" => Some(
-            "Operator-facing dashboard aggregations: per-model health comparison rows.",
-        ),
+        "dashboard" => {
+            Some("Operator-facing dashboard aggregations: per-model health comparison rows.")
+        }
         "mcp_clients" => Some(
             "Browse the MCP registries, declare the user's servers in one mcp.json document, manage their connections and credentials, and expose their tools to the agent.",
         ),
@@ -831,16 +812,26 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         ),
         "encrypt" => Some("Encrypt secure values managed by secret storage."),
         "health" => Some("Process and component health snapshots."),
-        "inference" => Some("Connect to configured text, vision, and embedding inference runtimes."),
-        "javascript" => Some("First-class JavaScript runtime bridge for listing and dispatching tools."),
+        "inference" => {
+            Some("Connect to configured text, vision, and embedding inference runtimes.")
+        }
+        "javascript" => {
+            Some("First-class JavaScript runtime bridge for listing and dispatching tools.")
+        }
         "security" => Some("Security policy and autonomy guardrail metadata."),
         "service" => Some("Desktop service lifecycle management."),
         "session_import" => {
             Some("One-time import of legacy session transcripts into TinyAgents stores.")
         }
-        "skill_registry" => Some("Browse, search, install, and uninstall skills from remote registries (OpenHuman, Hermes, OpenClaw)."),
-        "skill_runtime" => Some("Run installed skills, inspect run logs, and resolve Node/Python skill runtimes."),
-        "skills" => Some("Discovered SKILL.md skills (discovery, parse, install, run) and their resources."),
+        "skill_registry" => Some(
+            "Browse, search, install, and uninstall skills from remote registries (OpenHuman, Hermes, OpenClaw).",
+        ),
+        "skill_runtime" => {
+            Some("Run installed skills, inspect run logs, and resolve Node/Python skill runtimes.")
+        }
+        "skills" => {
+            Some("Discovered SKILL.md skills (discovery, parse, install, run) and their resources.")
+        }
         "socket" => Some("Backend Socket.IO bridge controls."),
         "memory" => Some(
             "Memory v2: engine selection, recall, fetch, learn, forget, conversations, document sources, context.md and v1 import.",
@@ -860,16 +851,18 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         "tool_registry" => Some(
             "Read-only discovery for MCP stdio tools and controller-backed tools, including routes, schemas, version, allowed agents, and health.",
         ),
-        "test" => Some(
-            "E2E test support — wipe sidecar state in-place between specs.",
-        ),
-        "wallet" => Some("Local wallet onboarding status and derived multi-chain account metadata."),
+        "test" => Some("E2E test support — wipe sidecar state in-place between specs."),
+        "wallet" => {
+            Some("Local wallet onboarding status and derived multi-chain account metadata.")
+        }
         "web3_swap" => Some("Single-chain crypto swaps via deBridge, built on the local wallet."),
-        "web3_bridge" => Some("Cross-chain crypto bridges via deBridge DLN, built on the local wallet."),
+        "web3_bridge" => {
+            Some("Cross-chain crypto bridges via deBridge DLN, built on the local wallet.")
+        }
         "web3_dapp" => Some("Generic EVM dapp contract calls signed by the local wallet."),
-        "provider_surfaces" => Some(
-            "Local-first assistive surfaces for provider events, respond queues, and drafts.",
-        ),
+        "provider_surfaces" => {
+            Some("Local-first assistive surfaces for provider events, respond queues, and drafts.")
+        }
         "voice" => Some("Speech-to-text and text-to-speech using local models."),
         "webhooks" => {
             Some("Webhook tunnel registrations and captured request/response debug logs.")
@@ -885,6 +878,7 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         "devices" => Some(
             "Paired mobile device management — pairing channel creation, listing, and revocation.",
         ),
+        "storage" => Some("Storage layout v1 to v2 migration, schema status and restore."),
         "subsystems" => Some(
             "Kernel subsystem slots and their bound drivers: class, health, contract version, and advertised capabilities.",
         ),

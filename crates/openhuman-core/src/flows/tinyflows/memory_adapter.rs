@@ -38,9 +38,6 @@ use serde_json::{json, Value};
 use tinyflows::caps::MemoryProvider;
 use tinyflows::error::{EngineError, Result};
 
-#[cfg(test)]
-use crate::agent::turn_origin;
-use crate::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::config::Config;
 use crate::flows::{
     cross_flow_filter, flow_filter, flow_key_of, flow_key_tag, forget_matching, remember_keyed,
@@ -51,6 +48,9 @@ use crate::memory::MemoryError;
 use crate::security::approval::{
     redact_args, summarize_action, ApprovalGate, ExecutionOutcome, GateOutcome,
 };
+#[cfg(test)]
+use crate::security::turn_origin;
+use crate::security::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::security::SecurityPolicy;
 use tinybox_bus::CommandClass;
 use tinymemory_api::wrap_untrusted_for_agent;

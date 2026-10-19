@@ -496,7 +496,7 @@ async fn harness_readiness_checks_session_for_execution_provider() {
 /// never cross.
 #[tokio::test]
 async fn agent_ref_gate_reads_the_registry_of_the_explicit_context() {
-    use crate::agent::registry::types::{AgentRegistryEntry, AgentRegistrySource};
+    use crate::agent_registry::types::{AgentRegistryEntry, AgentRegistrySource};
     use crate::core::runtime::{CoreContext, DispatchCtx, DomainSet};
 
     let entry = AgentRegistryEntry {

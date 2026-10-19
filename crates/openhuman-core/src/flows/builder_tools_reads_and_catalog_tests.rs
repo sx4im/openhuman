@@ -140,6 +140,9 @@ async fn get_flow_run_missing_id_is_error() {
 
 #[tokio::test]
 async fn list_flow_connections_is_read_only() {
+    // Reaches the connector module, whose route is process-wide: hold the module
+    // lock (before TEST_ENV_LOCK, the established order) for the whole test.
+    let _module = crate::integrations::composio::module_client::module_guard().await;
     let tmp = TempDir::new().unwrap();
     let tool = ListFlowConnectionsTool::new(test_config(&tmp));
     assert_eq!(tool.permission_level(), PermissionLevel::None);

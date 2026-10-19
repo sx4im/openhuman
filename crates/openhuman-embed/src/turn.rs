@@ -22,7 +22,7 @@
 //!
 //! A turn reads one `tokio` task-local that no parameter can carry yet:
 //!
-//! - **origin** ([`turn_origin`](openhuman_core::agent::turn_origin)) — the
+//! - **origin** ([`turn_origin`](openhuman_core::security::turn_origin)) — the
 //!   caller's statement of authority. The approval gate is *fail-closed*: an
 //!   unlabelled call gets the `Cli` default, and a caller wanting anything
 //!   else — a workflow's blanket automation grant, say — must scope it around
@@ -31,7 +31,7 @@
 //!
 //! Everything else a turn needs rides explicit values handed to the core
 //! (`AgentChatEnv`): the **progress** sink
-//! ([`progress_sink`](openhuman_core::agent::progress_sink)) and the host
+//! ([`AgentProgress`](openhuman_core::progress::AgentProgress)) and the host
 //! environment (shared budget, delegation depth, cancellation, hooks, tool-belt
 //! authority).
 //!
@@ -42,10 +42,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::error::CoreError;
-use openhuman_core::agent::progress::AgentProgress;
-use openhuman_core::agent::turn_origin::AgentTurnOrigin;
 use openhuman_core::core::runtime::CoreRuntime;
 use openhuman_core::inference::INFERENCE_AGENT_CHAT as AGENT_CHAT;
+use openhuman_core::progress::AgentProgress;
+use openhuman_core::security::turn_origin::AgentTurnOrigin;
 
 #[path = "turn_types.rs"]
 mod types;
@@ -98,7 +98,10 @@ pub struct Turn {
     control_deadline: Option<tokio::time::Instant>,
     observer: Option<Arc<dyn crate::observe::TurnObserver>>,
     trace_content: crate::observe::TraceContent,
-    hooks: openhuman_core::agent::hooks::HookScope,
+    hooks: tinyagents_hooks::scope::HookScope<
+        openhuman_core::agent::tinyagents::host::OpenHumanRunContext,
+        tinyagents_harness::cost::TurnCost,
+    >,
     tools: Option<openhuman_core::agent::HostTools>,
     tool_env: Option<Arc<std::collections::BTreeMap<String, String>>>,
 }
@@ -143,14 +146,23 @@ impl Turn {
         self
     }
 
-    pub(crate) fn with_hooks(mut self, hooks: openhuman_core::agent::hooks::HookScope) -> Self {
+    pub(crate) fn with_hooks(
+        mut self,
+        hooks: tinyagents_hooks::scope::HookScope<
+            openhuman_core::agent::tinyagents::host::OpenHumanRunContext,
+            tinyagents_harness::cost::TurnCost,
+        >,
+    ) -> Self {
         self.hooks = hooks;
         self
     }
 
     /// Add a tool callback for this turn only, after runtime and agent hooks.
     /// Does not change the agent or any other concurrent turn.
-    pub fn tool_hook(mut self, hook: Arc<dyn crate::seams::ToolHook>) -> Self {
+    pub fn tool_hook(
+        mut self,
+        hook: Arc<dyn crate::seams::ToolHook<crate::seams::OpenHumanRunContext>>,
+    ) -> Self {
         self.hooks.push_tool(hook);
         self
     }
@@ -210,8 +222,8 @@ impl Turn {
 
     /// Add a completed-turn callback for this turn only. The callback runs
     /// asynchronously with an owned snapshot after the turn completes.
-    pub fn post_turn_hook(mut self, hook: Arc<dyn crate::seams::PostTurnHook>) -> Self {
-        self.hooks.push_post_turn(hook);
+    pub fn post_turn_hook(mut self, hook: Arc<dyn crate::seams::LearningSink>) -> Self {
+        self.hooks.push_learning(hook);
         self
     }
 

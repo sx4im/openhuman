@@ -26,18 +26,19 @@ const FILE_BLOCK: &str = "[policy-blocked] Security policy: forbidden path /etc/
 
 async fn run_call(
     mw: &RepeatedToolFailureMiddleware,
+    context: &mut RunContext<crate::agent::tinyagents::host::OpenHumanRunContext>,
     id: &str,
     tool: &str,
     args: serde_json::Value,
     outcome: Result<&str, &str>,
 ) {
     let mut call = TaToolCall::new(id, tool, args);
-    mw.before_tool(&mut ctx(), &(), &mut call).await.unwrap();
+    mw.before_tool(context, &(), &mut call).await.unwrap();
     let mut result = match outcome {
         Ok(text) => TaToolResult::success(text),
         Err(error) => failing_result(tool, error),
     };
-    mw.after_tool(&mut ctx(), &(), &invocation(id, tool), &mut result)
+    mw.after_tool(context, &(), &invocation(id, tool), &mut result)
         .await
         .unwrap();
 }
@@ -90,8 +91,10 @@ fn a_policy_block_allows_one_alternative_but_a_user_denial_does_not() {
 #[tokio::test]
 async fn a_blocked_shell_command_lets_the_model_try_a_narrower_one() {
     let (mw, handle, slot) = breaker();
+    let mut context = ctx();
     run_call(
         &mw,
+        &mut context,
         "scan-1",
         "shell",
         serde_json::json!({"command": "find / -name '*.log'"}),
@@ -100,7 +103,7 @@ async fn a_blocked_shell_command_lets_the_model_try_a_narrower_one() {
     .await;
     assert_eq!(drain_pause_count(&handle), 0, "one refusal is not a halt");
     assert!(slot.lock().unwrap().is_none());
-    let nudges = drain_nudge_messages(&mw);
+    let nudges = drain_nudge_messages(&mw, &mut context).await;
     assert_eq!(nudges.len(), 1, "{nudges:?}");
     assert!(nudges[0].contains("narrower"), "{nudges:?}");
     assert!(nudges[0].contains("Unbounded system scan"), "{nudges:?}");
@@ -109,6 +112,7 @@ async fn a_blocked_shell_command_lets_the_model_try_a_narrower_one() {
     // refusal starts a fresh budget.
     run_call(
         &mw,
+        &mut context,
         "scan-2",
         "shell",
         serde_json::json!({"command": "find ./logs -name '*.log'"}),
@@ -117,6 +121,7 @@ async fn a_blocked_shell_command_lets_the_model_try_a_narrower_one() {
     .await;
     run_call(
         &mw,
+        &mut context,
         "scan-3",
         "shell",
         serde_json::json!({"command": "du -sh /"}),
@@ -130,9 +135,11 @@ async fn a_blocked_shell_command_lets_the_model_try_a_narrower_one() {
 #[tokio::test]
 async fn a_second_consecutive_policy_block_stops_the_turn() {
     let (mw, handle, slot) = breaker();
+    let mut context = ctx();
     for (id, command) in [("scan-1", "find / -name x"), ("scan-2", "ls -R /")] {
         run_call(
             &mw,
+            &mut context,
             id,
             "shell",
             serde_json::json!({"command": command}),
@@ -148,8 +155,10 @@ async fn a_second_consecutive_policy_block_stops_the_turn() {
 #[tokio::test]
 async fn blocks_on_different_tools_are_budgeted_separately() {
     let (mw, handle, slot) = breaker();
+    let mut context = ctx();
     run_call(
         &mw,
+        &mut context,
         "f-1",
         "web_fetch",
         serde_json::json!({"url": "https://blocked.test/a"}),
@@ -158,6 +167,7 @@ async fn blocks_on_different_tools_are_budgeted_separately() {
     .await;
     run_call(
         &mw,
+        &mut context,
         "r-1",
         "file_read",
         serde_json::json!({"path": "/etc/shadow"}),
@@ -171,8 +181,10 @@ async fn blocks_on_different_tools_are_budgeted_separately() {
 #[tokio::test]
 async fn a_user_denial_still_stops_on_the_first_refusal() {
     let (mw, handle, slot) = breaker();
+    let mut context = ctx();
     run_call(
         &mw,
+        &mut context,
         "deny-1",
         "shell",
         serde_json::json!({"command": "rm -rf build"}),
@@ -319,18 +331,27 @@ fn a_failed_task_is_classified_by_its_headline_not_its_attached_report() {
 #[tokio::test]
 async fn a_failed_browser_task_nudges_toward_its_hint_then_stops_on_a_repeat() {
     let (mw, handle, slot) = breaker();
+    let mut context = ctx();
     let error = format!(
         "{} Browser task failed at step 1: Planning failed Hint: name the exact button",
         tinytools::status::TASK_FAILED_MARKER
     );
     let args =
         serde_json::json!({"action": "task", "goal": "book it", "url": "https://shop.test/"});
-    run_call(&mw, "task-1", "browser", args.clone(), Err(&error)).await;
+    run_call(
+        &mw,
+        &mut context,
+        "task-1",
+        "browser",
+        args.clone(),
+        Err(&error),
+    )
+    .await;
     assert_eq!(drain_pause_count(&handle), 0);
-    let nudges = drain_nudge_messages(&mw);
+    let nudges = drain_nudge_messages(&mw, &mut context).await;
     assert_eq!(nudges.len(), 1, "{nudges:?}");
     assert!(nudges[0].contains("hint"), "{nudges:?}");
-    run_call(&mw, "task-2", "browser", args, Err(&error)).await;
+    run_call(&mw, &mut context, "task-2", "browser", args, Err(&error)).await;
     assert_eq!(drain_pause_count(&handle), 1);
     let summary = slot.lock().unwrap().clone().unwrap();
     assert!(summary.contains("task_failed"), "{summary}");

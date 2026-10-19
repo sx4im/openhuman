@@ -64,8 +64,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// Complete definition accepted by [`AgentDefinitionSpec::from_base`].
-pub use openhuman_core::agent::harness::host_definition::AgentDefinition;
-pub use openhuman_core::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
+pub use openhuman_core::agent_registry::host_definition::AgentDefinition;
+pub use openhuman_core::security::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 
 /// The origin of the executing turn, with its original chat or channel route.
 ///
@@ -76,10 +76,6 @@ pub use openhuman_core::agent::turn_origin::{AgentTurnOrigin, TrustedAutomationS
 pub fn current_turn_origin() -> Option<AgentTurnOrigin> {
     openhuman_core::core::runtime::CoreContext::current_turn_origin()
 }
-pub use openhuman_core::backend::{
-    install_backend_transport, installed_backend_transport, BackendRequest, BackendTransport,
-    BackendTransportError, BaseUrlPurpose, TransportProfile,
-};
 pub use openhuman_core::config::ComposioHostCredential;
 pub use openhuman_core::config::Config as RuntimeConfig;
 pub use openhuman_core::config::{SearchHostCredential, UnknownKeyedSearchProvider};
@@ -101,8 +97,9 @@ pub use tinytools::{PermissionLevel, Tool, ToolExposure, ToolResult};
 
 /// Live agent-turn progress for in-process embedders.
 pub mod agent_progress {
-    pub use openhuman_core::agent::progress::AgentProgress;
-    pub use openhuman_core::agent::progress_sink::ProgressSink;
+    pub use openhuman_core::progress::AgentProgress;
+    /// The bounded in-process channel an embedder supplies for one agent turn.
+    pub type ProgressSink = tokio::sync::mpsc::Sender<AgentProgress>;
 }
 
 /// The skill registry: the host transport an embedder passes to
@@ -215,14 +212,17 @@ pub use runtime::{
 /// so the trait unifies — re-exporting it here would break the
 /// agent-runtime ownership boundary.
 pub mod seams {
-    pub use openhuman_core::agent::hooks::{PostTurnHook, ToolHook};
-    pub use openhuman_core::agent::hooks::{ToolHookContext, ToolHookDecision, TurnContext};
-    pub use openhuman_core::agent::stop_hooks::BudgetStopHook;
+    pub use openhuman_core::agent::tinyagents::host::OpenHumanRunContext;
     pub use tinyagents_harness::cost::TurnCost;
+    pub use tinyagents_harness::host::{LearningSink, TurnSummary};
     pub use tinyagents_harness::middleware::{PolicyDecision, ToolCallPolicy};
-    pub use tinyagents_harness::middleware::{StopDecision, StopHook};
+    pub use tinyagents_hooks::stop::BudgetStopHook;
+    pub use tinyagents_hooks::stop::{StopDecision, StopHook};
+    pub use tinyagents_hooks::tool::{
+        HookIdentity, ToolHook, ToolHookContext, ToolHookDecision, ToolHookEvent,
+    };
     /// Product cost snapshot passed to harness-owned stop policies.
-    pub type TurnState<'a> = tinyagents_harness::middleware::TurnState<'a, TurnCost>;
+    pub type TurnState<'a> = tinyagents_hooks::stop::TurnState<'a, TurnCost>;
     pub use openhuman_core::core::all::{ControllerExtension, DomainGroup};
     pub use openhuman_core::core::server_launcher::{HostBoot, ServeRequest, ServerLauncher};
     pub use openhuman_core::security::SecurityPolicy;

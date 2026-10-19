@@ -13,7 +13,7 @@
 //! driver refusal ([`ErrorKind::Fenced`]) latches the fence and surfaces as
 //! [`FenceError::Superseded`](super::fence::FenceError::Superseded). Where
 //! the driver cannot fence (no [`Capability::Fencing`], a write it answers
-//! with `Unsupported(Fencing)`, a named database, or a lease store with no
+//! with `Unsupported(Fencing)`, or a lease store with no
 //! record in the ports) the write runs after the host check alone.
 //!
 //! The fence is looked up per write, not when the scope is bound, because
@@ -23,7 +23,10 @@
 //! See [`super::fence`] for what the checks do and do not guarantee.
 
 use std::ops::Range;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,10 +44,6 @@ use super::{DocumentStore, Scope, ScopedStorage, StorageBackend};
 pub struct FencedBackend {
     inner: Arc<dyn StorageBackend>,
     fences: Arc<FenceRegistry>,
-    /// Whether the driver can see the lease records: true for the default
-    /// database (where the cluster scope's leases live), false for a named
-    /// database ([`Self::database`]), whose writes get the host check only.
-    driver_fencing: bool,
 }
 
 impl std::fmt::Debug for FencedBackend {
@@ -58,11 +57,34 @@ impl std::fmt::Debug for FencedBackend {
 impl FencedBackend {
     /// `inner`, its writes checked against `fences`.
     pub fn new(inner: Arc<dyn StorageBackend>, fences: Arc<FenceRegistry>) -> Self {
-        Self {
-            inner,
-            fences,
-            driver_fencing: true,
-        }
+        Self { inner, fences }
+    }
+}
+
+impl FencedBackend {
+    /// `scoped`'s handles with every write passing the scope's fence.
+    fn wrap_scoped(&self, scope: &Scope, scoped: &ScopedStorage) -> ScopedStorage {
+        let guard = Guard {
+            scope: scope.clone(),
+            fences: Arc::clone(&self.fences),
+            backend: Some(Arc::clone(&self.inner)),
+        };
+        ScopedStorage::new(
+            scope.clone(),
+            scoped.driver(),
+            Arc::new(FencedDocuments {
+                inner: Arc::clone(scoped.documents()),
+                guard: guard.clone(),
+            }),
+            Arc::new(FencedStreams {
+                inner: Arc::clone(scoped.streams()),
+                guard: guard.clone(),
+            }),
+            Arc::new(FencedBlobs {
+                inner: Arc::clone(scoped.blobs()),
+                guard,
+            }),
+        )
     }
 }
 
@@ -83,27 +105,70 @@ impl StorageBackend for FencedBackend {
 
     fn for_scope(&self, scope: &Scope) -> Result<ScopedStorage> {
         let scoped = self.inner.for_scope(scope)?;
-        let guard = Guard {
-            scope: scope.clone(),
+        Ok(self.wrap_scoped(scope, &scoped))
+    }
+
+    fn document_driver(&self) -> &'static str {
+        self.inner.document_driver()
+    }
+
+    fn existing_schema(&self) -> Result<Arc<dyn StorageBackend>> {
+        Ok(Arc::new(Self {
+            inner: self.inner.existing_schema()?,
             fences: Arc::clone(&self.fences),
-            backend: self.driver_fencing.then(|| Arc::clone(&self.inner)),
-        };
-        Ok(ScopedStorage::new(
-            scope.clone(),
-            scoped.driver(),
-            Arc::new(FencedDocuments {
-                inner: Arc::clone(scoped.documents()),
-                guard: guard.clone(),
-            }),
-            Arc::new(FencedStreams {
-                inner: Arc::clone(scoped.streams()),
-                guard: guard.clone(),
-            }),
-            Arc::new(FencedBlobs {
-                inner: Arc::clone(scoped.blobs()),
-                guard,
-            }),
-        ))
+        }))
+    }
+
+    async fn prepare_schema(&self) -> Result<()> {
+        self.inner.prepare_schema().await
+    }
+
+    /// The driver's own fenced handles; the fence wrapper itself builds on
+    /// these, so they are not wrapped a second time.
+    fn for_scope_fenced(
+        &self,
+        scope: &Scope,
+        fence: &tinystoragedrivers::Fence,
+    ) -> Result<ScopedStorage> {
+        self.inner.for_scope_fenced(scope, fence)
+    }
+
+    fn for_scope_generation(
+        &self,
+        scope: &Scope,
+        generation: tinystoragedrivers::ScopeGeneration,
+    ) -> Result<ScopedStorage> {
+        let scoped = self.inner.for_scope_generation(scope, generation)?;
+        Ok(self.wrap_scoped(scope, &scoped))
+    }
+
+    fn for_scope_fenced_generation(
+        &self,
+        scope: &Scope,
+        generation: tinystoragedrivers::ScopeGeneration,
+        fence: &tinystoragedrivers::Fence,
+    ) -> Result<ScopedStorage> {
+        self.inner
+            .for_scope_fenced_generation(scope, generation, fence)
+    }
+
+    async fn maintain(
+        &self,
+        budget: tinystoragedrivers::MaintenanceBudget,
+    ) -> Result<tinystoragedrivers::MaintenanceReport> {
+        self.inner.maintain(budget).await
+    }
+
+    async fn checkpoint(&self, mode: tinystoragedrivers::Checkpoint) -> Result<()> {
+        self.inner.checkpoint(mode).await
+    }
+
+    async fn scopes(&self, prefix: &str) -> Result<Vec<Scope>> {
+        self.inner.scopes(prefix).await
+    }
+
+    async fn scopes_of_tenant(&self, tenant: &Scope) -> Result<Vec<Scope>> {
+        self.inner.scopes_of_tenant(tenant).await
     }
 
     /// Reclaiming blobs that already read as absent changes nothing a reader
@@ -112,22 +177,13 @@ impl StorageBackend for FencedBackend {
     async fn sweep_expired_blobs(&self, scope: &Scope) -> Result<u64> {
         self.inner.sweep_expired_blobs(scope).await
     }
-
-    fn database(&self, name: &str) -> Result<Arc<dyn StorageBackend>> {
-        Ok(Arc::new(Self {
-            inner: self.inner.database(name)?,
-            fences: Arc::clone(&self.fences),
-            driver_fencing: false,
-        }))
-    }
 }
 
 #[derive(Clone)]
 struct Guard {
     scope: Scope,
     fences: Arc<FenceRegistry>,
-    /// The inner backend, when its driver may enforce the fence (see
-    /// [`FencedBackend::driver_fencing`]).
+    /// The inner backend, whose driver may enforce the fence.
     backend: Option<Arc<dyn StorageBackend>>,
 }
 
@@ -244,6 +300,23 @@ impl DocumentStore for FencedDocuments {
             self,
             "documents.put",
             documents.put(collection, id, doc, precondition)
+        )
+    }
+
+    /// Forwarded (and fenced): without it the trait default refuses a write that
+    /// declares a schema version or expiry, which is every owner's write.
+    async fn put_with(
+        &self,
+        collection: &str,
+        id: &str,
+        doc: Value,
+        precondition: Precondition,
+        options: tinystoragedrivers::WriteOptions,
+    ) -> Result<Version> {
+        fenced_write!(
+            self,
+            "documents.put_with",
+            documents.put_with(collection, id, doc, precondition, options)
         )
     }
 
@@ -397,11 +470,74 @@ impl StreamStore for FencedStreams {
     async fn streams(&self, prefix: &str) -> Result<Vec<String>> {
         self.inner.streams(prefix).await
     }
+
+    async fn info(&self, stream: &str) -> Result<Option<tinystoragedrivers::StreamInfo>> {
+        self.inner.info(stream).await
+    }
+
+    /// Forwarded (and fenced): sealing a finished stream is a write.
+    async fn seal(&self, stream: &str) -> Result<tinystoragedrivers::SealOutcome> {
+        fenced_write!(self, "streams.seal", streams.seal(stream))
+    }
+
+    async fn delete_sealed_stream(&self, stream: &str, sealed_ms: i64) -> Result<bool> {
+        fenced_write!(
+            self,
+            "streams.delete_sealed_stream",
+            streams.delete_sealed_stream(stream, sealed_ms)
+        )
+    }
 }
 
 struct FencedBlobs {
     inner: Arc<dyn BlobStore>,
     guard: Guard,
+}
+
+/// Two handles to one stream, used only to recover the input when a native
+/// fenced handle rejects streaming before it polls the reader.
+#[derive(Clone)]
+struct SharedBlobReader {
+    reader: Arc<Mutex<tinystoragedrivers::BlobReader>>,
+    polled: Arc<AtomicBool>,
+}
+
+impl tokio::io::AsyncRead for SharedBlobReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        this.polled.store(true, Ordering::SeqCst);
+        let mut reader = match this.reader.lock() {
+            Ok(reader) => reader,
+            Err(_) => {
+                return Poll::Ready(Err(std::io::Error::other(
+                    "shared blob reader lock was poisoned",
+                )));
+            }
+        };
+        reader.as_mut().poll_read(cx, buf)
+    }
+}
+
+fn shared_blob_readers(
+    reader: tinystoragedrivers::BlobReader,
+) -> (
+    tinystoragedrivers::BlobReader,
+    tinystoragedrivers::BlobReader,
+    Arc<AtomicBool>,
+) {
+    let reader = Arc::new(Mutex::new(reader));
+    let polled = Arc::new(AtomicBool::new(false));
+    let handle = || {
+        Box::pin(SharedBlobReader {
+            reader: Arc::clone(&reader),
+            polled: Arc::clone(&polled),
+        }) as tinystoragedrivers::BlobReader
+    };
+    (handle(), handle(), polled)
 }
 
 impl std::fmt::Debug for FencedBlobs {
@@ -419,8 +555,7 @@ impl BlobStore for FencedBlobs {
     }
 
     /// The driver's abilities, minus presigned URLs: a presigned PUT is a write
-    /// the fence never sees, so the view does not offer them (the trait
-    /// default for `presign_get`/`presign_put` is `Unsupported`).
+    /// the fence never sees, so the view does not offer them.
     fn capabilities(&self) -> Capabilities {
         self.inner.capabilities().without(Capability::PresignedUrls)
     }
@@ -441,6 +576,83 @@ impl BlobStore for FencedBlobs {
 
     async fn get_stream(&self, key: &str) -> Result<Option<BlobStream>> {
         self.inner.get_stream(key).await
+    }
+
+    async fn put_stream(
+        &self,
+        key: &str,
+        reader: tinystoragedrivers::BlobReader,
+        len: u64,
+        content_type: Option<&str>,
+    ) -> Result<BlobMeta> {
+        match self.guard.admit("blobs.put_stream").await? {
+            None => self.inner.put_stream(key, reader, len, content_type).await,
+            Some((lease, scoped)) => {
+                let (attempt, fallback, polled) = shared_blob_readers(reader);
+                let outcome = scoped
+                    .blobs()
+                    .put_stream(key, attempt, len, content_type)
+                    .await;
+                match outcome {
+                    Err(error) if unfenceable(&error) && !polled.load(Ordering::SeqCst) => {
+                        tracing::debug!(
+                            target: "openhuman::storage::fence",
+                            op = "blobs.put_stream",
+                            "[storage][fence] driver cannot fence this stream write; host check only"
+                        );
+                        self.inner
+                            .put_stream(key, fallback, len, content_type)
+                            .await
+                    }
+                    outcome => self.guard.settle(&lease, "blobs.put_stream", outcome).await,
+                }
+            }
+        }
+    }
+
+    async fn put_stream_expiring(
+        &self,
+        key: &str,
+        reader: tinystoragedrivers::BlobReader,
+        len: u64,
+        content_type: Option<&str>,
+        ttl: Duration,
+    ) -> Result<BlobMeta> {
+        match self.guard.admit("blobs.put_stream_expiring").await? {
+            None => {
+                self.inner
+                    .put_stream_expiring(key, reader, len, content_type, ttl)
+                    .await
+            }
+            Some((lease, scoped)) => {
+                let (attempt, fallback, polled) = shared_blob_readers(reader);
+                let outcome = scoped
+                    .blobs()
+                    .put_stream_expiring(key, attempt, len, content_type, ttl)
+                    .await;
+                match outcome {
+                    Err(error) if unfenceable(&error) && !polled.load(Ordering::SeqCst) => {
+                        tracing::debug!(
+                            target: "openhuman::storage::fence",
+                            op = "blobs.put_stream_expiring",
+                            "[storage][fence] driver cannot fence this stream write; host check only"
+                        );
+                        self.inner
+                            .put_stream_expiring(key, fallback, len, content_type, ttl)
+                            .await
+                    }
+                    outcome => {
+                        self.guard
+                            .settle(&lease, "blobs.put_stream_expiring", outcome)
+                            .await
+                    }
+                }
+            }
+        }
+    }
+
+    async fn presign_get(&self, key: &str, ttl: Duration) -> Result<String> {
+        self.inner.presign_get(key, ttl).await
     }
 
     async fn put(&self, key: &str, bytes: Vec<u8>, content_type: Option<&str>) -> Result<BlobMeta> {

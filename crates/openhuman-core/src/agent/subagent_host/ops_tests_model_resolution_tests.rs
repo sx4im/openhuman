@@ -1,6 +1,37 @@
 use super::*;
 use crate::agent::subagent_host::run_subagent;
+use crate::agent::subagent_host::{
+    run_subagent_via_driver_tool, spawn_async_via_driver_tool_with_jobs, SubagentRunStatus,
+};
 use tinyagents_harness::context::{current_run_depth, with_run_depth, RunDepth};
+
+struct BlockingSubagentCloseTool {
+    started: tokio::sync::mpsc::Sender<()>,
+    release: Arc<tokio::sync::Notify>,
+    finished: tokio::sync::mpsc::Sender<()>,
+}
+
+#[async_trait::async_trait]
+impl tinytools::Tool for BlockingSubagentCloseTool {
+    fn name(&self) -> &str {
+        "blocking_close_fixture"
+    }
+
+    fn description(&self) -> &str {
+        "Blocks until the test releases the in-flight tool after close."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<tinytools::ToolResult> {
+        let _ = self.started.send(()).await;
+        self.release.notified().await;
+        let _ = self.finished.send(()).await;
+        Ok(tinytools::ToolResult::success("tool released after close"))
+    }
+}
 
 #[tokio::test]
 async fn runner_rejects_spawn_beyond_max_depth() {
@@ -84,7 +115,7 @@ async fn typed_mode_model_override_pins_exact_model_for_spawn() {
 /// `subagent_tool_result` socket events the parent thread renders.
 #[tokio::test]
 async fn typed_mode_emits_child_progress_events_when_sink_attached() {
-    use crate::agent::progress::AgentProgress;
+    use crate::progress::AgentProgress;
 
     let provider = ScriptedProvider::new(vec![
         tool_response("file_read", "{\"path\":\"x\"}"),
@@ -167,7 +198,7 @@ async fn typed_mode_emits_child_progress_events_when_sink_attached() {
 /// `subagent_thinking_delta` socket events the parent thread renders live.
 #[tokio::test]
 async fn typed_mode_forwards_child_text_and_thinking_deltas() {
-    use crate::agent::progress::AgentProgress;
+    use crate::progress::AgentProgress;
 
     let provider = ScriptedProvider::new(vec![text_response_with_reasoning(
         "the final answer",
@@ -504,7 +535,7 @@ fn resolve_subagent_source_hint_falls_back_on_factory_error() {
 
 #[test]
 fn direct_mode_user_with_stored_key_passes_signed_in_check() {
-    use super::super::user_is_signed_in_to_composio;
+    use crate::integrations::composio::user_is_signed_in_to_composio;
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut config = crate::config::Config::default();
     config.config_path = tmp.path().join("config.toml");
@@ -521,7 +552,7 @@ fn direct_mode_user_with_stored_key_passes_signed_in_check() {
 
 #[test]
 fn unsigned_in_user_fails_probe() {
-    use super::super::user_is_signed_in_to_composio;
+    use crate::integrations::composio::user_is_signed_in_to_composio;
     let tmp = tempfile::tempdir().expect("tempdir");
     let mut config = crate::config::Config::default();
     config.config_path = tmp.path().join("config.toml");
@@ -649,3 +680,9 @@ fn nested_subagent_dispatch_runs_on_a_constrained_worker_stack() {
         outcome.output
     );
 }
+
+#[path = "ops_tests_driver_bridge_tests.rs"]
+mod driver_bridge_tests;
+
+#[path = "ops_tests_trace_export_tests.rs"]
+mod trace_export_tests;

@@ -63,8 +63,8 @@ async fn backstop_firing_yields_a_classified_turn_timeout_error() {
     assert!(!classified.message.trim().is_empty());
 }
 
-fn text_delta() -> crate::agent::progress::AgentProgress {
-    crate::agent::progress::AgentProgress::TextDelta {
+fn text_delta() -> crate::progress::AgentProgress {
+    crate::progress::AgentProgress::TextDelta {
         delta: "x".into(),
         iteration: 1,
     }

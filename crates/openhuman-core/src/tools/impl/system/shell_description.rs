@@ -5,7 +5,7 @@
 //! a pure function of the contract's [`ShellFlavor`] so both flavors are testable
 //! on any host.
 
-use crate::agent::host_runtime::ShellFlavor;
+use crate::modules::tinybox::host_runtime::ShellFlavor;
 
 /// The `shell` tool description for the shell this host spawns. Models default
 /// to POSIX syntax, so on Windows the description says outright that commands

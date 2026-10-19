@@ -16,7 +16,7 @@
 //! The `.typed` files were derived once with the retired file writer; they are
 //! committed corpus now.
 
-use crate::agent::session_store::splice_fixture::head_of;
+use crate::storage::sessions::splice_fixture_tests::head_of;
 use serde_json::{json, Value};
 use tinyinference_llm::message::ContentBlock;
 use tinyinference_llm::model::ModelResponse;
@@ -401,8 +401,8 @@ fn typed_and_legacy_rows_bridge_to_identical_model_messages() {
         .iter()
         .filter_map(message_to_native_chat_message)
         .collect();
-    let locator = crate::agent::session_store::splice_fixture::memory_locator();
-    let mut meta = crate::agent::session_store::splice_fixture::blank_meta();
+    let locator = crate::storage::sessions::splice_fixture_tests::memory_locator();
+    let mut meta = crate::storage::sessions::splice_fixture_tests::blank_meta();
     meta.thread_id = Some("typed-bridge".into());
     let history = locator.open_stem("typed-bridge", meta).expect("bind");
     history.replace(&rows).expect("write");

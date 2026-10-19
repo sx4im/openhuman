@@ -183,12 +183,12 @@ async fn a_clean_reopen_does_not_recover_but_a_takeover_does() {
             4,
             "2026-10-09T00:00:00Z",
         );
-        crate::agent::session_store::default_turn_states_for(&workspace)
+        crate::storage::sessions::default_turn_states_for(&workspace)
             .put(&state)
             .unwrap();
     };
     let lifecycle = |thread: &str| {
-        crate::agent::session_store::default_turn_states_for(&workspace)
+        crate::storage::sessions::default_turn_states_for(&workspace)
             .get(thread)
             .unwrap()
             .unwrap()

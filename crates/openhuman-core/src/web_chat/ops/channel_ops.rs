@@ -267,9 +267,9 @@ pub async fn channel_web_chat(
     // `agent.set_run_mode` RPC. Unrecognized values are logged and ignored
     // — a stale/typo'd client build must not fail the whole turn.
     if let Some(run_mode) = run_mode.as_deref() {
-        match crate::agent::tinyagents::run_mode::parse_mode_label(run_mode) {
+        match crate::threads::run_mode::parse_mode_label(run_mode) {
             Some(mode) => {
-                crate::agent::tinyagents::run_mode::set_mode(ctx, thread_id, mode);
+                crate::threads::run_mode::set_mode(ctx, thread_id, mode);
             }
             None => log::warn!(
                 "[web_chat] channel_web_chat thread_id={thread_id} ignoring unrecognized run_mode={run_mode}"

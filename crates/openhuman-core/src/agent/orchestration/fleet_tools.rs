@@ -13,7 +13,7 @@
 //! "does this parent see tool X?", so both texts only ever name tools that
 //! are in the caller's belt.
 
-use crate::agent::harness::host_definition::AgentDefinitionRegistry;
+use crate::agent_registry::host_definition::AgentDefinitionRegistry;
 use tinyagents_definition::ToolScope;
 
 /// The fleet-control tools whose availability shapes the delegation texts.

@@ -11,7 +11,7 @@
 //! the test environment).
 
 use super::*;
-use crate::agent::harness::host_definition::AgentDefinition;
+use crate::agent_registry::host_definition::AgentDefinition;
 use async_trait::async_trait;
 use tinyagents_definition::{DefinitionSource, ModelSpec, PromptSource, SandboxMode, ToolScope};
 use tinytools::{PermissionLevel, Tool, ToolCategory, ToolResult};
@@ -69,7 +69,7 @@ fn def_with_scope(scope: ToolScope) -> AgentDefinition {
         delegate_name: None,
         agent_tier: tinyagents_definition::AgentTier::Worker,
         source: DefinitionSource::Builtin,
-        extensions: crate::agent::harness::host_definition::AgentExt {
+        extensions: crate::agent_registry::host_definition::AgentExt {
             omit_identity: true,
             omit_memory_context: true,
             omit_safety_preamble: true,

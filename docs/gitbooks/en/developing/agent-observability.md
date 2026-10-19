@@ -132,7 +132,7 @@ span id it receives twice. Langfuse Cloud removes the legacy
 traces there. Prompt and reply text ride along only while
 `observability.agent_tracing.capture_content` is also on; turning it off keeps
 metadata (names, timings, token and cost figures) but drops content. See
-`crates/openhuman-core/src/agent/progress_tracing/otlp.rs` and
+`crates/openhuman-core/src/core/observability/progress_tracing/` and
 `crates/openhuman-core/src/config/schema/observability.rs`.
 
 ## Out of scope for the E2E layer

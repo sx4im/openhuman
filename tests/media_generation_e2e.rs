@@ -2,7 +2,8 @@
 //!
 //! Boots the real TinyHumans backend transport in-process, builds the
 //! production `media_generate_image` / `media_generate_video` tools through
-//! `build_media_tools`' own code path (`managed_generators` +
+//! the registered media tool source's own code path
+//! (`openhuman_tinyhumans::integrations::media::managed_generators` +
 //! `media_tools_from`), and drives them against a scripted fake of the
 //! backend's `/agent-integrations/openrouter` proxy:
 //!
@@ -37,7 +38,8 @@ use tinyagents_harness::tinyinference_video::WaitPolicy;
 use tinytools::Tool;
 
 use openhuman_core::config::Config;
-use openhuman_core::media::generation::{managed_generators, media_tools_from};
+use openhuman_core::media::generation::media_tools_from;
+use openhuman_tinyhumans::integrations::media::managed_generators;
 
 /// A 1×1 PNG.
 const PNG: &[u8] = &[
@@ -265,7 +267,7 @@ async fn media_tools_deliver_images_and_videos_through_the_backend_proxy() {
         "blob-backed generation must not leave a filesystem staging directory"
     );
     for (id, kind) in [(&image_id, "image"), (&video_id, "video")] {
-        let record = openhuman_core::agent::artifacts::ops::ai_get_artifact(&config, id)
+        let record = openhuman_core::artifacts::ops::ai_get_artifact(&config, id)
             .await
             .expect("filed artifact record")
             .value;

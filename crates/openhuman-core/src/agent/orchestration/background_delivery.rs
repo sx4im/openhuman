@@ -28,22 +28,29 @@
 //! `chat_done`, so a reconnect cannot lose a completed delegated result.
 
 use crate::core::runtime::DispatchCtx;
-use std::collections::HashSet;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+#[cfg(test)]
+use std::{collections::HashSet, future::Future, sync::Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
-use tinyagents_tasks::{CompletionRecord, CompletionRouter};
+#[cfg(test)]
+use tinyagents_tasks::CompletionRouter;
+use tinyagents_tasks::{
+    CompletionDelivery, CompletionDeliveryConfig, CompletionRecord, DeliveryOutcome,
+    DeliveryTarget, ThreadDeliveryLeases,
+};
 
 use crate::core::bus::BUS;
 use crate::core::events::DomainEvent;
 use tinybus::EventHandler;
 use tinybus::SubscriptionHandle;
 
+#[cfg(test)]
 mod slot;
+#[cfg(test)]
 use slot::DeliverySlot;
 
 use super::background_completions;
@@ -52,8 +59,15 @@ use super::busy_guard::is_busy;
 use super::busy_guard::{busy, clear_busy_for_thread, TurnBusy};
 use super::completion_notice::build_undelivered_notice;
 use super::completion_owners;
-use super::delivery_drain::{run_drain, DrainFence, DrainOutcome, RECOVERY_BUSY_POLL};
+use super::delivery_drain::{DrainFence, RECOVERY_BUSY_POLL};
+#[path = "delivery_events.rs"]
+mod delivery_events;
 use crate::core::runtime::CoreContext;
+#[cfg(test)]
+pub(super) use delivery_events::drain_schedule;
+#[cfg(test)]
+pub(super) use delivery_events::Drain;
+pub(super) use delivery_events::{drain_schedule_in, owning_profiles};
 
 /// Coalesce completions landing within this window into one delivery turn.
 const DEBOUNCE: Duration = Duration::from_secs(3);
@@ -64,6 +78,7 @@ const RECOVERY_DELAY: Duration = Duration::from_secs(15);
 
 /// Threads whose delivery turn is in flight — prevents two concurrent turns.
 /// Keyed by the tenant profile derived from the thread id, for the same reason.
+#[cfg(test)]
 fn delivering() -> &'static Mutex<HashSet<String>> {
     static D: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     D.get_or_init(|| Mutex::new(HashSet::new()))
@@ -113,138 +128,6 @@ impl EventHandler<DomainEvent> for BackgroundDeliveryHandler {
     }
 }
 
-/// One drain an event asks for: the thread, how soon, and the context of the
-/// profile that owns it (`None` on the desktop, where nothing is per profile).
-pub(super) struct Drain {
-    pub(super) owner: Option<Arc<CoreContext>>,
-    pub(super) thread_id: String,
-    pub(super) delay: Duration,
-}
-
-/// Which thread to drain, and after how long, for an event, outside any
-/// profile. A session that maps to no thread (cron, voice, skills) has nothing
-/// to deliver into.
-#[cfg(test)]
-fn drain_schedule(event: &DomainEvent) -> Option<(String, Duration)> {
-    let drain = drain_schedule_in(false, event, |_| None)
-        .into_iter()
-        .next()?;
-    Some((drain.thread_id, drain.delay))
-}
-
-/// The session, task and delay an event drains on, if it asks for a drain.
-fn drain_target(event: &DomainEvent) -> Option<(&String, Option<&String>, Duration)> {
-    match event {
-        // A user turn just ended (or failed) — drain anything that finished while
-        // it ran.
-        DomainEvent::AgentTurnCompleted { session_id, .. }
-        | DomainEvent::AgentError { session_id, .. } => {
-            Some((session_id, None, Duration::from_millis(300)))
-        }
-        // Any subagent terminal state — completed, failed, or awaiting-user — can
-        // arrive after the parent turn already went idle. Schedule a debounced
-        // drain for all three so the pending result is delivered promptly instead
-        // of sitting until some unrelated later turn. Only `SubagentCompleted`
-        // used to trigger a drain, so a failure (or an awaiting-user pause) after
-        // the parent turn went idle left the chat stuck on the original
-        // "Accepted" response (#4896). Debounce so a burst batches into a single
-        // turn.
-        DomainEvent::SubagentCompleted {
-            parent_session,
-            task_id,
-            ..
-        }
-        | DomainEvent::SubagentFailed {
-            parent_session,
-            task_id,
-            ..
-        }
-        | DomainEvent::SubagentAwaitingUser {
-            parent_session,
-            task_id,
-            ..
-        } => Some((parent_session, Some(task_id), DEBOUNCE)),
-        _ => None,
-    }
-}
-
-/// Profiles recorded as owning the task (else the session).
-fn owners_of(session: &str, task: Option<&String>) -> Vec<String> {
-    let mut profiles = task
-        .map(|t| completion_owners::profiles_of(t))
-        .unwrap_or_default();
-    if profiles.is_empty() {
-        profiles = completion_owners::profiles_of(session);
-    }
-    profiles
-}
-
-/// The profiles whose contexts [`drain_schedule_in`] will ask for.
-fn owning_profiles(event: &DomainEvent) -> Vec<String> {
-    drain_target(event)
-        .map(|(session, task, _)| owners_of(session, task))
-        .unwrap_or_default()
-}
-
-/// The drains for `event`. This subscriber runs off-task, with no tenant scope,
-/// but the thread tables are keyed per profile: the profiles that recorded the
-/// completion (by task id) or ran the session are looked up in
-/// [`completion_owners`] and each is resolved through `resolve` and drained in
-/// its own scope, where it reaches only its own tables. In SaaS (`saas`) an id
-/// with no owner is dropped; elsewhere it drains unscoped, as on the desktop.
-pub(super) fn drain_schedule_in(
-    saas: bool,
-    event: &DomainEvent,
-    resolve: impl Fn(&str) -> Option<Arc<CoreContext>>,
-) -> Vec<Drain> {
-    let Some((session, task, delay)) = drain_target(event) else {
-        return Vec::new();
-    };
-    // A task id is core-minted and unique, so it names its one owner; a
-    // session id can be shared by profiles, so it may name several.
-    let profiles = owners_of(session, task);
-    let thread_in = |owner: Option<Arc<CoreContext>>| {
-        let thread_id = match &owner {
-            Some(ctx) => background_completions::thread_for_session(
-                &DispatchCtx::new(Arc::clone(ctx)),
-                session,
-            ),
-            // No owner: the unscoped (desktop) drain reads the host's own context.
-            None => {
-                background_completions::thread_for_session(&DispatchCtx::host_default(), session)
-            }
-        };
-        if thread_id.is_none() {
-            log::trace!("[background_delivery] session has no delivery thread; not scheduling");
-        }
-        thread_id.map(|thread_id| Drain {
-            owner,
-            thread_id,
-            delay,
-        })
-    };
-    if profiles.is_empty() {
-        if saas {
-            log::debug!(
-                "[background_delivery] no owning profile for the session or task; dropping \
-                 the drain (fails closed in SaaS)"
-            );
-            return Vec::new();
-        }
-        return thread_in(None).into_iter().collect();
-    }
-    profiles
-        .iter()
-        .filter_map(|profile| match resolve(profile) {
-            Some(ctx) => thread_in(Some(ctx)),
-            None => {
-                log::debug!("[background_delivery] owning profile has no live context; dropping");
-                None
-            }
-        })
-        .collect()
-}
-
 /// Schedule a debounced delivery attempt for a thread, fenced by the calling
 /// profile's lease ([`DrainFence::current`]).
 fn schedule_delivery(ctx: &DispatchCtx, thread_id: String, delay: Duration) {
@@ -272,22 +155,13 @@ fn schedule_delivery_inner(
         .lock()
         .expect("scheduled")
         .push((thread_id.clone(), delay));
-    // Scoped: the thread -> workspace table is keyed per profile, so the
-    // delayed task must run under the profile that scheduled it.
+    #[cfg(not(test))]
+    let _ = delay; // The owner applies debounce/recovery timing inside its delivery API.
+                   // Scoped: the thread -> workspace table is keyed per profile, so the
+                   // delayed task must run under the profile that scheduled it.
     ctx.clone().spawn(async move {
-        let turn_fence = fence.clone();
-        let turn_thread = thread_id.clone();
-        let outcome = run_drain(
-            &ctx,
-            &thread_id,
-            delay,
-            wait_idle,
-            &fence,
-            RECOVERY_BUSY_POLL,
-            || try_deliver(ctx.clone(), turn_thread, turn_fence),
-        )
-        .await;
-        if outcome == DrainOutcome::StillBusy {
+        let outcome = try_deliver(ctx.clone(), thread_id.clone(), fence.clone(), wait_idle).await;
+        if outcome == DeliveryOutcome::Busy {
             // Still running past the ceiling: leave the record pending and
             // wait again rather than overlap the user's turn.
             log::debug!(
@@ -326,7 +200,7 @@ fn recover_fenced(ctx: &DispatchCtx, workspace_dir: &Path, fence: DrainFence) ->
     }
     // Once per workspace per process: the bootstrap workspace at startup, any
     // other the first time a spawn opens it.
-    if !background_completions::claim_recovery(workspace_dir) {
+    if !background_completions::claim_recovery_ctx(ctx, workspace_dir) {
         return 0;
     }
     let threads = background_completions::recover_pending_threads(ctx, workspace_dir);
@@ -354,12 +228,12 @@ fn recover_fenced(ctx: &DispatchCtx, workspace_dir: &Path, fence: DrainFence) ->
 /// that comes due after this node lost that lease is dropped, and the records
 /// stay pending for the node that holds it now.
 pub(crate) fn recover_on_open(ctx: &DispatchCtx, workspace_dir: &Path, fence: DrainFence) -> usize {
-    background_completions::forget_recovery(workspace_dir);
+    background_completions::forget_recovery_ctx(ctx, workspace_dir);
     let scheduled = recover_fenced(ctx, workspace_dir, fence);
     if scheduled == 0 {
         // Nothing pending: do not keep this profile's log handle cached for a
         // workspace that may never complete anything on this node.
-        background_completions::forget_recovery(workspace_dir);
+        background_completions::forget_recovery_ctx(ctx, workspace_dir);
     }
     scheduled
 }
@@ -368,6 +242,7 @@ pub(crate) fn recover_on_open(ctx: &DispatchCtx, workspace_dir: &Path, fence: Dr
 /// (queue untouched) when the thread is busy or nothing is pending. A claimed
 /// batch stays leased until the caller settles it with `mark_delivered` /
 /// `mark_failed` / `release`.
+#[cfg(test)]
 fn claim_ready(
     ctx: &DispatchCtx,
     router: &CompletionRouter,
@@ -388,37 +263,114 @@ fn claim_ready(
 
 /// Drain + deliver pending completions for a thread — if idle and not already
 /// delivering. Batches everything ready at this instant into one system turn.
-async fn try_deliver(busy_ctx: DispatchCtx, thread_id: String, fence: DrainFence) {
+async fn try_deliver(
+    busy_ctx: DispatchCtx,
+    thread_id: String,
+    fence: DrainFence,
+    recovering: bool,
+) -> DeliveryOutcome {
     if !fence.admits() {
         log::info!(
             "[background_delivery] profile lease lost; not delivering thread_id={thread_id}"
         );
-        return;
+        return DeliveryOutcome::Fenced;
     }
     let Some(workspace_dir) = background_completions::workspace_for_thread(&busy_ctx, &thread_id)
     else {
         log::debug!("[background_delivery] no workspace for thread_id={thread_id}");
-        return;
+        return DeliveryOutcome::Empty;
     };
-    let router = background_completions::router_for_workspace(&workspace_dir);
-    let turn_workspace = workspace_dir.clone();
-    // The turn runs under the context the drain was scheduled for.
+    let router = background_completions::router_for_workspace_ctx(&busy_ctx, &workspace_dir);
+    let delivery = CompletionDelivery::new(
+        CompletionDeliveryConfig {
+            debounce: DEBOUNCE,
+            recovery_delay: RECOVERY_DELAY,
+            retry_backoff: Duration::from_secs(2),
+            busy_poll: RECOVERY_BUSY_POLL,
+            max_busy_polls: super::delivery_drain::RECOVERY_BUSY_POLLS,
+            batch_size: usize::MAX,
+        },
+        delivery_leases().clone(),
+    );
     let ctx = busy_ctx.clone();
+    let turn_workspace = workspace_dir.clone();
     let give_up_ctx = busy_ctx.clone();
-    let retry_after = try_deliver_with(
-        &busy_ctx,
-        thread_id.clone(),
-        router,
-        move |thread_id, notice| {
-            let workspace_dir = turn_workspace.clone();
-            let ctx = ctx.clone();
-            async move { run_system_turn_on_thread(&ctx, workspace_dir, thread_id, notice).await }
-        },
-        move |thread_id, notice| async move {
-            persist_undelivered(give_up_ctx, workspace_dir, thread_id, notice).await
-        },
-    )
-    .await;
+    let format_router = router.clone();
+    let turn_thread_id = thread_id.clone();
+    let give_up_thread_id = thread_id.clone();
+    let give_up_log_thread_id = thread_id.clone();
+    let scoped_thread = crate::core::runtime::tenant::profile_key_in(
+        &super::busy_guard::caller(&busy_ctx),
+        &thread_id,
+    );
+    let deliver = move |records: &[CompletionRecord]| {
+        let notice = format_router.formatter().format_batch(records);
+        let ctx = ctx.clone();
+        let workspace_dir = turn_workspace.clone();
+        let thread_id = turn_thread_id.clone();
+        async move {
+            let result = run_system_turn_on_thread(&ctx, workspace_dir, thread_id, notice)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+            result
+        }
+    };
+    let write_undelivered = move |records: &[CompletionRecord], error: &str| {
+        let attempts = records
+            .iter()
+            .map(|record| record.attempts)
+            .max()
+            .unwrap_or(1);
+        let notice = build_undelivered_notice(records, attempts, error);
+        if let Some(notice) = notice {
+            let run_id = format!("bgdeliver-undelivered-{}", uuid::Uuid::new_v4());
+            if let Err(error) = persist_delivery_reply(
+                &give_up_ctx,
+                workspace_dir.clone(),
+                &give_up_thread_id,
+                &run_id,
+                notice,
+                false,
+            ) {
+                log::error!(
+                    "[background_delivery] undelivered results LOST thread_id={give_up_log_thread_id} run_id={run_id} error={error}"
+                );
+            }
+        }
+    };
+    let target = DeliveryTarget {
+        router: &router,
+        parent_key: &thread_id,
+        thread_key: &scoped_thread,
+    };
+    let outcome = if recovering {
+        delivery
+            .recover_on_boot_with_error(
+                target,
+                || is_busy(&busy_ctx, &thread_id),
+                fence.clone(),
+                deliver,
+                write_undelivered,
+            )
+            .await
+    } else {
+        delivery
+            .deliver_once_with_error(
+                target,
+                || is_busy(&busy_ctx, &thread_id),
+                fence.clone(),
+                deliver,
+                write_undelivered,
+            )
+            .await
+    };
+    let retry_after = match outcome {
+        DeliveryOutcome::Failed { count, gave_up } if count > gave_up => {
+            Some(Duration::from_secs(2))
+        }
+        _ => None,
+    };
     // A failed turn that published no `AgentError` (a session checkout failure,
     // or the only post-boot attempt) re-triggers nothing, so a quiet thread would
     // keep its record pending for the rest of the process. The attempt ceiling
@@ -432,6 +384,12 @@ async fn try_deliver(busy_ctx: DispatchCtx, thread_id: String, fence: DrainFence
         );
         schedule_delivery_inner(busy_ctx, thread_id, delay, false, fence);
     }
+    outcome
+}
+
+fn delivery_leases() -> &'static ThreadDeliveryLeases {
+    static LEASES: OnceLock<ThreadDeliveryLeases> = OnceLock::new();
+    LEASES.get_or_init(ThreadDeliveryLeases::default)
 }
 
 /// One pass of the delivery loop whose turn only counts itself, for tests
@@ -457,6 +415,7 @@ pub(super) async fn try_deliver_for_test(
 }
 
 /// Backoff before retrying a delivery whose record has now failed `attempts` times.
+#[cfg(test)]
 fn retry_backoff(attempts: u32) -> Duration {
     Duration::from_secs(2u64.saturating_pow(attempts.min(5)))
 }
@@ -469,6 +428,7 @@ fn retry_backoff(attempts: u32) -> Duration {
 /// it is logged at error and the chain ends; that is the one path on which a
 /// result is genuinely lost, and it requires the conversation store to be
 /// failing as well as the agent.
+#[cfg(test)]
 async fn persist_undelivered(ctx: DispatchCtx, dir: PathBuf, thread_id: String, notice: String) {
     let run_id = format!("bgdeliver-undelivered-{}", uuid::Uuid::new_v4());
     match persist_delivery_reply(&ctx, dir, &thread_id, &run_id, notice, false) {
@@ -488,6 +448,7 @@ async fn persist_undelivered(ctx: DispatchCtx, dir: PathBuf, thread_id: String, 
 /// lets tests prove a failed durable append releases the batch before any
 /// terminal announcement is observable, and that a record which exhausts its
 /// attempts is handed to `on_undeliverable` rather than dropped.
+#[cfg(test)]
 async fn try_deliver_with<F, Fut, G, GFut>(
     ctx: &DispatchCtx,
     thread_id: String,
@@ -644,7 +605,7 @@ async fn run_system_turn_on_thread(
         &thread_id,
         &run_id,
         &prompt,
-        crate::agent::turn_origin::AgentTurnOrigin::Cli,
+        crate::security::turn_origin::AgentTurnOrigin::Cli,
     )
     .await;
 

@@ -35,8 +35,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::agent::artifacts::production::Production;
-use crate::agent::artifacts::read_artifact_bytes;
+use crate::artifacts::production::Production;
+use crate::artifacts::read_artifact_bytes;
 use crate::security::SecurityPolicy;
 use tinytools::{PermissionLevel, Tool, ToolResult};
 
@@ -107,7 +107,7 @@ impl ImageInspector for ModuleImageInspector<'_> {
 pub struct PresentationTool {
     workspace_dir: PathBuf,
     /// Visible folder the generated deck is written into (#5505).
-    files_dir: crate::agent::artifacts::FileRoots,
+    files_dir: crate::artifacts::FileRoots,
     /// Existing host config when the caller already owns the authoritative
     /// runtime snapshot. Keeping this optional preserves the ordinary agent
     /// constructor while avoiding a process-global config reload during
@@ -130,7 +130,7 @@ impl PresentationTool {
     /// active [`SecurityPolicy`] for validating `File`-source image paths.
     pub fn new(
         workspace_dir: PathBuf,
-        files_dir: impl Into<crate::agent::artifacts::FileRoots>,
+        files_dir: impl Into<crate::artifacts::FileRoots>,
         security: Arc<SecurityPolicy>,
     ) -> Self {
         Self {
@@ -147,7 +147,7 @@ impl PresentationTool {
     pub fn for_config(config: &crate::config::Config, security: Arc<SecurityPolicy>) -> Self {
         Self::with_config(
             config.workspace_dir.clone(),
-            crate::agent::artifacts::FileRoots::from_config(config),
+            crate::artifacts::FileRoots::from_config(config),
             security,
             config.clone(),
         )
@@ -156,7 +156,7 @@ impl PresentationTool {
     /// Construct the tool with an authoritative host config snapshot.
     pub(crate) fn with_config(
         workspace_dir: PathBuf,
-        files_dir: impl Into<crate::agent::artifacts::FileRoots>,
+        files_dir: impl Into<crate::artifacts::FileRoots>,
         security: Arc<SecurityPolicy>,
         config: crate::config::Config,
     ) -> Self {
@@ -381,12 +381,9 @@ impl PresentationTool {
         // Retry can re-dispatch this exact spec deterministically (#3162).
         // Best-effort: a write failure only forfeits future regeneration,
         // it must not abort an otherwise-successful generation.
-        if let Err(err) = crate::agent::artifacts::store::save_artifact_args(
-            &self.workspace_dir,
-            production.id(),
-            &args,
-        )
-        .await
+        if let Err(err) =
+            crate::artifacts::store::save_artifact_args(&self.workspace_dir, production.id(), &args)
+                .await
         {
             tracing::warn!(
                 target: "presentation",

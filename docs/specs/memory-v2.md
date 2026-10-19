@@ -94,7 +94,7 @@ credential.
 
 | Hook | Where | What |
 | --- | --- | --- |
-| pre-turn | session host `before_turn` (`agent/session_host/runtime_session/memory_ingest.rs`) | `lifecycle::prefetch::pre_turn` takes a completed cached pack immediately, or none on a cold cache, and queues scoped `AgentMemory::pre_turn` logging and recall |
+| pre-turn | session host `before_turn` (`memory/lifecycle/session_hooks.rs`) | `lifecycle::prefetch::pre_turn` takes a completed cached pack immediately, or none on a cold cache, and queues scoped `AgentMemory::pre_turn` logging and recall |
 | inject | `MemoryPackMiddleware` (`agent/tinyagents/middleware/memory_pack.rs`) | adds the pack, wrapped in `<memory-context>`, to every model request of the turn with `push_ephemeral_instruction` |
 | post-turn | scoped background work after the durable commit | `AgentMemory::post_turn`: logs the reply with its tool calls (name, id, and a one-line result per call), queues the belief build it hands back |
 | compaction | `MemoryRecallSummarizer` (`agent/tinyagents/memory_summarizer.rs`) wrapping the turn's summarizer | Takes completed cached context for "Recalled from memory" and queues `AgentMemory::recall_for_compaction`; engine I/O never delays the inner summarizer |

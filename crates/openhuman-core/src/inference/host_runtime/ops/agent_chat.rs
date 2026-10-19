@@ -37,7 +37,7 @@ use super::turn_guards::{
 /// # Progress
 ///
 /// An in-process embedder hands a
-/// [`ProgressSink`](crate::agent::progress_sink::ProgressSink) through
+/// [`AgentProgress`](crate::progress::AgentProgress) channel through
 /// [`AgentChatEnv`] (see [`agent_chat_for`]); it is attached to the agent built
 /// here, so the embedder observes the turn's tool calls and deltas live instead
 /// of only its final string.
@@ -81,7 +81,7 @@ pub async fn agent_chat(
 pub struct AgentChatEnv {
     /// Live progress for the turn; `None` attaches a drain-only sink so the
     /// model calls still stream.
-    pub progress: Option<crate::agent::progress_sink::ProgressSink>,
+    pub progress: Option<tokio::sync::mpsc::Sender<crate::progress::AgentProgress>>,
     /// The host environment installed on the session
     /// ([`OpenHumanSessionHost::set_host_env`]).
     pub host: crate::agent::turn_env::HostTurnEnv,
@@ -161,7 +161,7 @@ pub enum AgentChatTarget<'a> {
     /// can honour it: the other two resolve a definition the caller does not
     /// hold, so there is no agent for a host belt to belong to.
     Definition {
-        definition: &'a crate::agent::harness::host_definition::AgentDefinition,
+        definition: &'a crate::agent_registry::host_definition::AgentDefinition,
         host: Option<&'a crate::agent::HostTools>,
         /// History to seed this turn with, as `(role, content)` rows, instead
         /// of whatever the session would otherwise resume.
@@ -254,9 +254,9 @@ impl std::fmt::Debug for AgentChatTarget<'_> {
 // Definitions are reusable snapshots. A turn override belongs only to the
 // definition passed to this call's factory, which otherwise wins over Config.
 fn definition_for_turn(
-    definition: &crate::agent::harness::host_definition::AgentDefinition,
+    definition: &crate::agent_registry::host_definition::AgentDefinition,
     temperature: Option<f64>,
-) -> std::borrow::Cow<'_, crate::agent::harness::host_definition::AgentDefinition> {
+) -> std::borrow::Cow<'_, crate::agent_registry::host_definition::AgentDefinition> {
     match temperature {
         Some(temperature) => {
             let mut scoped = definition.clone();
@@ -489,11 +489,11 @@ pub async fn agent_chat_reply_for(
                 }
                 None => config.clone(),
             };
-            let scope = crate::agent::attachments::AttachmentAccessScope {
+            let scope = crate::attachments::AttachmentAccessScope {
                 external_channel: false,
                 workspace: turn_cwd.clone(),
             };
-            let references = crate::agent::attachments::host::stage_host(
+            let references = crate::attachments::host::stage_host(
                 attachments,
                 turn_session_id.unwrap_or("direct"),
                 &staging_config,
@@ -573,7 +573,7 @@ pub async fn agent_chat_reply_for(
         // turn fell back to unary `invoke`, so time-to-first-token equalled the
         // full completion latency. Attach a drain-only sink so the call streams;
         // the task ends when the agent drops its sender.
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::agent::progress::AgentProgress>(256);
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::progress::AgentProgress>(256);
         tokio::spawn(async move { while rx.recv().await.is_some() {} });
         agent.set_on_progress(Some(tx));
         log::debug!(
@@ -588,7 +588,7 @@ pub async fn agent_chat_reply_for(
     // Overwriting that with `Cli` would silently discard the caller's own
     // trust statement and hand every such turn the blanket CLI allowance
     // instead of the narrower one it asked for.
-    let run = crate::agent::turn_origin::with_origin(
+    let run = crate::security::turn_origin::with_origin(
         effective_agent_chat_origin(&turn_ctx),
         agent.run_single_with_approval(message, None, approval),
     );

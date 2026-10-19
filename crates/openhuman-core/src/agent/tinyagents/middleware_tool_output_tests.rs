@@ -4,6 +4,7 @@ use crate::agent::tinyagents::middleware::tool_output::ToolOutputMiddleware;
 // fully-qualified), so the module itself no longer references the type.
 use super::*;
 use crate::agent::tinyagents::middleware::turn_context::TurnContextMiddleware;
+use tinyagents_harness::middleware::library::DEFAULT_CLEARED_PLACEHOLDER as CLEARED_PLACEHOLDER;
 use tinyagents_harness::middleware::MicrocompactMiddleware;
 use tinytools::{ToolRuntime, ToolTimeout};
 
@@ -168,7 +169,7 @@ fn defaults_enable_the_byte_cap_only() {
     let mw = TurnContextMiddleware::defaults();
     assert_eq!(
         mw.tool_result_budget_bytes,
-        DEFAULT_TOOL_RESULT_BUDGET_BYTES
+        tinyagents_harness::config::TurnConfig::default().tool_result_budget_bytes
     );
     assert!(mw.payload_summarizer.is_none());
     assert_eq!(mw.microcompact_keep_recent, 0);
@@ -511,7 +512,10 @@ async fn tool_output_honors_a_tools_own_cap() {
 /// moving the ladder into the harness must not change it.
 #[test]
 fn shared_tool_result_byte_budget_stays_16_kib() {
-    assert_eq!(DEFAULT_TOOL_RESULT_BUDGET_BYTES, 16 * 1024);
+    assert_eq!(
+        tinyagents_harness::config::TurnConfig::default().tool_result_budget_bytes,
+        16 * 1024
+    );
 }
 
 #[path = "middleware_tool_output_compaction_tests.rs"]

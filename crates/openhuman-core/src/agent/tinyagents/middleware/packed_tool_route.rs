@@ -8,8 +8,8 @@
 //! and that pack's group is `Withheld`. No session (sub-agent, channel/CLI
 //! turns) means no routing, so the registration allowlist stays the boundary.
 
-use tinyagents_harness::middleware::{PackedToolRouteMiddleware, PackedToolRouter};
 use tinyagents_harness::tool::packs::USE_SKILL;
+use tinyagents_hooks::lifecycle::{PackedToolRouteMiddleware, PackedToolRouter};
 use tinytools::ToolPolicySession;
 
 use crate::agent::tinyagents::host::OpenHumanRunContext;

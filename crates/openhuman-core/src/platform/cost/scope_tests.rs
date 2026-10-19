@@ -65,7 +65,7 @@ async fn ambient_scope_reads_the_turn_and_prefers_the_subagent() {
         crate::core::runtime::CoreContext::for_test(crate::core::runtime::DomainSet::full(), None);
     let (parent, child) = {
         let scope_ctx = crate::core::runtime::DispatchCtx::new(ctx);
-        crate::agent::turn_origin::with_origin(origin, async {
+        crate::security::turn_origin::with_origin(origin, async {
             async {
                 (
                     UsageScope::in_ctx(&scope_ctx, Some("openhuman"), None)

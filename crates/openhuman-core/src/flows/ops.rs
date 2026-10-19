@@ -51,13 +51,13 @@ pub(crate) use tinyflows_catalog::graph_policy::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::turn_origin::{with_origin, AgentTurnOrigin, TrustedAutomationSource};
 use crate::config::Config;
 use crate::core::Outcome;
 use crate::flows::bus;
 use crate::flows::draft_store;
 use crate::flows::store;
 use crate::security::approval::{ApprovalChatContext, ApprovalTurnContext, FlowRunContext};
+use crate::security::turn_origin::{with_origin, AgentTurnOrigin, TrustedAutomationSource};
 use tinyflows_catalog::build_registry;
 use tinyflows_catalog::run_registry;
 use tinyflows_catalog::types::{

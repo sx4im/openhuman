@@ -176,17 +176,18 @@ impl InstallToolTool {
             )));
         }
 
-        let manager =
-            match args.get("manager").and_then(|v| v.as_str()) {
+        let manager = match args.get("manager").and_then(|v| v.as_str()) {
+            Some(m) => m.to_string(),
+            None => match detect_system_manager() {
                 Some(m) => m.to_string(),
-                None => match detect_system_manager() {
-                    Some(m) => m.to_string(),
-                    None => return Ok(ToolResult::error(
+                None => {
+                    return Ok(ToolResult::error(
                         "No supported package manager detected on PATH. Pass 'manager' explicitly \
                          (e.g. brew, pipx, npm, cargo).",
-                    )),
-                },
-            };
+                    ));
+                }
+            },
+        };
 
         let Some((program, prefix)) = manager_argv(&manager) else {
             return Ok(ToolResult::error(format!(
@@ -227,12 +228,12 @@ impl InstallToolTool {
             Ok(Err(e)) => {
                 return Ok(ToolResult::error(format!(
                     "Failed to launch {program}: {e}"
-                )))
+                )));
             }
             Err(_) => {
                 return Ok(ToolResult::error(format!(
                     "Install timed out after {INSTALL_TIMEOUT_SECS}s and was killed"
-                )))
+                )));
             }
         };
 

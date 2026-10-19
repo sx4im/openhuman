@@ -120,10 +120,10 @@ impl Transcriber for VoiceTranscriber {
 }
 
 // ---------------------------------------------------------------------------
-// SpeechSynthesizer → voice reply_speech
+// SpeechSynthesizer → the registered `cloud` TTS provider
 // ---------------------------------------------------------------------------
 
-/// Text-to-speech backed by the hosted reply-speech synthesizer.
+/// Text-to-speech backed by the registered hosted TTS provider.
 #[cfg(test)]
 pub struct VoiceSynthesizer {
     pub config: Arc<Config>,
@@ -138,23 +138,29 @@ impl SpeechSynthesizer for VoiceSynthesizer {
             request.text.len(),
             request.voice
         );
-        let opts = crate::voice::reply_speech::ReplySpeechOptions {
-            voice_id: request.voice,
-            model_id: None,
-            output_format: request.format,
-            voice_settings: None,
-        };
-        let outcome =
-            crate::voice::reply_speech::synthesize_reply(&self.config, &request.text, &opts)
+        // The hosted speech provider is registered by the hosted-backend layer
+        // under the `cloud` slug; with none registered this is an error.
+        #[cfg(feature = "voice")]
+        {
+            let voice = request.voice.as_deref().unwrap_or_default();
+            let provider = crate::voice::create_tts_provider("cloud", voice, &self.config)?;
+            let outcome = provider
+                .synthesize(&self.config, &request.text, request.voice.as_deref())
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
-        let value = outcome.value;
-        let visemes = serde_json::to_value(&value.visemes).ok();
-        Ok(SpeechResult {
-            audio_base64: value.audio_base64,
-            mime_type: value.audio_mime,
-            visemes,
-        })
+            let value = outcome.value;
+            let visemes = serde_json::to_value(&value.visemes).ok();
+            Ok(SpeechResult {
+                audio_base64: value.audio_base64,
+                mime_type: value.audio_mime,
+                visemes,
+            })
+        }
+        #[cfg(not(feature = "voice"))]
+        {
+            let _ = request;
+            Err(anyhow::anyhow!("voice feature disabled at compile time"))
+        }
     }
 }
 
@@ -289,13 +295,17 @@ impl ConfigAllowlistStore {
             .context("could not find home directory")?;
         let openhuman_dir = home.join(".openhuman");
         let config_path = openhuman_dir.join("config.toml");
-        let contents = tokio::fs::read_to_string(&config_path)
-            .await
-            .with_context(|| format!("failed to read config file: {}", config_path.display()))?;
-        let mut config: Config = crate::config::schema::config_from_toml_str(&contents)
-            .context("failed to parse config.toml for allowlist")?;
-        config.config_path = config_path;
-        config.workspace_dir = openhuman_dir.join("workspace");
+        let mut config = Config::load_from_config_path_without_env(
+            &config_path,
+            &openhuman_dir.join("workspace"),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "failed to load config.toml for allowlist: {}",
+                config_path.display()
+            )
+        })?;
 
         match channel {
             "telegram" => {

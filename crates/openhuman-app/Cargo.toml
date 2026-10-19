@@ -310,6 +310,8 @@ tinyinference-voice = { path = "../../vendor/tinyagents/vendor/tinyinference/cra
 # copy so the graph holds exactly one `tinybus` (one `Interface`, one
 # `Connection`) instead of a second one compiled only for the storage wire types.
 tinybus = { path = "../../vendor/tinybus/crates/tinybus" }
+tinybus-macros = { path = "../../vendor/tinybus/crates/tinybus-macros" }
+tinybus-module = { path = "../../vendor/tinybus/crates/tinybus-module" }
 
 [patch."https://github.com/tinyhumansai/tinystoragedrivers"]
 # One editable checkout every module resolves onto: each vendor/tiny* manifest
@@ -413,3 +415,10 @@ debug = false
 #   * No artifact paths, features, or runtime behaviour change.
 [profile.dev.package."*"]
 debug = false
+
+# Module admission hashes the host executable (tinybus `attach_linked`), once
+# per process. nextest runs every test in its own process, so an unoptimised
+# SHA-256 over a ~500 MB test binary cost ~10 s per module-backed test. Keep
+# in sync with the other workspace manifest.
+[profile.dev.package.sha2]
+opt-level = 3

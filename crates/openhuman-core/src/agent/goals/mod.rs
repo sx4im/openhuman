@@ -7,7 +7,6 @@
 //! the shared tool contract and TinyAgents' stop-hook contract.
 
 pub mod runtime;
-pub mod store;
 pub mod tools;
 
 use tinyagents_graph::goals::ThreadGoal;

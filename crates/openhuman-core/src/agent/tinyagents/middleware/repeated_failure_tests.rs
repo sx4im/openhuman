@@ -53,3 +53,36 @@ fn shell_missing_app_nudge_names_the_host_not_the_desktop_target() {
     assert!(generic.contains("desktop target"));
     assert!(missing_program_nudge("shell", "jq: not found").contains("not available on this host"));
 }
+
+#[test]
+fn missing_connection_copy_keeps_its_typed_stop_category_and_operation() {
+    let policy = HostFailurePolicy::new(
+        SteeringHandle::allow_all(),
+        Arc::new(std::sync::Mutex::new(None)),
+    );
+    let context = tinyagents_harness::context::RunContext::new(
+        tinyagents_harness::context::RunConfig::new("typed-stop"),
+        OpenHumanRunContext::new(),
+    );
+    let call = TaToolCall {
+        id: "call-1".into(),
+        name: "web_fetch".into(),
+        arguments: serde_json::json!({}),
+        invalid: None,
+    };
+    let cause = policy
+        .halt_cause_for_call(
+            &context,
+            FailureStopKind::NoProgress,
+            Some(tinyagents_harness::no_progress::ClassifiedStopCause {
+                class: "repeated_failure".into(),
+                operation: "web_fetch".into(),
+                summary: "old generic wording".into(),
+            }),
+            "[composio:error:composio_platform] service is not connected",
+            &call,
+        )
+        .expect("the same actionable blocker that changes the copy changes its category");
+    assert_eq!(cause.class, "missing_connection");
+    assert_eq!(cause.operation, "web_fetch");
+}

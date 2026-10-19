@@ -509,8 +509,8 @@ async fn channel_processed_event_is_found_behind_a_flood_of_unrelated_events() {
 /// message must NOT result in a file read. `process_channel_message`
 /// MUST override the operator-supplied `ctx.multimodal_files` with the
 /// hardened `MultimodalFileConfig::for_untrusted_channel_input()` so
-/// `prepare_messages_for_provider` rejects the marker with
-/// `TooManyFiles` before any disk access.
+/// TinyAgents' media request wrapper rejects the attachment before the host
+/// source resolver can access any path.
 #[tokio::test]
 async fn process_channel_message_hardens_multimodal_files_against_smuggled_markers() {
     let captured: Arc<Mutex<Option<crate::config::MultimodalFileConfig>>> =

@@ -37,7 +37,7 @@ impl HostAgentResolver for Host {
             return None;
         }
         let mut definition =
-            crate::agent::harness::host_definition::AgentDefinitionRegistry::builtins_only()
+            crate::agent_registry::host_definition::AgentDefinitionRegistry::builtins_only()
                 .get("orchestrator")
                 .cloned()
                 .unwrap();

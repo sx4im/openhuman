@@ -17,13 +17,13 @@ cd "$(dirname "$0")/../.."
 
 EXPECTED=$(cat <<'EOF'
 agent/harness/builtin_definitions_tests.rs
-agent/harness/host_definition_tests.rs
+agent_registry/host_definition_tests.rs
 agent/session_host/mod.rs
-agent/session_host/prelude_integrations.rs
+integrations/prelude_integrations.rs
 agent/session_host/runtime_session.rs
 agent/session_host/runtime_session_tests.rs
-agent/registry/agents/loader.rs
-agent/registry/agents/loader_tests_specialist_agents_tests.rs
+agent_registry/agents/loader.rs
+agent_registry/agents/loader_tests_specialist_agents_tests.rs
 agent/tinyagents/mod.rs
 commands/ops.rs
 config/migrations/retire_local_whisper_stt_tests.rs
@@ -46,7 +46,6 @@ modules/ops_components_tests.rs
 modules/registry_tests.rs
 modules/runtime.rs
 modules/runtime_tests.rs
-modules/storage_grant_tinywallet_tests.rs
 platform/socket/event_handlers.rs
 profiles/surface_tests.rs
 threads/store/mod.rs
@@ -56,7 +55,9 @@ mcp/host.rs
 modules/registry_contract_tests.rs
 modules/registry.rs
 security/credentials/ops/credential.rs
+storage/boot.rs
 storage/import/tinyflows.rs
+storage/schema.rs
 skills/bundled/mod.rs
 skills/mod.rs
 skills/search.rs

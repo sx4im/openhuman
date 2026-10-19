@@ -16,10 +16,12 @@
 
 use crate::core::runtime::DispatchCtx;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::storage::fence::LeaseFence;
+use tinyagents_tasks::DeliveryFence;
 
 use super::busy_guard::is_busy;
 
@@ -73,6 +75,19 @@ impl DrainFence {
                     () = fence.fenced() => false,
                 }
             }
+        }
+    }
+}
+
+impl DeliveryFence for DrainFence {
+    fn admitted(&self) -> bool {
+        self.admits()
+    }
+
+    fn lost(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        match &self.0 {
+            Some(fence) => Box::pin(async move { fence.fenced().await }),
+            None => Box::pin(std::future::pending()),
         }
     }
 }

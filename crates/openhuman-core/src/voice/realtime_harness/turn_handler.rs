@@ -11,7 +11,7 @@ use log::{info, warn};
 use serde_json::{json, Value};
 use tokio::sync::Semaphore;
 
-use crate::agent::progress::AgentProgress;
+use crate::progress::AgentProgress;
 
 use super::agent::run_voice_turn;
 use super::chat_delivery::{

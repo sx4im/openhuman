@@ -67,7 +67,7 @@ pub(super) async fn run_agent_job_for_run(
     } else {
         let agent_id = selected_agent_id;
         if let Some(registry) =
-            crate::agent::harness::host_definition::AgentDefinitionRegistry::current()
+            crate::agent_registry::host_definition::AgentDefinitionRegistry::current()
         {
             if let Some(def) = registry.get(agent_id) {
                 tracing::debug!(
@@ -195,7 +195,7 @@ pub(super) async fn run_agent_job_for_run(
                     // that channel's turn instead, so its external-effect
                     // tools stay gated like its creator's were.
                     let origin = crate::cron::origin::turn_origin_for_job_run(job, run_id);
-                    let turn = crate::agent::turn_origin::with_origin(
+                    let turn = crate::security::turn_origin::with_origin(
                         origin,
                         agent.run_single(&prefixed_prompt),
                     );

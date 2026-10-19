@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 /// Attribution for child (sub-agent) progress. When present, the bridge routes
-/// events to the `Subagent*` [`AgentProgress`](crate::agent::progress::AgentProgress)
+/// events to the `Subagent*` [`AgentProgress`](crate::progress::AgentProgress)
 /// variants (so the parent thread can nest child activity under a live
 /// subagent row) instead of the top-level ones. Absent = a parent/top-level
 /// turn.
@@ -16,16 +16,13 @@ pub struct SubagentScope {
     pub agent_id: String,
     pub task_id: String,
     pub extended_policy: bool,
-    /// The durable journal stream minted for this child turn. Shared with the
-    /// host so it can export the completed child as its own Langfuse trace.
-    pub journal_run_id: Option<Arc<Mutex<Option<String>>>>,
 }
 
 /// A shared `call_id → tool_name` map. The model adapter's `ThinkingForwarder`
 /// writes it when a tool call *starts* (the crate `ToolDelta` has no `tool_name`
 /// field, so the start-event/name half of the tool-arg contract can't ride the
 /// crate stream and stays on the out-of-band forwarder path — see
-/// [`super::model::ThinkingForwarder`]). The bridge reads it to label the
+/// [`crate::inference::provider::model::ThinkingForwarder`]). The bridge reads it to label the
 /// incremental tool-argument fragments it now projects off the crate stream
 /// (`MessageDelta.tool_call`), preserving the UI's `ToolCallArgsDelta`
 /// `tool_name` contract without the forwarder emitting those fragments itself.

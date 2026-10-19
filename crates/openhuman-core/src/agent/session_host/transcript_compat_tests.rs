@@ -182,7 +182,7 @@ pub(super) fn store_locator(root: &Path) -> Arc<dyn TranscriptLocator> {
     Arc::clone(
         stores
             .entry(root.to_path_buf())
-            .or_insert_with(super::super::session_store::splice_fixture::memory_locator),
+            .or_insert_with(crate::storage::sessions::splice_fixture_tests::memory_locator),
     )
 }
 
@@ -475,7 +475,7 @@ fn assert_retired_tool_replay(identity_bound: bool) {
             .turn("save this old conversation")
             .await
             .expect("archive turn");
-        let archived = super::super::session_store::splice_fixture::head_of(
+        let archived = crate::storage::sessions::splice_fixture_tests::head_of(
             &store_locator(root.path()),
             "retired-audio-thread",
         );
@@ -529,7 +529,7 @@ fn assert_retired_tool_replay(identity_bound: bool) {
         // remain intact in the durable transcript.
         assert_eq!(
             to_json(
-                &super::super::session_store::splice_fixture::head_of(
+                &crate::storage::sessions::splice_fixture_tests::head_of(
                     &store_locator(root.path()),
                     "retired-audio-thread",
                 )

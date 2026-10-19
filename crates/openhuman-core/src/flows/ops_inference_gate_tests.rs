@@ -189,7 +189,7 @@ fn agent_node_role_prefers_custom_registry_entry_model_pin_over_default() {
     // precedence `OpenHumanAgentRunner::run_via_harness` applies via
     // `resolve_node_model(&request, entry_model)`, reusing the same sync,
     // config-only accessor (`find_custom_in_config`) it calls.
-    use crate::agent::registry::types::{AgentRegistryEntry, AgentRegistrySource};
+    use crate::agent_registry::types::{AgentRegistryEntry, AgentRegistrySource};
 
     let tmp = TempDir::new().unwrap();
     let mut config = test_config(&tmp);

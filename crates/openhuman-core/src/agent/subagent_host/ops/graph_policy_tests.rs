@@ -129,7 +129,7 @@ async fn run_with_spawn_tool_in_parent_surface(allowed: HashSet<String>) -> (boo
         vec![],
         allowed,
         10,
-        None,
+        (None, None),
         None,
         "researcher",
         "task-6157",
@@ -144,6 +144,7 @@ async fn run_with_spawn_tool_in_parent_surface(allowed: HashSet<String>) -> (boo
         "root-session__spawn_refusal",
         "mock-channel",
         AgentTokenjuiceCompression::Off,
+        None,
         None,
     )
     .await

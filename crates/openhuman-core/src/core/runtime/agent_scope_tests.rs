@@ -69,7 +69,7 @@ fn derive_with_carries_policy_catalogue_and_approval_flag() {
         ..SecurityPolicy::default()
     });
     let definitions =
-        Arc::new(crate::agent::harness::host_definition::AgentDefinitionRegistry::default());
+        Arc::new(crate::agent_registry::host_definition::AgentDefinitionRegistry::default());
     let mut spec = overlay("/tmp/agent-scope-ws")
         .session_agent("alpha")
         .agent_policy(Arc::clone(&policy))

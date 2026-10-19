@@ -361,7 +361,7 @@ async fn thread_delete_removes_persisted_turn_state_snapshot() {
         .workspace_dir;
 
     let snapshot = TurnState::started(thread_id, "req-1", 4, "2026-01-01T00:00:00Z");
-    let store = crate::agent::session_store::turn_states_for(&dir);
+    let store = crate::storage::sessions::turn_states_for(&dir);
     store.put(&snapshot).expect("put snapshot");
     assert!(store.get(thread_id).unwrap().is_some());
 
@@ -417,7 +417,7 @@ async fn threads_purge_removes_every_turn_state_snapshot() {
         .workspace_dir;
 
     let snapshot = TurnState::started("thread-a", "req-1", 4, "2026-01-01T00:00:00Z");
-    let store = crate::agent::session_store::turn_states_for(&dir);
+    let store = crate::storage::sessions::turn_states_for(&dir);
     store.put(&snapshot).expect("put snapshot");
     store
         .put(&TurnState::started(

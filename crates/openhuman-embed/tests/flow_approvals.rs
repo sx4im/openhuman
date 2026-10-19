@@ -4,11 +4,11 @@ mod common;
 
 use std::time::Duration;
 
-use openhuman_core::agent::turn_origin::{self, TrustedAutomationSource};
 use openhuman_core::core::events::DomainEvent;
 use openhuman_core::core::runtime::{AgentContextRegistry, CoreContext};
 use openhuman_core::security::approval::{ApprovalGate, ApprovalSourceContext, GateOutcome};
 use openhuman_core::security::approval::{ApprovalTurnContext, FlowRunContext};
+use openhuman_core::security::turn_origin::{self, TrustedAutomationSource};
 use openhuman_embed::{
     Access, AgentDefinitionSpec, AgentSpec, AgentTurnOrigin, ApprovalDecision, Runtime,
     ToolScopeSpec, TrustedAccess, Workspace,
@@ -253,8 +253,10 @@ fn flow_surfaces_correlate_decisions_and_closed_instances_never_publish() {
             let requests = common::chat_requests(&provider).await;
             // Human approval refusals deliberately omit the policy-failure
             // marker so the model can explain that the action was not done.
-            assert!(requests.iter().any(|request| common::tool_results(request)
-                .contains("This action was refused and must not be performed this turn")));
+            assert!(requests.iter().any(|request| {
+                common::tool_results(request)
+                    .contains("This action was refused and must not be performed this turn")
+            }));
 
             // A retained context belongs to its old instance after removal.
             // Its late flow registration must create neither rows nor surfaces.
@@ -306,12 +308,12 @@ fn flow_surfaces_correlate_decisions_and_closed_instances_never_publish() {
                             DomainEvent::ApprovalRequested { agent_id, .. }
                                 if agent_id.as_deref() == Some("flow-removed") =>
                             {
-                                break
+                                break;
                             }
                             DomainEvent::FlowApprovalRequested { flow_id, .. }
                                 if flow_id == "flow-closed" =>
                             {
-                                break
+                                break;
                             }
                             _ => {}
                         }

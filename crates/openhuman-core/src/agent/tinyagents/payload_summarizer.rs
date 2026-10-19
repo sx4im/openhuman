@@ -27,11 +27,12 @@ use tinyagents_harness::context::RunContext;
 use tinyagents_harness::summarization::payload_summarizer::{
     run_unary_summary, summary_child_config, PayloadSummarizer as HarnessPayloadSummarizer,
 };
+use tinyagents_orchestration::subagent::{subagent_framing, SubagentRole};
 use tracing::debug;
 
-use crate::agent::harness::host_definition::AgentDefinition;
 use crate::agent::subagent_host;
 use crate::agent::tinyagents::host::OpenHumanRunContext;
+use crate::agent_registry::host_definition::AgentDefinition;
 use {
     crate::inference::tokenjuice::generate::PreparedGenerate, tinyjuice_bus::wire::GenerateRequest,
 };
@@ -107,6 +108,7 @@ impl HarnessPayloadSummarizer<OpenHumanRunContext> for SubagentPayloadSummarizer
             definition.max_iterations,
             max_output_tokens,
         )?;
+        let summary_depth = child_context.depth();
         debug!(
             agent = %definition.id,
             parent_depth = parent_ctx.depth(),
@@ -129,8 +131,8 @@ impl HarnessPayloadSummarizer<OpenHumanRunContext> for SubagentPayloadSummarizer
                     definition.temperature,
                 );
                 let max_output_tokens = request.max_output_tokens.min(max_output_tokens).max(1);
-                let system_prompt =
-                    subagent_host::append_subagent_role_contract(request.system, &definition.id);
+                let framing = subagent_framing(SubagentRole::Leaf, summary_depth, &request.prompt);
+                let system_prompt = format!("{}\n\n{framing}", request.system.trim_end());
 
                 let provider_model = tinyinference_llm::model::MaxTokensModel::new(
                     source.build_summarizer(

@@ -170,7 +170,7 @@ async fn terminal_turn_dispatches_followup_as_a_fresh_host_turn() {
     cancel_parked_turn(thread_id, &block).await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn cancellation_discards_pending_lanes_before_a_replacement_turn() {
     let _serial = FORCED_ERROR_TEST_LOCK.lock().await;
     let cancelled_block = make_block();

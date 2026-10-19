@@ -137,15 +137,19 @@ pub async fn install_from_config(config: &crate::config::Config) -> Result<(), S
         return Ok(());
     }
     savings::configure(
-        &client(config),
         config
             .default_model
             .clone()
             .unwrap_or_else(|| crate::config::DEFAULT_MODEL.to_string()),
+    );
+    // Totals the old build kept in a snapshot file move into the module's
+    // storage first (once per file, best effort).
+    crate::modules::import_legacy_tinyjuice_savings(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &client(config),
         &config.workspace_dir,
     )
-    .await
-    .unwrap_or_else(|e| log::debug!("[tokenjuice][savings] configure failed: {e}"));
+    .await;
     let request = install_request(config);
     // The module keeps the durable tier on its blob storage; originals the old
     // disk tier wrote move across first (once per directory, best effort).

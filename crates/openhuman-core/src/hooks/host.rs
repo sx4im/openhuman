@@ -1,7 +1,7 @@
 //! The process-global hook engine and the OpenHuman seams it is built with.
 //!
 //! The engine, `hooks.json` contract and process runner live in
-//! `tinyagents_runtime::command_hooks`. This module supplies what is specific
+//! `tinyagents_hooks::command`. This module supplies what is specific
 //! to this host: the product name that decides discovery paths and the
 //! `OPENHUMAN_*` hook environment, the user's home directory, the platform
 //! shell, and the model behind `prompt` hooks.
@@ -10,9 +10,7 @@ use crate::core::runtime::DispatchCtx;
 use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
-use tinyagents_runtime::command_hooks::{
-    config, HookConfig, HookEngine, HookEnvironment, PromptEvaluator,
-};
+use tinyagents_hooks::command::{config, HookConfig, HookEngine, HookEnvironment, PromptEvaluator};
 
 /// Product name handed to the engine: `ProgramData\OpenHuman`,
 /// `/Library/Application Support/OpenHuman`, `/etc/openhuman`, `.openhuman`,
@@ -34,10 +32,11 @@ fn environment() -> HookEnvironment {
         .with_prompt_evaluator(Arc::new(HostPromptEvaluator))
 }
 
-static ENGINE: LazyLock<HookEngine> = LazyLock::new(|| HookEngine::new(environment()));
+static ENGINE: LazyLock<Arc<HookEngine>> =
+    LazyLock::new(|| Arc::new(HookEngine::new(environment())));
 
 /// The process-global engine.
-pub fn engine() -> &'static HookEngine {
+pub fn engine() -> &'static Arc<HookEngine> {
     &ENGINE
 }
 

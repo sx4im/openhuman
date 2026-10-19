@@ -12,9 +12,9 @@ use tinytools::WorkspaceDescriptor;
 use tokio::sync::mpsc::Sender;
 
 use crate::agent::harness::fork_context::ParentExecutionContext;
-use crate::agent::harness::host_definition::AgentDefinition;
 use crate::agent::orchestration::worktree;
-use crate::agent::progress::AgentProgress;
+use crate::agent_registry::host_definition::AgentDefinition;
+use crate::progress::AgentProgress;
 use tinyagents_definition::SandboxMode;
 
 use super::staging::{
@@ -92,6 +92,7 @@ async fn create_spawn_parallel_worktree(
                             status: ParallelAgentStatus::Failed,
                             output: None,
                             error: Some(format!("worktree isolation failed: {err}")),
+                            failure_cause: None,
                             awaiting_question: None,
                             checkpoint_path: None,
                             ownership: task.ownership.clone(),
@@ -122,6 +123,7 @@ async fn create_spawn_parallel_worktree(
                     error: Some(
                         "worktree isolation requested but action_dir is unavailable".to_string(),
                     ),
+                    failure_cause: None,
                     awaiting_question: None,
                     checkpoint_path: None,
                     ownership: task.ownership.clone(),
@@ -151,7 +153,7 @@ pub(crate) async fn stage_spawn_parallel_workers_from_defs(
     let mut immediate_results = Vec::new();
     let mut prepared = Vec::new();
 
-    for preflight in prepare_spawn_parallel_tasks_from_defs(tasks, definitions, parent) {
+    for preflight in prepare_spawn_parallel_tasks_from_defs(tasks, definitions, parent).await {
         let (definition, prompt, task, task_id, dispatch_mode) = match preflight {
             SpawnParallelTaskPreflight::Rejected(rejection) => {
                 match rejection.kind {
@@ -204,6 +206,7 @@ pub(crate) async fn stage_spawn_parallel_workers_from_defs(
                     status: ParallelAgentStatus::Failed,
                     output: None,
                     error: Some(rejection.error),
+                    failure_cause: None,
                     awaiting_question: None,
                     checkpoint_path: None,
                     ownership: rejection.ownership,

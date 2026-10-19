@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use common::{
-    chat_completion, chat_requests, runtime_without_master_key, tool_names, PointedTransport,
+    chat_completion, chat_requests, runtime_without_master_key, tool_names, PointedInference,
 };
 use openhuman_embed::seams::ToolHookDecision;
 use openhuman_embed::{
@@ -118,7 +118,7 @@ async fn scenario() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&managed)
         .await;
-    PointedTransport::install(&managed.uri());
+    PointedInference::install(&managed.uri());
     openhuman_core::storage::install(Arc::new(openhuman_core::storage::MemoryStorage::new()));
 
     let root = tempfile::tempdir().unwrap();
@@ -141,7 +141,7 @@ async fn scenario() {
                 .map(String::from)
                 .to_vec(),
         ))
-        .can_use_tool(|_| Box::pin(async { ToolHookDecision::Proceed }))
+        .can_use_tool(|_| Box::pin(async { ToolHookDecision::default() }))
         .channel_permissions([("web_channel", PermissionLevel::Execute)])
         .cron_delivery(recorder.clone())
         .build()

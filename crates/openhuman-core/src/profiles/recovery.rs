@@ -16,7 +16,7 @@ use crate::core::runtime::CoreContext;
 /// opens.
 pub(crate) fn recover_workspace(id: &ProfileId, workspace_dir: &std::path::Path) {
     let now = chrono::Utc::now().to_rfc3339();
-    match crate::agent::session_store::default_turn_states_for(workspace_dir)
+    match crate::storage::sessions::default_turn_states_for(workspace_dir)
         .mark_all_interrupted(&now)
     {
         Ok(0) => {}
@@ -29,7 +29,7 @@ pub(crate) fn recover_workspace(id: &ProfileId, workspace_dir: &std::path::Path)
 /// store, which the workspace sweep cannot see: the profile's default
 /// session key is swept through the installed provider.
 pub(crate) fn recover_session_store(id: &ProfileId, context: &Arc<CoreContext>) {
-    let Some(provider) = crate::agent::session_store::installed_in(
+    let Some(provider) = crate::storage::sessions::installed_in(
         &crate::core::runtime::DispatchCtx::new(Arc::clone(context)),
     ) else {
         return;

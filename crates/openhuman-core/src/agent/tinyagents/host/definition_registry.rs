@@ -3,13 +3,13 @@
 //! Adapts two OpenHuman domains onto
 //! [`tinyagents_harness::host::DefinitionRegistry`]:
 //!
-//! * [`crate::agent::harness::host_definition::AgentDefinitionRegistry`] —
-//!   the harness registry of built-in ([`load_builtins`](crate::agent::registry::agents::load_builtins)-parsed
+//! * [`crate::agent_registry::host_definition::AgentDefinitionRegistry`] —
+//!   the harness registry of built-in ([`load_builtins`](crate::agent_registry::agents::load_builtins)-parsed
 //!   `agent.toml`)
 //!   and workspace-override agent definitions, plus the config-backed
 //!   user-authored fallback
-//!   ([`crate::agent::registry::find_custom_in_config`] →
-//!   [`crate::agent::registry::definition_from_registry_entry`]).
+//!   ([`crate::agent_registry::find_custom_in_config`] →
+//!   [`crate::agent_registry::definition_from_registry_entry`]).
 //!
 //! This is `docs/specs/plan-agents.md` Phase 4. The crate-side
 //! [`AgentDefinition`] is inert (`serde` + `std`); OpenHuman's harness
@@ -23,7 +23,7 @@
 //! this: an agent may list a subagent id that a feature gate compiled out of
 //! the build (`presentation_agent` without `documents`), and both existing resolution sites
 //! tolerate it (`collect_orchestrator_tools` warns and skips;
-//! [`validate_tier_hierarchy`](crate::agent::registry::agents::validate_tier_hierarchy) explicitly `continue`s past unknown ids). So
+//! `DefinitionSet::validate_tier_hierarchy` explicitly continues past unknown ids). So
 //! `OpenHumanDefinitionRegistry::resolve` returns `Ok(None)` for every miss
 //! and this adapter has no error path at all.
 //!
@@ -33,9 +33,9 @@
 //! the tier hierarchy, so `delegates_for` applies
 //! [`validate_tier_transition`](tinyagents_definition::validate_tier_transition)
 //! — the same single source of truth
-//! [`validate_tier_hierarchy`](crate::agent::registry::agents::validate_tier_hierarchy) walks at boot — per declared pair. A `Worker`
+//! `DefinitionSet::validate_tier_hierarchy` walks at boot — per declared pair. A `Worker`
 //! parent yields an empty list; a tier-illegal child is dropped. Unknown child
-//! ids are **kept**, matching both [`validate_tier_hierarchy`](crate::agent::registry::agents::validate_tier_hierarchy)'s `continue` and
+//! ids are **kept**, matching the owner's validator and
 //! the trait's note that an authorized id may still fail to resolve.
 //!
 //! **3. Tool scopes remain host-materialized.** The portable definition
@@ -58,11 +58,11 @@ use async_trait::async_trait;
 use tinyagents_definition::Result;
 use tinyagents_definition::{AgentDefinition, DefinitionRegistry};
 
-use crate::agent::harness::host_definition::NO_TOOLS_SENTINEL;
-use crate::agent::harness::host_definition::{
+use crate::agent_registry::host_definition::NO_TOOLS_SENTINEL;
+use crate::agent_registry::host_definition::{
     AgentDefinition as HostAgentDefinition, AgentDefinitionRegistry,
 };
-use crate::agent::registry::{definition_from_registry_entry, find_custom_in_config};
+use crate::agent_registry::{definition_from_registry_entry, find_custom_in_config};
 use crate::config::Config;
 use tinyagents_definition::{AgentTier, ToolScope};
 
@@ -402,11 +402,11 @@ impl OpenHumanDefinitionRegistry {
     /// Tier-checked delegate ids for `def`.
     ///
     /// Reuses [`tinyagents_definition::validate_tier_transition`]
-    /// — the single source of truth [`validate_tier_hierarchy`](crate::agent::registry::agents::validate_tier_hierarchy) walks at boot —
+    /// — the single source of truth `DefinitionSet::validate_tier_hierarchy` walks at boot —
     /// so this seam can never disagree with the host's boot-time validation.
     fn authorized_delegates(&self, def: &HostAgentDefinition) -> Vec<String> {
         if def.agent_tier == AgentTier::Worker {
-            // `validate_tier_hierarchy` hard-fails a worker that lists any
+            // the owner validator hard-fails a worker that lists any
             // agent id, so a worker's authorized set is empty by construction.
             return Vec::new();
         }
@@ -414,7 +414,7 @@ impl OpenHumanDefinitionRegistry {
         let mut out = Vec::new();
         for id in def.allowed_subagent_ids() {
             let Some(child) = self.host_definition(&id) else {
-                // Unknown child: `validate_tier_hierarchy` `continue`s past it
+                // Unknown child: the owner validator tolerates it
                 // rather than failing, and the trait explicitly allows an
                 // authorized id that does not resolve in this build.
                 out.push(id);

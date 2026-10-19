@@ -263,7 +263,7 @@ impl ModuleReplTool {
             Err(error) => {
                 return Ok(ToolResult::error(format!(
                     "juice: invalid arguments: {error}"
-                )))
+                )));
             }
         };
         let response = self
@@ -364,7 +364,7 @@ impl Tool for ModuleReplTool {
         let handle = match handle::classify(raw) {
             handle::HandleArg::Handle(handle) => handle,
             handle::HandleArg::Path(path) => {
-                return self.execute_on_artifact(&ctx, path, args).await
+                return self.execute_on_artifact(&ctx, path, args).await;
             }
             handle::HandleArg::Invalid => {
                 log::debug!("[tokenjuice][repl] {} rejected a non-handle", self.name);

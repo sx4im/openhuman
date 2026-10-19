@@ -1,7 +1,7 @@
 //! What an agent *is*: prompt, tool scope, sandbox mode, iteration cap.
 //!
 //! A thin re-spelling of the core's
-//! [`AgentDefinition`](openhuman_core::agent::harness::host_definition::AgentDefinition)
+//! [`AgentDefinition`](openhuman_core::agent_registry::host_definition::AgentDefinition)
 //! so the library surface does not track that thirty-field struct
 //! field-by-field. The default is the built-in orchestrator's definition
 //! under the agent's own id — the same dynamic prompt and delegation
@@ -12,7 +12,7 @@
 //! server expects to call it, so the host narrows with
 //! [`AgentDefinitionSpec::tools`] rather than widening.
 
-use openhuman_core::agent::harness::host_definition::{AgentDefinition, AgentDefinitionRegistry};
+use openhuman_core::agent_registry::host_definition::{AgentDefinition, AgentDefinitionRegistry};
 use tinyagents_definition::{PromptSource, SandboxMode, ToolScope};
 
 use super::AgentError;

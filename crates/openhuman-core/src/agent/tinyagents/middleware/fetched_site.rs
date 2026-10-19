@@ -26,18 +26,16 @@ pub(super) fn fetched_site_policy(
     tool: &str,
     error: &str,
 ) -> Option<Option<(&'static str, usize)>> {
-    if tool != WEB_FETCH_TOOL {
-        return None;
-    }
-    let status = tinytools_std::network::web_fetch::status_of(error)?;
+    use tinytools::status::FetchedSiteRecovery;
+    let failure = tinytools::status::classify_web_fetch_status(tool, error, false)?;
     tracing::debug!(
-        status,
+        status = failure.status,
         "[tinyagents::mw] web_fetch site status — not a credential failure"
     );
-    Some(match status {
-        401 | 403 => Some(("site_refused", 2)),
-        429 | 500..=599 => Some(("transient", 2)),
-        _ => None,
+    Some(match failure.recovery {
+        FetchedSiteRecovery::SiteRefused => Some(("site_refused", 2)),
+        FetchedSiteRecovery::Transient => Some(("transient", 2)),
+        FetchedSiteRecovery::Ordinary => None,
     })
 }
 
@@ -58,9 +56,10 @@ pub(super) fn fetch_host_scope(tool: &str, field: &str, value: &str) -> Option<S
 /// failure into a terminal inference or transient tool failure. Everything else
 /// is read whole.
 pub(super) fn heuristic_text<'a>(tool: &str, failure_text: &'a str) -> &'a str {
-    if fetched_site_policy(tool, failure_text) == Some(None) {
-        failure_text.lines().next().unwrap_or(failure_text)
-    } else {
-        failure_text
+    match tinytools::status::classify_web_fetch_status(tool, failure_text, false) {
+        Some(failure) if failure.recovery == tinytools::status::FetchedSiteRecovery::Ordinary => {
+            failure.headline(failure_text)
+        }
+        _ => failure_text,
     }
 }

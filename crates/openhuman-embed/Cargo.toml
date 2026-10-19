@@ -77,6 +77,7 @@ tinymcp-bus = { path = "../../vendor/tinymcp/crates/tinymcp-bus" }
 # The session store port (`SessionStoreProvider`) a host implements to keep
 # conversations in its own database, and the in-memory provider; same path as
 # the core's so one copy resolves.
+tinyagents-hooks = { workspace = true }
 tinyagents-harness = { path = "../../vendor/tinyagents/crates/tinyagents-harness", default-features = false }
 tinyagents-definition = { path = "../../vendor/tinyagents/crates/tinyagents-definition" }
 tinyagents-session = { path = "../../vendor/tinyagents/crates/tinyagents-session" }

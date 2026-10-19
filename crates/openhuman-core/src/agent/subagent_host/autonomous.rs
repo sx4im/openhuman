@@ -39,7 +39,7 @@ pub fn subagent_iter_cap_with_autonomous_lift(autonomous_cap: Option<usize>, bas
 /// A definition's iteration cap under the run context's autonomous lift.
 pub fn definition_iter_cap(
     run_context: &crate::agent::tinyagents::host::OpenHumanRunContext,
-    definition: &crate::agent::harness::host_definition::AgentDefinition,
+    definition: &crate::agent_registry::host_definition::AgentDefinition,
 ) -> usize {
     subagent_iter_cap_with_autonomous_lift(
         run_context.autonomous_iter_cap,

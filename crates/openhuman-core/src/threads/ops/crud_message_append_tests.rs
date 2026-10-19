@@ -27,7 +27,7 @@ async fn setup() -> (tempfile::TempDir, crate::config::Config) {
 async fn append_with_test_config(
     request: AppendConversationMessageRequest,
     config: &crate::config::Config,
-    origin: Option<&crate::agent::turn_origin::AgentTurnOrigin>,
+    origin: Option<&crate::security::turn_origin::AgentTurnOrigin>,
 ) -> Result<Outcome<ApiEnvelope<ConversationMessageRecord>>, ThreadsError> {
     message_append_with_config(
         &crate::core::runtime::DispatchCtx::ambient(),
@@ -73,7 +73,7 @@ async fn user_append_stages_original_strips_upload_bytes_and_reuses_returned_con
     .value
     .data
     .unwrap();
-    let (_, files) = crate::agent::attachments::parse(&first.content);
+    let (_, files) = crate::attachments::parse(&first.content);
     assert_eq!(files.len(), 1);
     assert_eq!(
         tokio::fs::read(config.action_dir.join(&files[0].path))
@@ -98,15 +98,10 @@ async fn user_append_stages_original_strips_upload_bytes_and_reuses_returned_con
         .data
         .unwrap();
     assert_eq!(second.content, first.content);
-    let staged = crate::agent::attachments::stage_turn(
-        &second.content,
-        Some(&config),
-        None,
-        Some("uploads"),
-        None,
-    )
-    .await
-    .unwrap();
+    let staged =
+        crate::attachments::stage_turn(&second.content, Some(&config), None, Some("uploads"), None)
+            .await
+            .unwrap();
     assert_eq!(staged, first.content);
     let persisted = conversations::blocking::get_messages(
         crate::core::runtime::DispatchCtx::ambient(),
@@ -162,7 +157,7 @@ async fn rejected_upload_never_appends_a_message() {
 #[tokio::test]
 async fn external_origin_cannot_reuse_an_existing_attachment_marker() {
     let (_temp, config) = setup().await;
-    let staged = crate::agent::attachments::stage_turn(
+    let staged = crate::attachments::stage_turn(
         "[IMAGE:data:image/png;base64,iVBORw0KGgo=]",
         Some(&config),
         None,
@@ -171,7 +166,7 @@ async fn external_origin_cannot_reuse_an_existing_attachment_marker() {
     )
     .await
     .unwrap();
-    let origin = crate::agent::turn_origin::AgentTurnOrigin::ExternalChannel {
+    let origin = crate::security::turn_origin::AgentTurnOrigin::ExternalChannel {
         sender_name: None,
         channel: "test".into(),
         sender: None,
@@ -320,7 +315,7 @@ async fn raw_append_stages_in_the_bound_thread_folder() {
         .value
         .data
         .unwrap();
-    let (_, files) = crate::agent::attachments::parse(&staged.content);
+    let (_, files) = crate::attachments::parse(&staged.content);
     assert_eq!(files.len(), 1);
     assert!(folder.join(&files[0].path).is_file());
     assert!(!config.action_dir.join("uploads").exists());

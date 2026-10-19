@@ -32,8 +32,6 @@ use crate::config::Config;
 use crate::security::SecurityPolicy;
 
 use super::build_capabilities;
-#[cfg(target_os = "linux")]
-use super::caps::OpenHumanCode;
 use super::caps::{OpenHumanHttp, OpenHumanTools};
 
 fn test_config(tmp: &TempDir) -> Arc<Config> {
@@ -144,9 +142,9 @@ use super::caps::{
 // ── B38 (Gap 2): a custom agent_ref must route to the harness (real tools),
 // not the persona-only completion fallback ─────────────────────────────────
 
-fn custom_registry_entry(enabled: bool) -> crate::agent::registry::AgentRegistryEntry {
-    use crate::agent::registry::types::{AgentRegistrySource, AgentSubagentPolicy};
-    crate::agent::registry::AgentRegistryEntry {
+fn custom_registry_entry(enabled: bool) -> crate::agent_registry::AgentRegistryEntry {
+    use crate::agent_registry::types::{AgentRegistrySource, AgentSubagentPolicy};
+    crate::agent_registry::AgentRegistryEntry {
         id: "finance_analyst".to_string(),
         name: "Finance Analyst".to_string(),
         description: "Reviews spend and drafts finance summaries.".to_string(),

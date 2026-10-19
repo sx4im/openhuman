@@ -78,7 +78,7 @@ fn a_stateless_runtime_keeps_every_conversation_in_its_session_store() {
                 .build()
                 .await
                 .expect("a stateless runtime with a store builds");
-            assert!(openhuman_core::agent::session_store::is_installed());
+            assert!(openhuman_core::storage::sessions::is_installed());
             let scratch = runtime.root_dir().to_path_buf();
 
             let spec = |id: &str| {
@@ -170,7 +170,7 @@ fn a_stateless_runtime_keeps_every_conversation_in_its_session_store() {
                 .expect("asha's storage scope")
                 .documents()
                 .query_all(
-                    tinyagents_harness::observability::DriverStatusStore::DEFAULT_COLLECTION,
+                    tinyagents_harness::observability::DriverStatusStore::COLLECTION,
                     &Default::default(),
                 )
                 .await
@@ -200,7 +200,7 @@ fn a_stateless_runtime_keeps_every_conversation_in_its_session_store() {
             drop((asha, ravi));
             drop(runtime);
             assert!(
-                !openhuman_core::agent::session_store::is_installed(),
+                !openhuman_core::storage::sessions::is_installed(),
                 "the store is removed with the runtime"
             );
             assert!(!scratch.exists(), "the scratch workspace is removed");

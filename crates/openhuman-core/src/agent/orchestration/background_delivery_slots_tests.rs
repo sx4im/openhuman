@@ -5,7 +5,8 @@
 
 use super::*;
 use crate::agent::orchestration::background_completions::{
-    pending_for, record_completion, router_for_workspace, TestWorkspace,
+    pending_for_ctx, record_completion, router_for_workspace, router_for_workspace_ctx,
+    TestWorkspace,
 };
 use crate::core::runtime::DispatchCtx;
 use crate::core::runtime::{ContextOverlay, DomainSet};
@@ -92,7 +93,8 @@ async fn one_profiles_busy_turn_does_not_block_anothers_thread() {
         &DispatchCtx::ambient(),
         &p.thread
     )));
-    let router_b = router_for_workspace(p.ws_b.path());
+    let bob_ctx = DispatchCtx::new(Arc::clone(&p.bob));
+    let router_b = router_for_workspace_ctx(&bob_ctx, p.ws_b.path());
     let batch = in_scope(&p.bob, || {
         claim_ready(&DispatchCtx::ambient(), &router_b, &p.thread)
     })
@@ -124,9 +126,13 @@ async fn one_profiles_busy_turn_does_not_block_anothers_thread() {
 async fn a_delivery_in_flight_for_one_profile_does_not_take_anothers_slot() {
     let _guard = crate::config::TEST_ENV_LOCK.lock().await;
     let p = pair().await;
+    let (alice_ctx, bob_ctx) = (
+        DispatchCtx::new(Arc::clone(&p.alice)),
+        DispatchCtx::new(Arc::clone(&p.bob)),
+    );
     let (router_a, router_b) = (
-        router_for_workspace(p.ws_a.path()),
-        router_for_workspace(p.ws_b.path()),
+        router_for_workspace_ctx(&alice_ctx, p.ws_a.path()),
+        router_for_workspace_ctx(&bob_ctx, p.ws_b.path()),
     );
 
     let held = in_scope(&p.alice, || {
@@ -201,8 +207,8 @@ async fn a_delivery_in_flight_for_one_profile_does_not_take_anothers_slot() {
     assert!(delivered[0].1.contains("task-bob") && !delivered[0].1.contains("task-alice"));
     assert_eq!(delivered[1].0, format!("alice:{}", p.thread));
     assert!(delivered[1].1.contains("task-alice") && !delivered[1].1.contains("task-bob"));
-    assert!(pending_for(p.ws_a.path(), &p.thread).is_empty());
-    assert!(pending_for(p.ws_b.path(), &p.thread).is_empty());
+    assert!(pending_for_ctx(&alice_ctx, p.ws_a.path(), &p.thread).is_empty());
+    assert!(pending_for_ctx(&bob_ctx, p.ws_b.path(), &p.thread).is_empty());
 }
 
 #[tokio::test]

@@ -61,7 +61,7 @@ impl Tool for McpListServersTool {
             Err(_) => {
                 return Ok(ToolResult::error(
                     "mcp_list_servers failed: TinyMCP is unavailable",
-                ))
+                ));
             }
         };
         let config = host::client_config(&self.config);
@@ -77,7 +77,7 @@ impl Tool for McpListServersTool {
             Err(_) => {
                 return Ok(ToolResult::error(
                     "mcp_list_servers failed: module call failed",
-                ))
+                ));
             }
         };
         let servers = summaries
@@ -173,7 +173,7 @@ impl Tool for McpListToolsTool {
             Err(_) => {
                 return Ok(ToolResult::error(
                     "mcp_list_tools failed: TinyMCP is unavailable",
-                ))
+                ));
             }
         };
         let server = client
@@ -193,7 +193,7 @@ impl Tool for McpListToolsTool {
             Err(_) => {
                 return Ok(ToolResult::error(
                     "mcp_list_tools failed: module call failed",
-                ))
+                ));
             }
         };
         let remote = match client
@@ -204,7 +204,7 @@ impl Tool for McpListToolsTool {
             Err(_) => {
                 return Ok(ToolResult::error(
                     "mcp_list_tools failed: metadata scrubbing failed",
-                ))
+                ));
             }
         };
 
@@ -222,7 +222,7 @@ impl Tool for McpListToolsTool {
                 Err(_) => {
                     return Ok(ToolResult::error(
                         "mcp_list_tools failed: tool display failed",
-                    ))
+                    ));
                 }
             };
             display.push((tool, projected));

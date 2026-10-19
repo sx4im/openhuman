@@ -18,8 +18,8 @@ use std::sync::Arc;
 use tinyagents_harness::cancel::CancellationToken;
 use tinyagents_harness::turn_deadline::TurnDeadline;
 
-use crate::agent::hooks::HookScope;
 use crate::agent::tinyagents::budget::ModelBudget;
+use crate::agent::tinyagents::host::OpenHumanRunContext;
 
 /// Per-turn values an entry point hands to the session it runs.
 ///
@@ -45,7 +45,8 @@ pub struct HostTurnEnv {
     /// A cap on real tool invocations, never wider than the product default.
     pub tool_call_limit: Option<usize>,
     /// Agent/turn hook callbacks added after the runtime's global ones.
-    pub hooks: HookScope,
+    pub hooks:
+        tinyagents_hooks::scope::HookScope<OpenHumanRunContext, tinyagents_harness::cost::TurnCost>,
     /// The host's tool belt for this turn is authoritative: tool declarations
     /// recorded in a restored transcript must not bring a revoked tool back.
     pub fresh_tool_snapshot: bool,

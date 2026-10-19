@@ -157,9 +157,7 @@ there only while its bytes still match the binary
 - `Workflow`, `WorkflowScope` ([`ops_types.rs`](./ops_types.rs)): the discovered skill and its
   scope (`Builtin`, `Legacy`, `User`, `Project`, `Profile`, `Flow`).
 - `load_workflow_metadata`, `discover_workflows`, `discover_automations`,
-  `is_workspace_trusted`, `init_workflows_dir` ([`ops_discover/api.rs`](./ops_discover/api.rs)).
-  `config/workspace/ops.rs` calls `init_workflows_dir` during workspace
-  bootstrap.
+  `is_workspace_trusted` ([`ops_discover/api.rs`](./ops_discover/api.rs)).
 - `read_workflow_resource` ([`ops_discover/resource.rs`](./ops_discover/resource.rs)): wraps
   `tinyskills::resolve_skill` and `read_resource`, which enforce traversal,
   symlink, size (`MAX_WORKFLOW_RESOURCE_BYTES`, 128 KiB) and UTF-8 checks.
@@ -217,7 +215,7 @@ rather than re-implementing it:
 | Bundled-skill validate, digest, install, `is_current_materialization` | The `BUNDLED` table and the builtin root |
 
 Other owners: the orchestrator prompt renders the catalog
-(`agent/registry/agents/orchestrator/prompt.rs`), channel turns render their
+(`agent_registry/agents/orchestrator/prompt.rs`), channel turns render their
 own skills list (`agent/context/channels_prompt.rs`), fork context carries the
 parent's skill list to sub-agents (`agent/harness/fork_context.rs`), and the
 flows domain contributes `Flow`-scope entries (`flows/catalogue.rs`).
@@ -227,8 +225,8 @@ flows domain contributes `Flow`-scope entries (`flows/catalogue.rs`).
 - The `skills` Cargo feature (default on) gates every behavioral submodule.
   `pub mod skills` itself always compiles as a facade: when the feature is off,
   [`stub.rs`](./stub.rs) supplies the functions always-on callers use with empty or no-op
-  bodies (`load_workflow_metadata` returns `[]`, `init_workflows_dir` returns
-  `Ok(())`, the controller aggregators return nothing), so callers need no
+  bodies (`load_workflow_metadata` returns `[]`, the controller aggregators
+  return nothing), so callers need no
   `#[cfg]`. [`types.rs`](./types.rs) and `ops_types.rs` stay compiled in both builds because
   agent-harness and prompt signatures name them; the stub re-exports them
   rather than redeclaring them. [`catalog`](./catalog) and [`runtime`](./runtime) are facade and stub
