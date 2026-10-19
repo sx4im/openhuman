@@ -142,6 +142,9 @@ pub async fn remove_agent(ctx: &DispatchCtx, id: &str) -> Result<bool, String> {
             .await
             .map_err(|e| format!("failed to save config: {e:#}"))?;
     }
+    // Refresh the process registry like `update_agent` does, so a removed
+    // entry's overlay stops resolving without a restart (#6934).
+    AgentDefinitionRegistry::apply_registry_entries(&config.agent_registry.entries);
     Ok(removed)
 }
 

@@ -531,7 +531,9 @@ fn entry_overlay_skips_ids_the_harness_does_not_know() {
 
 #[test]
 fn apply_registry_entries_refreshes_the_process_registry() {
-    let _refresh_lock = REGISTRY_REFRESH_LOCK.lock().expect("registry test lock");
+    let _refresh_lock = REGISTRY_REFRESH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     /// Restores the process registry on drop, so parallel tests are
     /// unaffected even when an assertion below panics.
     struct RestoreGlobal(Option<std::sync::Arc<AgentDefinitionRegistry>>);
@@ -564,7 +566,9 @@ fn apply_registry_entries_refreshes_the_process_registry() {
 
 #[test]
 fn apply_registry_entries_empty_refresh_restores_pristine_policy() {
-    let _refresh_lock = REGISTRY_REFRESH_LOCK.lock().expect("registry test lock");
+    let _refresh_lock = REGISTRY_REFRESH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     /// Restores the process registry on drop, so parallel tests are
     /// unaffected even when an assertion below panics.
     struct RestoreGlobal(Option<std::sync::Arc<AgentDefinitionRegistry>>);
@@ -610,7 +614,9 @@ fn apply_registry_entries_empty_refresh_restores_pristine_policy() {
 
 #[test]
 fn apply_registry_entries_removed_entry_does_not_linger() {
-    let _refresh_lock = REGISTRY_REFRESH_LOCK.lock().expect("registry test lock");
+    let _refresh_lock = REGISTRY_REFRESH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     /// Restores the process registry on drop, so parallel tests are
     /// unaffected even when an assertion below panics.
     struct RestoreGlobal(Option<std::sync::Arc<AgentDefinitionRegistry>>);
@@ -665,7 +671,9 @@ fn apply_registry_entries_removed_entry_does_not_linger() {
 
 #[test]
 fn apply_registry_entries_registers_enabled_custom_agents() {
-    let _refresh_lock = REGISTRY_REFRESH_LOCK.lock().expect("registry test lock");
+    let _refresh_lock = REGISTRY_REFRESH_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     /// Restores the process registry on drop, so parallel tests are
     /// unaffected even when an assertion below panics.
     struct RestoreGlobal(Option<std::sync::Arc<AgentDefinitionRegistry>>);
