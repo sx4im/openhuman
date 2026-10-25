@@ -104,10 +104,10 @@ fn workspace_guard_defers_to_the_security_policy_for_internal_state() {
     }
 }
 
-fn memory_blobs() -> Arc<dyn tinystoragedrivers::BlobStore> {
-    use tinystoragedrivers::StorageBackend as _;
-    let scoped = tinystoragedrivers::MemoryStorage::new()
-        .for_scope(&tinystoragedrivers::Scope::local())
+fn memory_blobs() -> Arc<dyn tinystoragedrivers_api::BlobStore> {
+    let backend = crate::storage::test_support::memory_backend();
+    let scoped = backend
+        .for_scope(&crate::storage::Scope::local())
         .expect("the memory backend binds the local scope");
     Arc::clone(scoped.blobs())
 }

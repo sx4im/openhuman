@@ -169,7 +169,7 @@ pub(crate) fn instantiate(runtime: &Runtime, spec: AgentSpec) -> Result<AgentInn
             ));
         }
         if let Some(root) = binding.root_namespace() {
-            openhuman_core::memory::scope::validate_root(root)
+            tinymemory_tools::layout::identity::validate_root(root)
                 .map_err(|reason| AgentError::Invalid(format!("memory root {root:?}: {reason}")))?;
         }
         log::debug!("[embed][agent] id={id} binds its memory agent_id={agent_id}");
@@ -243,9 +243,8 @@ pub(crate) fn instantiate(runtime: &Runtime, spec: AgentSpec) -> Result<AgentInn
     }
 
     // A named scope is an explicit allowlist: unless it names a spawn tool it
-    // delegates only to the sub-agents its host declares, never to the
-    // inherited built-in roster (which would otherwise come back as
-    // `delegate_*` tools the scope never listed).
+    // cannot reach the inherited built-in sub-agent roster.
+    let declares_subagents = !parts.subagents.is_empty();
     if matches!(definition.tools, tinyagents_definition::ToolScope::Named(_))
         && !definition.tools.names_a_spawn_tool()
         && !definition.subagents.is_empty()
@@ -255,6 +254,9 @@ pub(crate) fn instantiate(runtime: &Runtime, spec: AgentSpec) -> Result<AgentInn
             definition.subagents.len()
         );
         definition.subagents.clear();
+    }
+    if !host_only && declares_subagents {
+        opt_named_belt_into_spawn(&mut definition.tools);
     }
     let definitions = own_catalogue(&catalogue, &id, &mut definition, parts.subagents)?;
 
@@ -281,7 +283,16 @@ pub(crate) fn instantiate(runtime: &Runtime, spec: AgentSpec) -> Result<AgentInn
             Some(route.base_url.clone()),
             Some(route.api_key.clone()),
         )
-        .map(|scoped| scoped.with_headers(route.headers.clone()))
+        .map(|scoped| {
+            scoped
+                .with_headers(route.headers.clone())
+                .with_provider_options(route.provider_options.clone())
+                .with_reasoning_effort(
+                    route
+                        .reasoning_effort
+                        .map(|effort| effort.as_str().to_string()),
+                )
+        })
     });
     let mut overrides = openhuman_core::agent::host_overrides::HostOverrides::default();
     overrides.parent = runtime.core_runtime().context().host_overrides();
@@ -317,6 +328,9 @@ pub(crate) fn instantiate(runtime: &Runtime, spec: AgentSpec) -> Result<AgentInn
             )
             .with_privacy_mode(config.privacy.mode),
         )),
+        autonomy_tier_source: Some(openhuman_core::core::runtime::AutonomyTierSource::Captured),
+        autonomy_tier_ceiling: host_only
+            .then_some(openhuman_core::security::AutonomyLevel::ReadOnly),
         approvals_disabled: !access.approval_gate_enabled(),
         definitions,
     };
@@ -425,6 +439,22 @@ fn opt_named_belt_into_discovery(scope: &mut tinyagents_definition::ToolScope) {
         if !names.iter().any(|name| name == TOOL_SEARCH) {
             names.push(TOOL_SEARCH.to_string());
             log::debug!("[embed][agent] declared MCP servers opt the named belt into tool_search");
+        }
+    }
+}
+
+/// Lets a named-scope agent reach only the child agents it explicitly owns.
+/// Apply the existing inherited-roster policy first and exclude HostOnly
+/// agents, whose named empty belt is a hard prohibition on acting tools.
+fn opt_named_belt_into_spawn(scope: &mut tinyagents_definition::ToolScope) {
+    use tinyagents_definition::ToolScope;
+    const SPAWN_SUBAGENT: &str = "spawn_subagent";
+    if let ToolScope::Named(names) = scope {
+        if !names.iter().any(|name| name == SPAWN_SUBAGENT) {
+            names.push(SPAWN_SUBAGENT.to_string());
+            log::debug!(
+                "[embed][agent] declared sub-agents opt the named belt into spawn_subagent"
+            );
         }
     }
 }

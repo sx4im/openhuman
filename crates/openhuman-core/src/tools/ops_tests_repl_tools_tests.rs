@@ -19,7 +19,6 @@ fn registry_for(tmp: &TempDir, cfg: &Config) -> Vec<Box<dyn Tool>> {
         &browser,
         &crate::config::HttpRequestConfig::default(),
         tmp.path(),
-        &HashMap::new(),
         cfg,
     )
 }

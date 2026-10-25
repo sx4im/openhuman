@@ -36,9 +36,12 @@ impl CoreContext {
             host_kind: HostKind::Cli,
             workspace_binding: RwLock::new(Arc::new(RwLock::new(WorkspaceBinding {
                 workspace_dir: None,
+                config_path: None,
             }))),
             domains: crate::core::runtime::DomainSet::full(),
             tool_groups: Default::default(),
+            autonomy_tier_source: AutonomyTierSource::LiveConfig,
+            autonomy_tier_ceiling: None,
             components: Default::default(),
             embedder_config: None,
             latest_embedder_config: None,
@@ -48,6 +51,7 @@ impl CoreContext {
             channel_thread: None,
             session_agent: None,
             profile: None,
+            profile_admission: Arc::new(()),
             agent: Default::default(),
             bare: true,
         })
@@ -102,6 +106,8 @@ impl CoreContext {
             ),
             domains: ctx.domains,
             tool_groups: ctx.tool_groups.clone(),
+            autonomy_tier_source: ctx.autonomy_tier_source,
+            autonomy_tier_ceiling: ctx.autonomy_tier_ceiling,
             components: ctx.components,
             embedder_config: ctx.embedder_config.clone(),
             latest_embedder_config: ctx.latest_embedder_config.as_ref().map(Arc::clone),
@@ -111,6 +117,7 @@ impl CoreContext {
             channel_thread: thread.or_else(|| ctx.channel_thread.clone()),
             session_agent: ctx.session_agent.clone(),
             profile: ctx.profile.clone(),
+            profile_admission: Arc::clone(&ctx.profile_admission),
             agent: ctx.agent.clone(),
             bare: ctx.bare,
         })

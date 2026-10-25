@@ -1,5 +1,5 @@
-//! Login-gated background services (local AI, voice) started on session
-//! store and stopped on session clear, plus the embedder-host detection
+//! Login-gated background services (local AI) started on session store and
+//! stopped on session clear, plus the embedder-host detection
 //! that gates global (operator-wide) activation side effects.
 
 use crate::config::Config;
@@ -40,13 +40,16 @@ pub(super) fn spawn_integrations_cache_warm(config: &Config) {
     });
 }
 
-/// Start all login-gated background services (local AI and voice). Called both
+/// Start login-gated background services. Called both
 /// from the initial boot path (when an existing
 /// session is detected) and from `set_credential()` when a credential is installed.
 pub async fn start_credential_gated_services(
     ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
 ) {
+    // Optional TinyFlows resources warm in the background and must never hold
+    // credential activation or ordinary chat startup on module availability.
+    crate::skills::schedule_flow_authoring_prewarm(ctx, config, None);
     // These login-gated services are mutually independent — the ONLY ordering
     // constraint is voice-server → standalone-dictation-listener (they contend
     // for the single rdev global listener on macOS). Previously each was
@@ -66,8 +69,7 @@ pub async fn start_credential_gated_services(
     // panic in one service is logged on join and never aborts the others.
 
     // Unit tests must not launch the real login-gated background services: they
-    // include detached, long-lived continuous audio capture that outlives the
-    // test that spawned it and interleaves with the
+    // include detached listeners that outlive the test that spawned them and interleave with the
     // shared process state (HOME / active_user.toml) of the parallel `cargo
     // test` run. Once startup became concurrent (#3490) that interleaving made
     // the session-isolation tests order-dependent. `cfg!(test)` is compiled out
@@ -77,17 +79,6 @@ pub async fn start_credential_gated_services(
     if cfg!(test) && std::env::var_os("OPENHUMAN_RUN_LOGIN_GATED_SERVICES_IN_TEST").is_none() {
         log::debug!("[services] login-gated services skipped under unit test");
         return;
-    }
-
-    // An embedder's task-local user-root policy does not cross spawn_blocking;
-    // its first agent build warms the correctly scoped cache instead.
-    if !is_embedder_host() {
-        let skills_workspace = config.workspace_dir.clone();
-        // Detached on purpose: the warm-up must not delay startup.
-        tokio::task::spawn_blocking(move || {
-            let count = crate::skills::load_workflow_metadata(&skills_workspace).len();
-            log::debug!("[services] skill metadata cache warmed entries={count}");
-        });
     }
 
     spawn_integrations_cache_warm(config);
@@ -123,52 +114,6 @@ pub async fn start_credential_gated_services(
         ));
     }
 
-    // 2+3. Voice hotkey services — the user-facing command registration. The
-    //      embedded voice server owns the single rdev listener; the standalone
-    //      dictation listener only starts when the server is NOT auto-starting,
-    //      so keep these two ordered *relative to each other* (but concurrent
-    //      with everything else).
-    {
-        let config = config.clone();
-        let ctx = ctx.clone();
-        tasks.push((
-            "voice_hotkey",
-            tokio::spawn(async move {
-                let step = std::time::Instant::now();
-                crate::voice::server::start_if_enabled(&ctx, &config).await;
-                if !config.voice_server.auto_start && config.components.voice {
-                    crate::voice::dictation_listener::start_if_enabled(&ctx, &config).await;
-                }
-                log::debug!(
-                    "[services] voice hotkey services registered ({} ms)",
-                    step.elapsed().as_millis()
-                );
-            }),
-        ));
-    }
-
-    // 3b. Always-on listening (Phase 2): continuous mic + VAD → STT → agent.
-    //     Its cold WASAPI init (`always_on::spawn_capture_thread`) is the
-    //     Windows-specific blocker; it now runs the blocking capture-readiness
-    //     handshake on the blocking pool (see `always_on::start_if_enabled`), so
-    //     on its own task it neither stalls an async worker nor the hotkey /
-    //     command registration above.
-    {
-        let config = config.clone();
-        let ctx = ctx.clone();
-        tasks.push((
-            "always_on",
-            tokio::spawn(async move {
-                let step = std::time::Instant::now();
-                crate::voice::always_on::start_if_enabled(&ctx, &config).await;
-                log::debug!(
-                    "[services] always-on listening started ({} ms)",
-                    step.elapsed().as_millis()
-                );
-            }),
-        ));
-    }
-
     let total = tasks.len();
     let mut failed = 0usize;
     for (name, task) in tasks {
@@ -195,12 +140,6 @@ pub async fn stop_credential_gated_services(
     ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
 ) {
-    // 2. Voice server
-    if let Some(server) = crate::voice::server::try_global_server() {
-        server.stop().await;
-        log::info!("[services] voice server stopped on logout");
-    }
-
     // 4. Local AI — reset state to idle. OpenHuman never owns the local
     //    runtime process (the user runs Ollama / LM Studio / MLX), so there is
     //    nothing to stop; we only clear the cached probe verdict so the
@@ -210,17 +149,6 @@ pub async fn stop_credential_gated_services(
         let runtime = crate::inference::local_runtime_config(config);
         service.reset_to_idle(&runtime);
         log::info!("[services] local AI reset to idle on logout");
-    }
-
-    // 5. Dictation listener — abort the hotkey forwarder task so it doesn't
-    //    accumulate duplicate rdev listeners across logout → login cycles.
-    crate::voice::dictation_listener::stop().await;
-
-    // 6. Disable delivery and release module-owned microphone/output leases.
-    crate::voice::always_on::shutdown().await;
-    #[cfg(feature = "voice")]
-    if let Err(error) = crate::voice::capture_lease::close_all().await {
-        log::warn!("[services] voice capture cleanup pending: {error}");
     }
 
     if let Err(error) = crate::integrations::composio::trigger_history::close_global(ctx).await {

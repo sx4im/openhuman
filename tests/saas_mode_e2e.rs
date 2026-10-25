@@ -298,7 +298,8 @@ fn gateway_requests_run_under_the_named_users_profile() {
         assert_eq!(status, 404, "{path}");
     }
 
-    // The credential lives in alice's own directory.
+    // The configured storage backend owns credentials, so they are not
+    // written beside the profile's workspace and sandbox.
     let profile_dir = d.root.join("users").join(alice.as_str());
     let stored: Vec<_> = std::fs::read_dir(&profile_dir)
         .unwrap()
@@ -306,8 +307,8 @@ fn gateway_requests_run_under_the_named_users_profile() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert!(
-        stored.iter().any(|name| name.contains("auth")),
-        "credential store beside alice's config: {stored:?}"
+        !stored.iter().any(|name| name.contains("auth")),
+        "backend credentials must not create an on-disk sidecar: {stored:?}"
     );
     drop(server);
 }
@@ -663,29 +664,30 @@ fn a_profile_holds_web_and_relayed_channel_threads() {
     assert_eq!(status, 200, "{body}");
 
     // The web chat and relay share Alice's profile turn gate. Let the offline
-    // web turn reach a terminal snapshot before queuing the channel turn; this
-    // test covers profile/thread isolation, not same-profile turn scheduling.
-    let deadline = Instant::now() + Duration::from_secs(90);
-    let mut lifecycle = None;
-    while Instant::now() < deadline {
-        let (_, state) = call(
+    // web turn finish before queuing the channel turn; this test covers
+    // profile/thread isolation, not same-profile turn scheduling. The backend
+    // is a closed port, so the turn fails before any progress event and leaves
+    // neither a turn snapshot nor a stored reply: it is over once the thread's
+    // queue has been idle for several consecutive polls.
+    let sent = Instant::now();
+    let deadline = sent + Duration::from_secs(90);
+    let mut idle_polls = 0;
+    while Instant::now() < deadline && idle_polls < 5 {
+        let (_, queue) = call(
             "alice",
-            "openhuman.threads_turn_state_get",
+            "openhuman.channel_web_queue_status",
             json!({ "thread_id": "web-1" }),
         );
-        lifecycle = state
-            .pointer("/result/data/turnState/lifecycle")
-            .or_else(|| state.pointer("/result/result/data/turnState/lifecycle"))
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        if matches!(lifecycle.as_deref(), Some("completed" | "interrupted")) {
-            break;
+        if queue.to_string().contains("\"active\":true") {
+            idle_polls = 0;
+        } else if sent.elapsed() > Duration::from_secs(1) {
+            idle_polls += 1;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
     assert!(
-        matches!(lifecycle.as_deref(), Some("completed" | "interrupted")),
-        "Alice's web turn did not settle before relay: {lifecycle:?}"
+        idle_polls >= 5,
+        "Alice's web turn did not settle before relay"
     );
 
     // ...and the gateway relays a Telegram message of hers.

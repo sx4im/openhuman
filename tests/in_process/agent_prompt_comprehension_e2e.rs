@@ -439,6 +439,9 @@ async fn wait_for_terminal(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Value>)
 }
 
 struct Stack {
+    /// The connectors module serves the integration catalogue from the host's
+    /// installed storage backend.
+    _storage: crate::storage_case::Case,
     rpc_base: String,
     _guards: Vec<EnvVarGuard>,
     _tmp: tempfile::TempDir,
@@ -452,6 +455,10 @@ impl Drop for Stack {
 }
 
 async fn boot_stack(extra_config: &str) -> Stack {
+    // The managed chat provider is installed by the TinyHumans layer; without
+    // it every turn ends in `chat_error.inference` and no request reaches the
+    // scripted upstream.
+    crate::tinyhumans_boot::boot();
     AGENT_DEF_REGISTRY_INIT.get_or_init(|| {
         AgentDefinitionRegistry::init_global_builtins()
             .expect("AgentDefinitionRegistry::init_global_builtins must not fail");
@@ -461,6 +468,8 @@ async fn boot_stack(extra_config: &str) -> Stack {
         openhuman_core::agent::bus::register_agent_handlers();
     });
 
+    let storage = crate::storage_case::Case::open();
+    storage.install();
     let tmp = tempdir().expect("tempdir");
     let home = tmp.path().to_path_buf();
     let openhuman_home = home.join(".openhuman");
@@ -494,6 +503,7 @@ async fn boot_stack(extra_config: &str) -> Stack {
     assert_no_jsonrpc_error(&store, "auth_store_session");
 
     Stack {
+        _storage: storage,
         rpc_base,
         _guards: guards,
         _tmp: tmp,
@@ -639,7 +649,7 @@ async fn run_case_inner(case: Case) {
 
     match case.entry {
         Entry::Summarizer => {
-            use openhuman_core::inference::host_runtime::ops::{agent_chat_for, AgentChatTarget};
+            use openhuman_core::agent_runs::agent_chat::{agent_chat_for, AgentChatTarget};
             let mut config = openhuman_core::config::Config::load_or_init()
                 .await
                 .unwrap();
@@ -652,7 +662,7 @@ async fn run_case_inner(case: Case) {
                 None,
                 None,
                 None,
-                openhuman_core::inference::host_runtime::ops::AgentChatEnv::default(),
+                openhuman_core::agent_runs::agent_chat::AgentChatEnv::default(),
             )
             .await
             .expect("summarizer turn must finish");
@@ -830,7 +840,6 @@ fn news_digest_graph() -> Value {
 /// failure — so a loop in the runtime (a re-issued call, a retry that repeats
 /// the search) cannot pass as progress.
 #[test]
-#[ignore = "TODO(#6376): hosted TinyAgents omits workflow specialist tools"]
 fn workflow_builder_reaches_propose_workflow() {
     run_case(Case {
         agent: "workflow_builder",
@@ -864,7 +873,6 @@ fn workflow_builder_reaches_propose_workflow() {
 /// Composio or cron tools its specialists own. The action itself is
 /// `Deferred`: off the advertised belt, found through `tool_search`.
 #[test]
-#[ignore = "TODO(#6376): hosted TinyAgents omits the deferred integration catalogue"]
 fn orchestrator_searches_for_and_calls_the_integration_action() {
     run_case(Case {
         agent: "orchestrator",

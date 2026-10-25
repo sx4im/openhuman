@@ -14,11 +14,13 @@ fn, which returns `Outcome<T>`.
 | File | Responsibility |
 | --- | --- |
 | [`agent.rs`](./agent.rs) | Autonomy, agent, agent-paths, and memory-sync settings. |
+| [`cloud_providers.rs`](./cloud_providers.rs) | Cloud-provider RPC input conversion and validation. |
 | [`loader.rs`](./loader.rs) | Config loading/snapshotting and runtime flags; split into submodules [`loader/load.rs`](./loader/load.rs), [`loader/paths.rs`](./loader/paths.rs), [`loader/reset_local_data.rs`](./loader/reset_local_data.rs), [`loader/runtime_flags.rs`](./loader/runtime_flags.rs), [`loader/snapshot.rs`](./loader/snapshot.rs). |
 | [`model.rs`](./model.rs) | AI-provider, memory, runtime, local-AI, and Composio-trigger settings. |
+| [`primary_cloud.rs`](./primary_cloud.rs) | Primary cloud selection and legacy direct-inference compatibility. |
 | [`privacy.rs`](./privacy.rs) | Privacy Mode (`[privacy]`) get/set. |
 | [`sandbox.rs`](./sandbox.rs) | Sandbox / Docker runtime (`[sandbox]`, `[runtime.docker]`) settings. |
-| [`ui.rs`](./ui.rs) | Browser, analytics, dictation, voice-server, and onboarding-flag settings. |
+| [`ui.rs`](./ui.rs) | Browser, analytics, and onboarding-flag settings. |
 | [`search.rs`](./search.rs) | Search settings: providers, routes, role order, keys, limits, and the web-access allowlist. |
 
 Each submodule follows the same shape: a `*SettingsPatch` struct with
@@ -27,7 +29,6 @@ that mutates the given config, calls `Config::save()`, and returns the
 settings or snapshot; a `load_and_apply_*(patch)` wrapper that calls
 `load_config_with_timeout` first; and a `get_*` fn that reads the relevant
 section back out, usually as `Outcome<serde_json::Value>`. `ui.rs`'s
-dictation and voice-server mutators exist only in `load_and_apply_*` form.
 
 ## Key entry points
 
@@ -46,13 +47,15 @@ dictation and voice-server mutators exist only in `load_and_apply_*` form.
 - `model.rs`: `apply_model_settings`, `apply_memory_settings`,
   `apply_runtime_settings`, `apply_local_ai_settings`,
   `apply_composio_trigger_settings`, `load_and_resolve_api_url`.
+- `cloud_providers.rs`: `build_cloud_provider_creds` converts settings RPC
+  inputs into validated cloud-provider config entries.
+- `primary_cloud.rs`: primary cloud selection and matching legacy
+  `inference_url` compatibility used by inference routing and credentials.
 - `privacy.rs`: `apply_privacy_settings`, `get_privacy_mode`.
 - `sandbox.rs`: `apply_sandbox_settings`, `get_sandbox_settings`.
 - `search.rs`: `apply_search_settings` / `get_search_settings`,
   `search_settings_json`.
 - `ui.rs`: `apply_browser_settings`, `apply_analytics_settings`,
-  `load_and_apply_voice_server_settings` / `get_voice_server_settings`,
-  `load_and_apply_dictation_settings` / `get_dictation_settings`,
   `set_onboarding_completed` / `get_onboarding_completed`,
   `workspace_onboarding_flag_exists` / `workspace_onboarding_flag_set` /
   `workspace_onboarding_flag_resolve`.

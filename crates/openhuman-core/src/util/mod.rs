@@ -6,7 +6,7 @@
 //!
 //! - [`text`]     — UTF-8-safe truncation, char-boundary rounding, provenance tags
 //! - [`retry`]    — retry-with-backoff + transient-filesystem-error classification
-//! - `tinytools_std::sanitize` — LLM-facing text sanitization (control-char stripping,
+//! - `tinytools::sanitize` — LLM-facing text sanitization (control-char stripping,
 //!   instruction-fence removal, UTF-8-safe byte caps)
 //! - [`tls`]      — platform-conditional `reqwest::ClientBuilder` factory
 //! - [`types`]    — shared utility types

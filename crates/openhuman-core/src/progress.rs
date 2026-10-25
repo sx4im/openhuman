@@ -27,6 +27,11 @@ pub enum AgentProgress {
         max_iterations: u32,
     },
 
+    /// The turn is summarizing earlier conversation to fit the context window
+    /// before its next model call. That call starts with the next
+    /// [`Self::IterationStarted`].
+    ContextCompacting,
+
     /// The LLM responded and the agent is about to execute a tool.
     ToolCallStarted {
         /// Provider-assigned (or synthesised) tool call id that ties
@@ -177,18 +182,6 @@ pub enum AgentProgress {
         /// The sub-agent's full final assistant text. Trace exporters record
         /// this (truncated + content-gated) as the subagent span's output.
         output: String,
-        /// Absolute path to the worker's isolated `git worktree` checkout,
-        /// when it ran with `isolation = "worktree"` (#3376). `None` for
-        /// non-isolated (read-only / shared-workspace) workers.
-        worktree_path: Option<String>,
-        /// Files (relative to the worktree root) the worker changed, snapshot
-        /// from `git status` after the run. Empty for non-isolated workers or
-        /// a clean worktree.
-        changed_files: Vec<String>,
-        /// Whether the worker's worktree had uncommitted changes after the
-        /// run. A dirty worktree must not be auto-removed — surfaced so the UI
-        /// can require an explicit user decision. `None` for non-isolated.
-        dirty_status: Option<bool>,
         /// Set when the sub-agent's own turn was stopped early (failure
         /// breaker or iteration cap) and handed back as incomplete. The trace
         /// collector closes the subagent span at `WARNING` with it. `None` for

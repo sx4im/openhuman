@@ -16,6 +16,8 @@ pub(crate) mod native_jail;
 pub mod ops;
 pub mod schemas;
 pub(crate) mod shell_exec;
+pub(crate) mod shell_live;
+pub(crate) mod shell_processes;
 pub(crate) mod shell_progress;
 pub mod types;
 

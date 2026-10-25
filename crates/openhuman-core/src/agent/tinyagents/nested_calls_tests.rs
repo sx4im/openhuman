@@ -158,7 +158,7 @@ async fn run_with_hooks(target: &'static str) -> (Option<Outcome>, usize, usize)
     let (secret, secret_ran) = leaf("secret");
     let outcome = Arc::new(Mutex::new(None));
     let mut harness: AgentHarness<(), OpenHumanRunContext> = AgentHarness::new();
-    harness.register_model("mock", model());
+    harness.with_model(model());
     harness.with_policy(nested_enabled());
     harness.register_tool(allowed);
     harness.register_tool(secret);

@@ -2,7 +2,11 @@ use super::*;
 
 #[test]
 fn disabled_export_does_not_create_a_trace_context() {
-    let config = crate::config::Config::default();
+    // Usage sharing is on by default, so "disabled" has to turn both exporters
+    // off explicitly rather than lean on the default config.
+    let mut config = crate::config::Config::default();
+    config.observability.share_usage_data = false;
+    config.observability.agent_tracing.enabled = false;
     let context = trace_context(
         &config,
         &ChatRequestMetadata::default(),

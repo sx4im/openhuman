@@ -25,6 +25,7 @@ export const TEST_MODULE_IDS = [
   "tinywallet",
   "tinychannels",
   "tinymcp",
+  "tinyeventqueues",
   "tinyhosts",
   "tinyconnectors",
   "tinyflows",

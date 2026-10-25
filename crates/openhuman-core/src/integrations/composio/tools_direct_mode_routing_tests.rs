@@ -142,6 +142,11 @@ async fn execute_tool_per_call_factory_means_no_baked_client() {
     // `Config` to that tempdir's `config.toml` before invoking the tool.
     use crate::config::TEST_ENV_LOCK;
     let _env_guard = TEST_ENV_LOCK.lock().await;
+    // The scope gate reads the user's scope preference from the connector
+    // module's storage and fails closed when it cannot; hold the module with
+    // that storage in place so the gate answers and dispatch is reached. The
+    // guard is not reentrant: taking it twice self-deadlocks.
+    let _module = crate::integrations::composio::module_client::module_guard().await;
 
     let tmp = tempfile::tempdir().unwrap();
     let _workspace_guard = EnvVarGuard::workspace_unlocked(tmp.path());

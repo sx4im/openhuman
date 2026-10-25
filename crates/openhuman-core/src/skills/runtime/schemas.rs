@@ -331,7 +331,7 @@ fn handle_read_run_log(_ctx: DispatchCtx, params: Map<String, Value>) -> Control
         })?;
         let offset = payload.offset.unwrap_or(0);
         let max_bytes = payload.max_bytes.unwrap_or(64 * 1024).min(256 * 1024) as usize;
-        let slice = run_log::read_run_log_slice(&path, offset, max_bytes)
+        let slice = run_log::read_run_log_slice(&workspace, &path, offset, max_bytes)
             .map_err(|e| format!("skill_runtime_read_run_log: read failed: {e}"))?;
         to_json(Outcome::new(slice, Vec::new()))
     })

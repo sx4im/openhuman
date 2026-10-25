@@ -98,6 +98,22 @@ describe('chatService.subscribeChatEvents', () => {
     expect(onInferenceHeartbeat).toHaveBeenCalledWith(beat);
   });
 
+  it('forwards plan_review_decided to clear the pending review surface', () => {
+    const socket = createMockSocket();
+    bindMockSocket(socket);
+    const onPlanReviewDecided = vi.fn();
+    subscribeChatEvents({ onPlanReviewDecided });
+
+    const event = {
+      thread_id: 'thread-plan',
+      request_id: 'review-1',
+      decision: 'reject',
+      cancel_reason: 'cancelled',
+    };
+    socket.emit('plan_review_decided', event);
+    expect(onPlanReviewDecided).toHaveBeenCalledWith(event);
+  });
+
   it('does not process alias events when only canonical subscriptions are active', () => {
     const socket = createMockSocket();
     bindMockSocket(socket);
@@ -117,6 +133,19 @@ describe('chatService.subscribeChatEvents', () => {
   // listener interface unchanged. Without this coverage the parent
   // thread's live subagent block silently goes blank if a future
   // refactor renames a socket event.
+  it('forwards context_compacting to its listener', () => {
+    const socket = createMockSocket();
+    bindMockSocket(socket);
+    const onContextCompacting = vi.fn();
+
+    subscribeChatEvents({ onContextCompacting });
+
+    expect(socket.on.mock.calls.map(call => call[0])).toEqual(['context_compacting']);
+    const event = { thread_id: 't', request_id: 'r', round: 1 };
+    socket.emit('context_compacting', event);
+    expect(onContextCompacting).toHaveBeenCalledWith(event);
+  });
+
   it('subscribes and forwards live subagent events under canonical names', () => {
     const socket = createMockSocket();
     bindMockSocket(socket);
@@ -400,40 +429,15 @@ describe('chatService.subscribeChatEvents', () => {
     });
   });
 
-  it('forwards speak_reply, source, session_id when provided', async () => {
-    const socket = createMockSocket();
-    bindMockSocket(socket);
-
-    await chatSend({
-      threadId: 'thread-1',
-      message: 'hello',
-      speakReply: true,
-      source: 'ptt',
-      sessionId: 42,
-    });
-
-    expect(mockCallCoreRpc).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: 'openhuman.channel_web_chat',
-        params: expect.objectContaining({
-          message: 'hello',
-          speak_reply: true,
-          source: 'ptt',
-          session_id: 42,
-        }),
-      })
-    );
-  });
-
-  it('does not include the new fields when omitted', async () => {
+  it('does not include PTT-only request fields', async () => {
     const socket = createMockSocket();
     bindMockSocket(socket);
 
     await chatSend({ threadId: 'thread-1', message: 'hi' });
     const params = mockCallCoreRpc.mock.calls[0][0].params;
-    expect(params.speak_reply).toBeUndefined();
-    expect(params.source).toBeUndefined();
-    expect(params.session_id).toBeUndefined();
+    expect(params).not.toHaveProperty('speak_reply');
+    expect(params).not.toHaveProperty('source');
+    expect(params).not.toHaveProperty('session_id');
   });
 });
 

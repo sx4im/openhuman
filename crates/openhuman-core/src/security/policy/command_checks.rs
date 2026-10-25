@@ -5,33 +5,128 @@
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
+use super::command_vocabulary::classify_segment_source;
+use super::CommandAnalysis;
+
+#[cfg(test)]
 use super::types::CommandRiskLevel;
 use super::types::{AutonomyLevel, GateDecision, SecurityPolicy};
+use crate::security::policy::CommandClass;
 #[cfg(test)]
 use crate::util::floor_char_boundary;
-use tinybox_bus::CommandClass;
-#[cfg(test)]
-use tinybox_core::shell::classify::{classify_segment, has_hidden_execution};
-#[cfg(test)]
-use tinybox_core::shell::env_guard::has_dangerous_env_prefix;
-#[cfg(test)]
-use tinybox_core::shell::executor::is_command_executor;
 #[cfg(test)]
 use tinybox_core::shell::scan::{
-    command_basename, contains_unquoted_char, contains_unquoted_single_ampersand,
-    has_leading_env_assignment, normalized_command_name, skip_env_assignments,
-    split_unquoted_segments, strip_quoted_heredoc_bodies,
+    contains_unquoted_char, split_unquoted_segments, strip_quoted_heredoc_bodies,
 };
 use tinytools::status::POLICY_BLOCKED_MARKER;
+
+#[cfg(test)]
+fn command_basename(command: &str) -> &str {
+    command.rsplit(['/', '\\']).next().unwrap_or(command)
+}
+
+#[cfg(test)]
+fn normalized_command_name(command: &str) -> String {
+    command_basename(command.trim_matches(|c: char| matches!(c, '\'' | '"'))).to_ascii_lowercase()
+}
+
+#[cfg(test)]
+fn skip_env_assignments(command: &str) -> &str {
+    let mut rest = command;
+    loop {
+        rest = rest.trim_start();
+        let Some(end) = rest.find(char::is_whitespace) else {
+            return if rest.contains('=') { "" } else { rest };
+        };
+        if !rest[..end].contains('=') {
+            return rest;
+        }
+        rest = &rest[end..];
+    }
+}
+
+#[cfg(test)]
+fn has_leading_env_assignment(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .next()
+        .is_some_and(|word| word.contains('='))
+}
+
+#[cfg(test)]
+fn has_dangerous_env_prefix(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .take_while(|word| word.contains('='))
+        .any(|word| {
+            matches!(
+                word.split('=')
+                    .next()
+                    .unwrap_or_default()
+                    .to_ascii_uppercase()
+                    .as_str(),
+                "LD_PRELOAD"
+                    | "LD_LIBRARY_PATH"
+                    | "DYLD_INSERT_LIBRARIES"
+                    | "DYLD_LIBRARY_PATH"
+                    | "PATH"
+            )
+        })
+}
+
+#[cfg(test)]
+fn contains_unquoted_single_ampersand(command: &str) -> bool {
+    contains_unquoted_char(command, '&') && !command.contains("&&") && !command.contains(">&")
+}
+
+#[cfg(test)]
+fn has_hidden_execution(command: &str) -> bool {
+    let command = strip_quoted_heredoc_bodies(command);
+    ["$(", "<(", ">("]
+        .iter()
+        .any(|needle| command.contains(needle))
+        || contains_unquoted_char(&command, '`')
+        || contains_unquoted_single_ampersand(&command)
+}
+
+#[cfg(test)]
+fn is_command_executor(command: &str) -> bool {
+    let command = command_basename(command.trim_matches(|c: char| matches!(c, '\'' | '"')))
+        .to_ascii_lowercase();
+    let command = command.strip_suffix(".exe").unwrap_or(&command);
+    let python_executor = command
+        .strip_prefix("pythonw")
+        .or_else(|| command.strip_prefix("python"))
+        .is_some_and(|version| {
+            version.is_empty()
+                || version
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '.')
+        });
+    python_executor
+        || matches!(
+            command,
+            "sh" | "bash"
+                | "zsh"
+                | "fish"
+                | "python"
+                | "python2"
+                | "node"
+                | "ruby"
+                | "perl"
+                | "php"
+                | "lua"
+                | "awk"
+                | "xargs"
+                | "env"
+        )
+}
 
 impl SecurityPolicy {
     /// Apply the supervised allowlist to parser facts returned by TinyBox.
     /// The module owns shell structure; this host owns the permission policy.
     #[cfg(feature = "modules")]
-    pub fn is_command_allowed_analysis(
-        &self,
-        analysis: &crate::modules::tinybox::contract::CommandAnalysis,
-    ) -> bool {
+    pub(crate) fn is_command_allowed_analysis(&self, analysis: &CommandAnalysis) -> bool {
         if !self.enabled {
             return true;
         }
@@ -75,9 +170,9 @@ impl SecurityPolicy {
     /// The module supplies parsing facts, while this host owns path checks,
     /// autonomy tiers, and approval decisions.
     #[cfg(feature = "modules")]
-    pub fn check_gated_command_analysis(
+    pub(crate) fn check_gated_command_analysis(
         &self,
-        analysis: &crate::modules::tinybox::contract::CommandAnalysis,
+        analysis: &CommandAnalysis,
     ) -> Result<CommandClass, String> {
         self.check_protected_path_words(&analysis.literal_words)?;
 
@@ -227,17 +322,12 @@ impl SecurityPolicy {
         // `rm` or `curl` lifts a plain file write to Destructive/Network.
         let command = &strip_quoted_heredoc_bodies(command);
         let mut class = CommandClass::Read;
+        // The same per-segment classifier production applies to TinyBox's
+        // segment facts (`CommandAnalysis::from_shell_analysis`).
         for segment in split_unquoted_segments(command) {
-            let cmd_part = skip_env_assignments(&segment);
-            let mut words = cmd_part.split_whitespace();
-            let Some(base_raw) = words.next() else {
-                continue;
-            };
-            let base = normalized_command_name(base_raw);
-            let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
-            let joined = cmd_part.to_ascii_lowercase();
-            let segment_class = classify_segment(&base, &args, &joined);
-            class = class.max(segment_class);
+            if !segment.trim().is_empty() {
+                class = class.max(classify_segment_source(&segment));
+            }
         }
         // A redirect or `tee` writes a file regardless of the base command.
         if contains_unquoted_char(command, '>')
@@ -329,7 +419,10 @@ impl SecurityPolicy {
         let words = strip_quoted_heredoc_bodies(input)
             .split(|c: char| {
                 c.is_whitespace()
-                    || matches!(c, '\'' | '"' | '(' | ')' | '[' | ']' | ',' | ';' | '=')
+                    || matches!(
+                        c,
+                        '\'' | '"' | '(' | ')' | '[' | ']' | ',' | ';' | '=' | '@'
+                    )
             })
             .map(str::to_owned)
             .collect::<Vec<_>>();

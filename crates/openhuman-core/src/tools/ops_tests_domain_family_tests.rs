@@ -2,7 +2,7 @@ use super::*;
 #[cfg(feature = "modules")]
 use crate::tools::BrowserOpenTool;
 use crate::tools::{filter_tools_by_user_preference, http_request_tool};
-use tinytools_std::filesystem::{ApplyPatchTool, CsvExportTool};
+use tinyagents_harness_tools::fs::filesystem::{ApplyPatchTool, CsvExportTool};
 
 /// Every acting tool gates on `can_act()` and returns its own read-only refusal
 /// string. Each of those must carry [`POLICY_BLOCKED_MARKER`] so the agent

@@ -120,7 +120,7 @@ pub(super) struct ParallelEntry {
 #[derive(Debug, Clone)]
 pub(super) struct WebChatTaskResult {
     pub(super) full_response: String,
-    pub(super) citations: Vec<crate::memory::types::TurnCitation>,
+    pub(super) citations: Vec<crate::web_chat::TurnCitation>,
     /// Holistic token/cost/context totals for the turn (parent + sub-agents),
     /// forwarded to the frontend on `chat_done`. `None` for synthetic results
     /// (e.g. budget-exhausted placeholders) that never ran a real turn.
@@ -154,12 +154,6 @@ pub struct ChatRequestMetadata {
     /// is resolved — used purely for trace attribution (Langfuse `agent.id` /
     /// `agent.turn:<id>` trace name), never for routing.
     pub agent_id: Option<String>,
-    /// Do not stream the orchestrator's answer text (`text_delta`) to the
-    /// client; the reply arrives whole in `chat_done`. Set for threads whose
-    /// final reply is post-processed (TinyMemes treatment arm), so the user
-    /// never sees the original stream in and then get replaced. Interim
-    /// narration before tool calls is still flushed as `chat_interim`.
-    pub hold_text_stream: bool,
 }
 
 #[derive(Debug, Deserialize)]

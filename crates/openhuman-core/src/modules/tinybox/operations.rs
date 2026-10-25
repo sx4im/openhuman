@@ -35,7 +35,6 @@ const SHUTDOWN: &str = contract::names::SHUTDOWN;
 const FORWARD: &str = contract::names::FORWARD;
 const CLOSE_FORWARD: &str = contract::names::CLOSE_FORWARD;
 const JAIL_STATUS: &str = contract::names::JAIL_STATUS;
-const ANALYZE_COMMAND: &str = contract::names::ANALYZE_COMMAND;
 const BEGIN_FILE_READ: &str = contract::names::BEGIN_FILE_READ;
 const READ_FILE_CHUNK: &str = contract::names::READ_FILE_CHUNK;
 const FINISH_FILE_READ: &str = contract::names::FINISH_FILE_READ;
@@ -360,11 +359,12 @@ pub async fn analyze_shell(
 }
 
 /// Ask TinyBox for generic command facts; the caller still decides policy.
-pub async fn analyze_command(
+pub(crate) async fn analyze_command(
     config: &Config,
     command: String,
-) -> Result<contract::CommandAnalysis, String> {
-    call(config, ANALYZE_COMMAND, (command,), false).await
+) -> Result<crate::security::policy::CommandAnalysis, String> {
+    let facts = analyze_shell(config, command).await?;
+    Ok(crate::security::policy::CommandAnalysis::from_shell_analysis(facts))
 }
 
 /// Open a bounded workspace file reader.

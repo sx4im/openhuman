@@ -1,8 +1,4 @@
 use super::*;
-use crate::agent::subagent_host::run_subagent;
-use crate::agent::subagent_host::{
-    run_subagent_via_driver_tool, spawn_async_via_driver_tool_with_jobs, SubagentRunStatus,
-};
 use tinyagents_harness::context::{current_run_depth, with_run_depth, RunDepth};
 
 struct BlockingSubagentCloseTool {
@@ -46,7 +42,7 @@ async fn runner_rejects_spawn_beyond_max_depth() {
                 max_depth: MAX_SPAWN_DEPTH,
             },
             async {
-                run_subagent(
+                run_host_from_test_options(
                     &def,
                     "x",
                     with_parent(parent.clone(), SubagentRunOptions::default()),
@@ -80,6 +76,80 @@ async fn runner_rejects_spawn_beyond_max_depth() {
 }
 
 #[tokio::test]
+async fn a_team_depth_cap_below_the_product_limit_is_enforced() {
+    // Driven through `run_subagent`, so the runner's own gate must honour the
+    // team's cap (not the budget helper alone): a team capped at one level runs
+    // a child and refuses a grandchild before any provider dispatch, and a cap
+    // above the product limit cannot widen it.
+    use crate::agent::tinyagents::budget::MAX_SPAWN_DEPTH;
+    let def = make_def_named_tools(&[]);
+
+    let provider = ScriptedProvider::new(vec![text_response("ok")]);
+    let mut options = with_parent(
+        make_parent(provider.clone(), vec![]),
+        SubagentRunOptions::default(),
+    );
+    options.run_context.max_spawn_depth = Some(1);
+    let child = run_host_from_test_options(&def, "x", options).await;
+    assert!(
+        !matches!(child, Err(SubagentRunError::SpawnDepthExceeded { .. })),
+        "a one-level team must admit its child: {child:?}"
+    );
+    assert!(
+        !provider.captured.lock().is_empty(),
+        "the admitted child reaches the provider: {child:?}"
+    );
+
+    let provider = ScriptedProvider::new(vec![text_response("should not be called")]);
+    let mut options = with_parent(
+        make_parent(provider.clone(), vec![]),
+        SubagentRunOptions::default(),
+    );
+    options.run_context.max_spawn_depth = Some(1);
+    let grandchild = with_run_depth(
+        RunDepth {
+            depth: 1,
+            max_depth: MAX_SPAWN_DEPTH,
+        },
+        async { run_host_from_test_options(&def, "x", options).await },
+    )
+    .await;
+    assert!(
+        matches!(
+            grandchild,
+            Err(SubagentRunError::SpawnDepthExceeded {
+                attempted_depth: 2,
+                max_depth: 1
+            })
+        ),
+        "a grandchild of a one-level team is refused: {grandchild:?}"
+    );
+    assert!(
+        provider.captured.lock().is_empty(),
+        "the refused grandchild never reaches the provider"
+    );
+
+    let provider = ScriptedProvider::new(vec![text_response("should not be called")]);
+    let mut options = with_parent(
+        make_parent(provider.clone(), vec![]),
+        SubagentRunOptions::default(),
+    );
+    options.run_context.max_spawn_depth = Some(MAX_SPAWN_DEPTH + 3);
+    let beyond = with_run_depth(
+        RunDepth {
+            depth: MAX_SPAWN_DEPTH,
+            max_depth: MAX_SPAWN_DEPTH,
+        },
+        async { run_host_from_test_options(&def, "x", options).await },
+    )
+    .await;
+    let Err(SubagentRunError::SpawnDepthExceeded { max_depth, .. }) = &beyond else {
+        panic!("a cap above the product limit cannot widen it: {beyond:?}");
+    };
+    assert_eq!(*max_depth, MAX_SPAWN_DEPTH);
+}
+
+#[tokio::test]
 async fn typed_mode_model_override_pins_exact_model_for_spawn() {
     let provider = ScriptedProvider::new(vec![text_response("ok")]);
     let parent = make_parent(provider.clone(), vec![]);
@@ -87,7 +157,7 @@ async fn typed_mode_model_override_pins_exact_model_for_spawn() {
     def.model = ModelSpec::Inherit;
 
     let _ = (async {
-        run_subagent(
+        run_host_from_test_options(
             &def,
             "use the pinned model",
             with_parent(
@@ -131,7 +201,7 @@ async fn typed_mode_emits_child_progress_events_when_sink_attached() {
 
     let def = make_def_named_tools(&["file_read"]);
     let outcome = (async {
-        run_subagent(
+        run_host_from_test_options(
             &def,
             "read x",
             with_parent(parent, SubagentRunOptions::default()),
@@ -211,7 +281,7 @@ async fn typed_mode_forwards_child_text_and_thinking_deltas() {
 
     let def = make_def_named_tools(&[]);
     let outcome = (async {
-        run_subagent(
+        run_host_from_test_options(
             &def,
             "answer me",
             with_parent(parent, SubagentRunOptions::default()),
@@ -289,7 +359,7 @@ async fn typed_mode_progress_emission_is_a_noop_without_sink() {
     assert!(parent.on_progress.is_none());
     let def = make_def_named_tools(&[]);
     let outcome = (async {
-        run_subagent(
+        run_host_from_test_options(
             &def,
             "x",
             with_parent(parent.clone(), SubagentRunOptions::default()),
@@ -462,6 +532,7 @@ fn resolve_subagent_source_hint_with_no_config_falls_back() {
 
 #[test]
 fn resolve_subagent_source_hint_with_config_routes_via_factory() {
+    crate::agent::session_host::test_support::install_model_fixture();
     // The Hint arm with a real config takes the workload-factory path.
     // We don't assert the *resulting* provider identity here (the
     // factory may return a fresh OpenHuman backend or whatever
@@ -469,15 +540,17 @@ fn resolve_subagent_source_hint_with_config_routes_via_factory() {
     // is the workload's canonical managed tier — NOT `default_model`,
     // and NOT the parent's model.
     //
-    // Every managed role runs on the managed default model; a retired tier
-    // slug in `default_model` is not a pin and must not leak to the backend.
+    // The provider hook resolves the role through the generic factory; a
+    // different configured chat model must not replace the role's selection.
     use crate::config::Config;
     let mut config = Config::default();
     // Route `agentic` to the OpenHuman backend explicitly, and set a
     // distinct `default_model` so the assertion proves the role — not the
     // global default — drives the resolved tier.
     config.agentic_provider = Some("openhuman".to_string());
-    config.default_model = Some("chat-v1".to_string());
+    config.default_model = Some("fixture-reasoning".to_string());
+    crate::security::credentials::api_key::store_api_key(&config, "test-session-fixture-key")
+        .expect("store the managed inference fixture credential");
 
     let parent: Arc<dyn ChatModel<()>> = ScriptedProvider::new(vec![]);
     let (_resolved_source, resolved_model) = super::super::resolve_subagent_source(
@@ -491,9 +564,8 @@ fn resolve_subagent_source_hint_with_config_routes_via_factory() {
         0.0,
     );
     assert_eq!(
-        resolved_model,
-        crate::config::MODEL_MANAGED_DEFAULT,
-        "Hint must resolve to the managed default model, not a retired tier \
+        resolved_model, "test/session-fixture",
+        "Hint must resolve through the registered provider model policy, not a retired tier \
          slug from default_model or the parent's model"
     );
 }
@@ -562,122 +634,6 @@ fn unsigned_in_user_fails_probe() {
     assert!(
         !user_is_signed_in_to_composio(&config),
         "user with neither backend session nor direct key must NOT be reported as signed in"
-    );
-}
-
-/// Sanity-check: a parent agent delegating to a sub-agent must complete
-/// without panicking, even on a worker thread with a tight stack — this
-/// is the same recursion shape that crashed the
-/// `chat-harness-subagent` Playwright lane in production with
-/// `thread 'tokio-rt-worker' has overflowed its stack, fatal runtime
-/// error: stack overflow`.
-///
-/// The deep ground-truth regression catcher for this is the
-/// `chat-harness-subagent.spec.ts` Playwright spec, which exercises the
-/// real orchestrator → researcher dispatch end-to-end (real provider
-/// stream, real config load, real tool registry). The scripted unit
-/// path here has much smaller per-frame state than production, so a
-/// single stack size doesn't cleanly bracket boxed-vs-unboxed — we use
-/// the loose 1 MiB worker stack as a smoke check that the dispatch
-/// path remains poll-bounded after refactors. See `subagent_host/
-/// ops.rs` `Box::pin` callsites for the structural fix.
-#[test]
-fn nested_subagent_dispatch_runs_on_a_constrained_worker_stack() {
-    use async_trait::async_trait;
-    use std::sync::Arc;
-
-    struct RecursiveDelegateTool {
-        inner_def: AgentDefinition,
-        /// The explicit parent the nested run is spawned under (filled once the
-        /// parent snapshot, which itself holds this tool, exists).
-        parent: Arc<std::sync::OnceLock<ParentExecutionContext>>,
-    }
-
-    #[async_trait]
-    impl Tool for RecursiveDelegateTool {
-        fn name(&self) -> &str {
-            "delegate_inner"
-        }
-        fn description(&self) -> &str {
-            "Dispatches a nested sub-agent — reproduces the recursive engine poll."
-        }
-        fn parameters_schema(&self) -> serde_json::Value {
-            serde_json::json!({"type":"object","properties":{}})
-        }
-        fn permission_level(&self) -> PermissionLevel {
-            PermissionLevel::Execute
-        }
-        async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<ToolResult> {
-            let parent = self
-                .parent
-                .get()
-                .cloned()
-                .expect("parent set before the run");
-            let outcome = run_subagent(
-                &self.inner_def,
-                "inner go",
-                with_parent(parent, SubagentRunOptions::default()),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("nested run_subagent failed: {e}"))?;
-            Ok(ToolResult::success(outcome.output))
-        }
-    }
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .thread_stack_size(1024 * 1024)
-        .enable_all()
-        .build()
-        .expect("build constrained-stack tokio runtime");
-
-    let outcome = runtime.block_on(async {
-        // Three scripted responses, shared by outer + inner runs
-        // (providers are Arc-cloned, so both pull from the same queue):
-        //   [0] outer round 1: call `delegate_inner`
-        //   [1] inner round 1: return final text
-        //   [2] outer round 2: return final text using the tool result
-        let provider = ScriptedProvider::new(vec![
-            tool_response("delegate_inner", "{}"),
-            text_response("inner-final"),
-            text_response("outer-final: inner-final"),
-        ]);
-
-        let inner_def = make_def_named_tools(&[]);
-        let parent_slot = Arc::new(std::sync::OnceLock::new());
-        let delegate_tool: Box<dyn Tool> = Box::new(RecursiveDelegateTool {
-            inner_def,
-            parent: parent_slot.clone(),
-        });
-        let parent = make_parent(
-            Arc::clone(&(provider.clone() as Arc<dyn ChatModel<()>>)),
-            vec![delegate_tool],
-        );
-        let _ = parent_slot.set(parent.clone());
-        let outer_def = make_def_named_tools(&["delegate_inner"]);
-
-        (async {
-            run_subagent(
-                &outer_def,
-                "outer go",
-                with_parent(parent.clone(), SubagentRunOptions::default()),
-            )
-            .await
-        })
-        .await
-    });
-
-    let outcome = outcome.expect(
-        "nested run_subagent must complete on a 1 MiB worker stack — \
-         a stack overflow here means the recursion boundary in \
-         `run_typed_mode` regressed (see the `Box::pin` callsites around \
-         `run_typed_mode` and the child's tinyagents drive future).",
-    );
-    assert!(
-        outcome.output.contains("inner-final"),
-        "outer should fold the inner sub-agent's result into its final \
-         answer, got: {}",
-        outcome.output
     );
 }
 

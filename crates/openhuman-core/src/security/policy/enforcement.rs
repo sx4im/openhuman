@@ -27,7 +27,7 @@ impl SecurityPolicy {
     /// guard, which sits under `MemoryCore::store` and is hit hundreds of times
     /// by one bulk ingest — want the tier refusal and nothing else. That is the
     /// same shape the ~15 acting tools which gate on bare [`Self::can_act`]
-    /// already use (e.g. `tinytools_std::filesystem::FileWriteTool`,
+    /// already use (e.g. `tinyagents_harness_tools::fs::filesystem::FileWriteTool`,
     /// `cron/scheduler.rs`).
     pub fn enforce_write_tier(&self, operation_name: &str) -> Result<(), String> {
         if !self.can_act() {
@@ -150,7 +150,23 @@ impl SecurityPolicy {
         // carry an in-memory edit anyway. A user-granted entry is left as-is.
         // SaaS: the projects home and `/tmp/openhuman` are shared by every user
         // of the process, so neither is granted there.
-        let mut trusted_roots = autonomy_config.trusted_roots.clone();
+        // A relative or empty root grants nothing (`is_within_trusted_root`), so
+        // drop it here too: the turn prompt lists these roots as grants.
+        let mut trusted_roots: Vec<TrustedRoot> = autonomy_config
+            .trusted_roots
+            .iter()
+            .filter(|root| {
+                let absolute = Path::new(&crate::config::expand_tilde(&root.path)).is_absolute();
+                if !absolute {
+                    log::warn!(
+                        "[openhuman:policy] ignoring non-absolute trusted root {:?}",
+                        root.path
+                    );
+                }
+                absolute
+            })
+            .cloned()
+            .collect();
         let projects_path = crate::config::default_projects_dir()
             .to_string_lossy()
             .to_string();
@@ -180,8 +196,13 @@ impl SecurityPolicy {
         // `is_always_forbidden` are checked *before* that shortcut and still
         // hold, but the `forbidden_paths` bypass is not something a working
         // directory should buy, so skip the grant in that shape.
-        let action_path = action_dir.to_string_lossy().to_string();
-        let action_covers_workspace = workspace_dir.starts_with(action_dir);
+        // Path checks resolve tool paths against `action_dir` (absolute after
+        // canonicalising), so a relative action dir is granted as its absolute
+        // form; only an absolute trusted root matches anything.
+        let action_root =
+            std::path::absolute(action_dir).unwrap_or_else(|_| action_dir.to_path_buf());
+        let action_path = action_root.to_string_lossy().to_string();
+        let action_covers_workspace = workspace_dir.starts_with(&action_root);
         if action_path.is_empty() || action_covers_workspace {
             tracing::debug!(
                 action_dir = %action_dir.display(),

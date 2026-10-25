@@ -1,6 +1,5 @@
 use super::*;
 use tokio::sync::broadcast;
-
 /// `fresh_approval_surface_subscription` returns `Some` when the global event bus has
 /// been initialised and `None` otherwise (bus not started).  It must never return `None`
 /// after `init_global` has been called — the production path always initialises the bus
@@ -301,6 +300,102 @@ async fn agent_surface_bridges_thread_goal_updated() {
     assert_eq!(ev.goal, Some(goal));
 }
 
+/// Goal resume and committed-turn accounting use the same observed owner store
+/// as model-facing goal tools, so both lifecycle paths reach the existing
+/// thread-scoped socket event.
+#[tokio::test]
+async fn goal_resume_and_account_updates_reach_the_web_channel() {
+    crate::core::bus::init().await.expect("bus init");
+    register_agent_surface_subscriber();
+    let mut web_rx = subscribe_web_channel_events();
+
+    let workspace = tempfile::tempdir().expect("workspace");
+    let context = crate::core::runtime::CoreContext::for_test(
+        crate::core::runtime::DomainSet::full(),
+        Some(workspace.path().to_path_buf()),
+    );
+    crate::core::runtime::CoreContext::scope(context, async {
+        let dispatch = crate::core::runtime::DispatchCtx::ambient();
+        let store = crate::agent::goals::goal_store(workspace.path(), &dispatch);
+        let thread_id = "goal-observer-resume-account";
+
+        store
+            .set(thread_id, "resume this goal", Some(100))
+            .await
+            .expect("set goal");
+        let _ = find_agent_web_event(&mut web_rx, "thread_goal_updated", thread_id).await;
+        store.pause(thread_id).await.expect("pause goal");
+        let _ = find_agent_web_event(&mut web_rx, "thread_goal_updated", thread_id).await;
+
+        let prepared = store.prepare_turn(thread_id).await.expect("prepare turn");
+        let paused = tinyagents_harness_tools::goals::ThreadGoalStatus::Paused;
+        assert_eq!(prepared.goal.map(|goal| goal.status), Some(paused));
+        store.resume(thread_id).await.expect("resume goal");
+        let resumed = find_agent_web_event(&mut web_rx, "thread_goal_updated", thread_id).await;
+        assert_eq!(
+            resumed.goal.as_ref().and_then(|goal| goal.get("status")),
+            Some(&serde_json::json!("active"))
+        );
+
+        crate::agent::goals::account_turn(
+            workspace.path(),
+            &dispatch,
+            Some(thread_id),
+            2,
+            0,
+            std::time::Duration::from_secs(1),
+        )
+        .await;
+        drop(store);
+        crate::agent::goals::account_turn(
+            workspace.path(),
+            &dispatch,
+            Some(thread_id),
+            2,
+            0,
+            std::time::Duration::from_secs(1),
+        )
+        .await;
+        loop {
+            match web_rx.try_recv() {
+                Ok(event)
+                    if event.event == "thread_goal_updated" && event.thread_id == thread_id =>
+                {
+                    panic!("account update published before the throttle threshold")
+                }
+                Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    panic!("web-channel bus closed before the account threshold")
+                }
+            }
+        }
+        crate::agent::goals::account_turn(
+            workspace.path(),
+            &dispatch,
+            Some(thread_id),
+            1,
+            0,
+            std::time::Duration::from_secs(1),
+        )
+        .await;
+        let accounted = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            find_agent_web_event(&mut web_rx, "thread_goal_updated", thread_id),
+        )
+        .await
+        .expect("throttled account event arrives after the threshold");
+        assert_eq!(
+            accounted
+                .goal
+                .as_ref()
+                .and_then(|goal| goal.get("tokensUsed")),
+            Some(&serde_json::json!(5))
+        );
+    })
+    .await;
+}
+
 /// `ThreadGoalCleared` bridges to `thread_goal_cleared`.
 #[tokio::test]
 async fn agent_surface_bridges_thread_goal_cleared() {
@@ -488,7 +583,7 @@ async fn approval_surface_drops_approval_decided_without_chat_routing() {
                     if ev.event == "approval_decided"
                         && ev.request_id == "req-decided-no-route" =>
                 {
-                    return Some(ev)
+                    return Some(ev);
                 }
                 Ok(_) => continue,
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,

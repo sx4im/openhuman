@@ -12,14 +12,18 @@
 
 use std::sync::Arc;
 
-use tiny_artifacts::ArtifactPublisher;
+use tiny_artifacts::{ArtifactPublisher, FileStore};
 
 use crate::config::Config;
 use crate::core::slots::{Extensions, HookSlot};
 
+/// Binds a publisher to the file store selected for one artifact service.
+pub type ArtifactPublisherBinder =
+    Arc<dyn Fn(Arc<dyn FileStore>) -> Arc<dyn ArtifactPublisher> + Send + Sync>;
+
 /// A registered publisher factory.
 pub type ArtifactPublisherFactory =
-    Arc<dyn Fn(&Config) -> Option<Arc<dyn ArtifactPublisher>> + Send + Sync>;
+    Arc<dyn Fn(&Config) -> Option<ArtifactPublisherBinder> + Send + Sync>;
 
 static PUBLISHERS: HookSlot<ArtifactPublisherFactory> = HookSlot::new("artifacts::publisher");
 
@@ -27,7 +31,7 @@ static PUBLISHERS: HookSlot<ArtifactPublisherFactory> = HookSlot::new("artifacts
 /// factory (registration order) that returns a publisher serves requests.
 pub fn register_artifact_publisher<F>(id: impl Into<String>, factory: F)
 where
-    F: Fn(&Config) -> Option<Arc<dyn ArtifactPublisher>> + Send + Sync + 'static,
+    F: Fn(&Config) -> Option<ArtifactPublisherBinder> + Send + Sync + 'static,
 {
     PUBLISHERS.register(id, Arc::new(factory));
 }
@@ -35,7 +39,7 @@ where
 /// Registers the publisher factory `id` for the context built from `extensions`.
 pub fn register_artifact_publisher_in<F>(extensions: &Extensions, id: impl Into<String>, factory: F)
 where
-    F: Fn(&Config) -> Option<Arc<dyn ArtifactPublisher>> + Send + Sync + 'static,
+    F: Fn(&Config) -> Option<ArtifactPublisherBinder> + Send + Sync + 'static,
 {
     PUBLISHERS.register_in(extensions, id, Arc::new(factory));
 }
@@ -46,7 +50,7 @@ pub fn unregister_artifact_publisher(id: &str) -> bool {
 }
 
 /// The publisher for `config`, or `None` when no registered factory offers one.
-pub fn artifact_publisher(config: &Config) -> Option<Arc<dyn ArtifactPublisher>> {
+pub fn artifact_publisher(config: &Config) -> Option<ArtifactPublisherBinder> {
     for (id, factory) in PUBLISHERS.entries_context_first() {
         if let Some(publisher) = factory(config) {
             log::debug!("[artifacts] publisher `{id}` serves sharing");
@@ -54,6 +58,16 @@ pub fn artifact_publisher(config: &Config) -> Option<Arc<dyn ArtifactPublisher>>
         }
     }
     None
+}
+
+/// Selects a publisher using the hook registrations of the supplied call
+/// context, then falls back to process registrations as usual.
+pub fn artifact_publisher_in(
+    config: &Config,
+    ctx: &crate::core::runtime::DispatchCtx,
+) -> Option<ArtifactPublisherBinder> {
+    let context = ctx.resolved()?;
+    crate::core::runtime::CoreContext::sync_scope(context, || artifact_publisher(config))
 }
 
 #[cfg(test)]

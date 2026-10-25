@@ -163,3 +163,37 @@ async fn ambient_config_follows_the_explicit_context() {
         "an unbound context falls back to the process default, never a scope"
     );
 }
+
+#[cfg(feature = "modules")]
+#[test]
+fn registry_stdio_servers_get_the_host_jail_and_are_never_operator_trusted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.workspace_dir = tmp.path().to_path_buf();
+    config.mcp_client.servers.push(populated_server());
+
+    let converted = client_config(&config);
+    let sandbox = converted
+        .stdio_sandbox
+        .as_ref()
+        .expect("tinymcp refuses stdio servers without a stdio_sandbox");
+    assert!(std::path::Path::new(&sandbox.workspace).is_dir());
+    assert!(sandbox.workspace.starts_with(
+        &tmp.path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    ));
+    assert_eq!(
+        sandbox.require_process_isolation,
+        super::super::host_sandbox::require_process_isolation(false)
+    );
+    assert!(
+        converted
+            .servers
+            .iter()
+            .all(|server| !server.operator_trusted),
+        "the host must not vouch for servers it did not configure as trusted"
+    );
+}

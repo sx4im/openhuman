@@ -596,6 +596,8 @@ const messages: TranslationMap = {
   'desktop.pendingUnavailable':
     'No se pudieron cargar las aprobaciones pendientes del escritorio. Actualiza para reintentarlo.',
   'desktop.unsupported': 'El control del escritorio no está disponible en este entorno.',
+  'desktop.unsupportedWindows':
+    'El control del escritorio aún no está disponible en Windows. El control del navegador ya funciona en Windows.',
   'desktop.localOnly': 'Este ajuste solo se aplica a este equipo.',
   'desktop.permissions': 'Permisos del sistema',
   'desktop.openSettings': 'Abrir ajustes',
@@ -616,6 +618,10 @@ const messages: TranslationMap = {
     'No se puede acceder a la memoria ahora mismo. No se ha perdido nada guardado; inténtalo de nuevo en un momento.',
   'memory.outOfCredits.title': 'Sin créditos',
   'memory.outOfCredits.action': 'Recargar',
+  'memory.error.planRequired':
+    'Tu plan actual no incluye memoria, así que OpenHuman no puede guardar ni consultar lo que aprende. Mejora tu plan para activar la memoria, o cambia a otra opción de memoria en Configuración.',
+  'memory.planRequired.title': 'La memoria no forma parte de tu plan',
+  'memory.planRequired.action': 'Ver planes',
   'alerts.title': 'Alertas',
   'alerts.empty': 'Sin alertas aún',
   'alerts.markAllRead': 'Marcar todo como leído',
@@ -681,12 +687,20 @@ const messages: TranslationMap = {
   'invites.title': 'Invitaciones',
   'invites.noInvites': 'Sin invitaciones pendientes',
   'devOptions.titleDiagnostics': 'Desarrollador y Diagnóstico',
+  'devOptions.doctor.run': 'Ejecutar diagnóstico',
+  'devOptions.doctor.runLive': 'Ejecutar comprobaciones en vivo',
+  'devOptions.doctor.liveWarning':
+    'Las comprobaciones en vivo pueden consumir tokens al probar modelos o embeddings. ¿Continuar?',
+  'devOptions.doctor.severity.pass': 'Correcto',
+  'devOptions.doctor.severity.info': 'Información',
+  'devOptions.doctor.severity.warn': 'Advertencia',
+  'devOptions.doctor.severity.error': 'Error',
+  'devOptions.doctor.severity.skipped': 'Omitido',
   'devOptions.diagnostics': 'Diagnósticos',
   'devOptions.toolPolicyDiagnosticsDesc':
     'Inventario de herramientas, postura política, listas permitidas de MCP y bloqueos recientes',
   'devOptions.toolPolicyDiagnostics.loading': 'Cargando…',
   'devOptions.toolPolicyDiagnostics.unavailable': 'Diagnóstico no disponible',
-  'voice.pushToTalk': 'Pulsar para hablar',
   'misc.somethingWentWrong': 'Algo salió mal',
   'misc.beta':
     'OpenHuman está en beta temprana. No dudes en compartir comentarios o reportar cualquier error que encuentres: cada reporte nos ayuda a mejorar más rápido.',
@@ -1205,13 +1219,9 @@ const messages: TranslationMap = {
   'mnemonic.createANewWallet': 'Crear una nueva billetera',
   'mnemonic.importWallet': 'Importar billetera',
   'team.deleting': 'Eliminando...',
-  'voice.tapToToggle': 'Toca para alternar',
   'voice.settingsSaved': 'Configuración de voz guardada.',
   'voice.failedToLoadSettings': 'No se pudo cargar la configuración de voz',
   'voice.failedToSaveSettings': 'No se pudo guardar la configuración de voz',
-  'voice.debug.alwaysOn': 'Escucha continua',
-  'voice.debug.alwaysOnDesc':
-    'Mantén el micrófono abierto y envía lo que dices al agente automáticamente, sin atajo. Se pausa cuando la pantalla está bloqueada.',
   'voice.providers.saved': 'Proveedores de voz guardados.',
   'voice.providers.failedToSave': 'No se pudieron guardar los proveedores de voz',
   'voice.mode.start': 'Iniciar chat de voz',
@@ -1277,27 +1287,6 @@ const messages: TranslationMap = {
   'voice.routing.elevenlabsVoiceIdAria': 'ID de voz de ElevenLabs (personalizado)',
   'voice.routing.elevenlabsVoiceDesc':
     'Elige una voz seleccionada o pega un ID de voz personalizado desde tu panel de ElevenLabs.',
-  'pttSettings.title': 'Pulsa para hablar',
-  'pttSettings.description':
-    'Mantén pulsada una tecla para hablar con OpenHuman mientras estás en otra aplicación. Al soltarla se envía la grabación; si tienes activada la opción «Leer las respuestas», OpenHuman las dice en voz alta.',
-  'pttSettings.shortcutLabel': 'Atajo de teclado',
-  'pttSettings.shortcutPlaceholder': 'Pulsa una tecla (p. ej. F13)',
-  'pttSettings.shortcutUnsetHint':
-    'Pulsa para hablar está desactivado: elige un atajo para activarlo.',
-  'pttSettings.speakRepliesLabel': 'Leer las respuestas del agente en voz alta',
-  'pttSettings.showOverlayLabel': 'Mostrar el panel mientras se mantiene pulsado',
-  'pttSettings.errorConflictsWithDictation':
-    'Este atajo ya lo usa el dictado. Elige una tecla distinta.',
-  'pttSettings.errorModifierOnly':
-    'Elige una tecla normal (p. ej. F13): los atajos compuestos solo por modificadores no funcionan para pulsa para hablar.',
-  'pttSettings.errorEmpty': 'Elige una tecla para asignarla.',
-  'pttSettings.errorAccessibility':
-    'macOS necesita permiso de Accesibilidad para este atajo. Abre Ajustes del sistema → Privacidad y seguridad → Accesibilidad y activa OpenHuman.',
-  'pttSettings.errorShortcutInUse': 'Otra aplicación ya usa este atajo. Elige uno distinto.',
-  'pttSettings.errorUnsupportedWayland':
-    'Las sesiones Wayland todavía no admiten atajos globales en OpenHuman: cambia a una sesión X11 o usa el botón de dictado dentro de la aplicación.',
-  'pttOverlay.listening': 'Escuchando…',
-  'pttOverlay.idle': 'En espera',
   'composio.triageTitle': 'Disparadores de integración',
   'composio.triageDesc':
     'Cuando está activo, cada disparador de Composio entrante pasa por un paso de clasificación con IA que clasifica el evento y puede iniciar acciones automatizadas: un turno de LLM local por disparador. Desactívalo globalmente o por integración si prefieres revisión manual. Si la variable de entorno',
@@ -1348,6 +1337,8 @@ const messages: TranslationMap = {
   'chat.failedToLoadMessages': 'No se pudieron cargar los mensajes',
   'chat.thinkingDots': 'Pensando...',
   'chat.status.thinkingElapsed': 'Pensando · {elapsed}',
+  'chat.status.compacting': 'Resumiendo la conversación anterior…',
+  'chat.status.compactingElapsed': 'Resumiendo la conversación anterior · {elapsed}',
   'chat.status.waitingApproval': 'Esperando tu aprobación',
   'chat.status.waitingReview': 'Esperando tu revisión',
   'chat.status.waitingAnswer': 'Esperando tu respuesta',
@@ -1878,11 +1869,6 @@ const messages: TranslationMap = {
   'chat.todos.ofTotal': '{done} de {total}',
   'chat.todos.receipt': 'Progreso actualizado · {done}/{total}',
   'chat.subagents.ranFor': 'Duró {duration}',
-  'chat.subagents.ofTotal': '{complete} de {total}',
-  'chat.subagents.runningCount': '{count} en curso',
-  'chat.subagents.failedCount': '{count} con error',
-  'chat.subagents.incompleteCount': '{count} incompletos',
-  'chat.subagents.settled': 'Las subtareas terminaron. Procesando sus resultados.',
   'conversations.planReview.title': 'Revisar plan',
   'conversations.planReview.subtitle':
     'Aprueba para ejecutarlo, recházalo para descartarlo o envía comentarios para revisarlo.',
@@ -1918,7 +1904,6 @@ const messages: TranslationMap = {
   'conversations.mcpUi.confirmAllow': 'Permitir',
   'conversations.mcpUi.confirmDeny': 'Denegar',
   'conversations.tools.delegatedTo': 'Delegado a {agent}',
-  'conversations.tools.parallelAgentsAggregating': 'Agregando resultados',
   'conversations.tools.openInBrowser': 'Abrir en el navegador',
   'conversations.tools.status.running': 'en curso',
   'conversations.tools.status.done': 'hecho',
@@ -1987,22 +1972,6 @@ const messages: TranslationMap = {
     'Reintento fallido. Descarga la última versión de la app e inténtalo de nuevo.',
   'daemon.serviceBlockingGate.retrying': 'Reintentando...',
   'daemon.serviceBlockingGate.title': 'El core de OpenHuman no está disponible',
-  'worktree.label': 'árbol de trabajo',
-  'worktree.dirty': 'Cambios sin confirmar',
-  'worktree.clean': 'Limpio',
-  'worktree.removing': 'Eliminando…',
-  'worktree.removeFailed': 'No se pudo eliminar el worktree',
-  'worktree.diffFailed': 'No se pudo cargar el diff',
-  'worktree.diffLoading': 'Cargando diff…',
-  'worktree.diffEmpty': 'Sin cambios respecto a HEAD.',
-  'worktree.dirtyConfirm':
-    'Este worktree tiene cambios sin confirmar. Eliminarlo descarta ese trabajo. La rama del worker se conserva.',
-  'worktree.action.open': 'Abrir carpeta',
-  'worktree.action.diff': 'diferencia',
-  'worktree.action.hideDiff': 'Ocultar diff',
-  'worktree.action.remove': 'Eliminar',
-  'worktree.action.removeAnyway': 'Descartar y eliminar',
-  'worktree.action.preserve': 'Conservar',
   'notifications.card.dismiss': 'Descartar notificación',
   'notifications.card.importanceTitle': 'Importancia: {pct}%',
   'notifications.center.empty': 'Sin notificaciones aún',
@@ -2405,10 +2374,6 @@ const messages: TranslationMap = {
   'oauth.button.loopbackTimeout':
     'El inicio de sesión expiró: el navegador no completó la redirección OAuth. Por favor, inténtalo de nuevo.',
   'openhuman.team_list_teams': 'Lista de equipos',
-  'overlay.ariaAttention': 'Mensaje de atención',
-  'overlay.ariaOrb': 'Overlay de OpenHuman',
-  'overlay.ariaVoiceActive': 'Entrada de voz activa',
-  'overlay.orbTitle': 'Arrastra para mover · Doble clic para restablecer posición',
   'pages.settings.account.migration': 'Importar',
   'pages.settings.account.migrationDesc':
     'Migra memoria y notas desde OpenClaw (y pronto Hermes) a este espacio de trabajo.',
@@ -3311,27 +3276,6 @@ const messages: TranslationMap = {
   'skills.install.urlLabel': 'URL de la habilidad',
   'skills.install.urlPlaceholder': 'https://raw.githubusercontent.com/owner/repo/main/SKILL.md',
   'skills.search.placeholder': 'Marcador de posición',
-  'skills.setup.voice.activation': 'Activación',
-  'skills.setup.voice.activeDescPrefix': 'fn',
-  'skills.setup.voice.activeDescSuffix': 'fn',
-  'skills.setup.voice.activeTitle': 'Inteligencia de voz está activa',
-  'skills.setup.voice.customizeSettings': 'Personalizar configuración',
-  'skills.setup.voice.downloadSttBtn': 'Abrir ajustes de voz',
-  'skills.setup.voice.enableDesc': 'Descripción de activación',
-  'skills.setup.voice.hotkey': 'Tecla de acceso rápido',
-  'skills.setup.voice.startBtn': 'Iniciando...',
-  'skills.setup.voice.startError': 'No se pudo iniciar el servidor de voz',
-  'skills.setup.voice.starting': 'Iniciando...',
-  'skills.setup.voice.stepEnable': 'Iniciar servidor de voz',
-  'skills.setup.voice.stepSetup': 'Se requiere configurar la voz a texto',
-  'skills.setup.voice.stepSuccess': 'Listo para usar',
-  'skills.setup.voice.sttNotReady': 'Modelo de voz a texto no listo',
-  'skills.setup.voice.sttNotReadyDesc':
-    'La Inteligencia de voz necesita un motor de voz a texto operativo. Elige uno en Ajustes › Voz.',
-  'skills.setup.voice.sttReady': 'Modelo de voz a texto listo',
-  'skills.setup.voice.sttReturnHint':
-    'Configura un motor de voz a texto en los ajustes de voz y vuelve aquí para iniciar la voz.',
-  'skills.setup.voice.title': 'Inteligencia de voz',
   'skills.uninstall.description':
     'Esto elimina permanentemente el directorio de la habilidad y todos sus recursos incluidos. El agente dejará de verlo en el próximo turno.',
   'upsell.global.limitMessage': 'Mejora tu plan o recarga créditos para continuar',
@@ -3614,8 +3558,6 @@ const messages: TranslationMap = {
     'Se detectó una anulación OPENHUMAN_APPROVAL_GATE=0, pero se ignoró: la aplicación de escritorio mantiene siempre activa la puerta de aprobación.',
 
   // Run queue
-  'notch.ready': 'Listo',
-  'notch.listening': 'Escuchando…',
 
   'orchestration.detail.stop': 'Detener',
 
@@ -3809,7 +3751,6 @@ const messages: TranslationMap = {
   'voice.routing.testOk': 'Trabajando',
   'voice.routing.testFailed': 'Fallido',
   'voice.routing.unsaved': 'Cambios sin guardar',
-  'pttSettings.clearShortcut': 'Limpiar',
   'flows.allRuns.tableTitle': 'Ejecuciones',
   'flows.allRuns.columnStatus': 'Estado',
   'flows.allRuns.columnWorkflow': 'Flujo de trabajo',
@@ -3862,7 +3803,7 @@ const messages: TranslationMap = {
   'settings.embeddings.modelCardTitle': 'Modelo &quot; dimensiones &quot;',
   'mcp.rows.searchPlaceholder': 'Buscar servidores...',
   'mcp.tab.section.clients': 'Clientes',
-  'voice.pageDesc': 'Motores de voz, cómo se enruzan y empujan a hablar.',
+  'voice.pageDesc': 'Motores de voz y enrutamiento de proveedores.',
   'voice.providers.cardDesc':
     'Enciende los motores que quieras usar. Las llaves permanecen en este dispositivo.',
   'voice.providers.cap.stt': 'Discurso al texto',
@@ -4971,8 +4912,6 @@ const messages: TranslationMap = {
   'conversations.tools.updateLearnings.done': 'Aprendizajes actualizados',
   'conversations.tools.delegateTask.active': 'Delegando tarea',
   'conversations.tools.delegateTask.done': 'Tarea delegada',
-  'conversations.tools.runAgentsInParallel.active': 'Ejecutando agentes en paralelo',
-  'conversations.tools.runAgentsInParallel.done': 'Agentes ejecutados en paralelo',
   'conversations.tools.messageAgent.active': 'Enviando mensaje al agente',
   'conversations.tools.messageAgent.done': 'Mensaje enviado al agente',
   'conversations.tools.waitForAgent.active': 'Esperando al agente',
@@ -5009,6 +4948,8 @@ const messages: TranslationMap = {
   'conversations.tools.checkGoal.done': 'Objetivo comprobado',
   'conversations.tools.completeGoal.active': 'Completando objetivo',
   'conversations.tools.completeGoal.done': 'Objetivo completado',
+  'conversations.tools.resumeGoal.active': 'Reanudando objetivo',
+  'conversations.tools.resumeGoal.done': 'Objetivo reanudado',
   'conversations.tools.scheduleTask.active': 'Programando tarea',
   'conversations.tools.scheduleTask.done': 'Tarea programada',
   'conversations.tools.checkSchedules.active': 'Comprobando programaciones',

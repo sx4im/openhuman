@@ -1,29 +1,40 @@
-//! Handlers for provider settings, model listing, provider testing, and server lifecycle.
+//! Handlers for provider settings, model listing, and provider testing.
 
 use crate::core::runtime::DispatchCtx;
 use serde_json::{Map, Value};
 
-use crate::core::all::ControllerFuture;
+use crate::core::all::{BoundRegisteredController, ControllerFuture};
 
 use crate::voice::schemas::helpers::{
     deserialize_params, generate_silent_wav, validate_provider_key, validate_stt_provider,
     validate_tts_provider,
 };
 use crate::voice::schemas::params::{
-    OverlaySttNotifyParams, OverlaySttState, SetProvidersParams, VoiceListModelsParams,
-    VoiceTestProviderParams, VoiceUpdateProviderSettingsParams,
+    SetProvidersParams, VoiceListModelsParams, VoiceTestProviderParams,
+    VoiceUpdateProviderSettingsParams,
 };
 
 // ---------------------------------------------------------------------------
 // Provider configuration handlers
 // ---------------------------------------------------------------------------
 
+pub(crate) fn voice_set_providers_controller() -> BoundRegisteredController {
+    BoundRegisteredController::typed(
+        super::super::registry::voice_schemas("voice_set_providers"),
+        deserialize_params::<SetProvidersParams>,
+        run_voice_set_providers,
+    )
+}
+
 pub(crate) fn handle_voice_set_providers(
     ctx: DispatchCtx,
     params: Map<String, Value>,
 ) -> ControllerFuture {
+    voice_set_providers_controller().invoke(ctx, params)
+}
+
+fn run_voice_set_providers(ctx: DispatchCtx, p: SetProvidersParams) -> ControllerFuture {
     Box::pin(async move {
-        let p = deserialize_params::<SetProvidersParams>(params)?;
         let mut config = ctx.load_config().await?;
 
         if let Some(stt) = p
@@ -35,6 +46,7 @@ pub(crate) fn handle_voice_set_providers(
             validate_stt_provider(stt)?;
             config.local_ai.stt_provider = stt.to_string();
             config.stt_provider = Some(stt.to_string());
+            sync_legacy_stt_engine(&mut config, stt);
         }
         if let Some(tts) = p
             .tts_provider
@@ -84,9 +96,24 @@ pub(crate) fn handle_voice_set_providers(
     })
 }
 
+pub(crate) fn voice_update_provider_settings_controller() -> BoundRegisteredController {
+    BoundRegisteredController::typed(
+        super::super::registry::voice_schemas("voice_update_provider_settings"),
+        deserialize_params::<VoiceUpdateProviderSettingsParams>,
+        run_voice_update_provider_settings,
+    )
+}
+
 pub(crate) fn handle_voice_update_provider_settings(
     ctx: DispatchCtx,
     params: Map<String, Value>,
+) -> ControllerFuture {
+    voice_update_provider_settings_controller().invoke(ctx, params)
+}
+
+fn run_voice_update_provider_settings(
+    ctx: DispatchCtx,
+    p: VoiceUpdateProviderSettingsParams,
 ) -> ControllerFuture {
     Box::pin(async move {
         use crate::config::schema::voice_providers::{
@@ -95,7 +122,6 @@ pub(crate) fn handle_voice_update_provider_settings(
         use tinyinference_voice::external_stt::SttApiStyle;
         use tinyinference_voice::external_tts::TtsApiStyle;
 
-        let p = deserialize_params::<VoiceUpdateProviderSettingsParams>(params)?;
         let mut config = ctx.load_config().await?;
 
         if let Some(providers) = p.voice_providers {
@@ -191,6 +217,7 @@ pub(crate) fn handle_voice_update_provider_settings(
                 // Sync to legacy field so voice_status / voice_stt_dispatch
                 // pick up the change without waiting for a restart.
                 config.local_ai.stt_provider = trimmed.to_string();
+                sync_legacy_stt_engine(&mut config, trimmed);
             }
         }
 
@@ -242,12 +269,32 @@ pub(crate) fn handle_voice_update_provider_settings(
     })
 }
 
+/// Keep the persisted engine fallback aligned when a known provider is chosen.
+/// Custom `slug:model` routing remains in `stt_provider` and leaves the legacy
+/// fallback untouched.
+fn sync_legacy_stt_engine(config: &mut crate::config::Config, provider: &str) {
+    if let Some(engine) = crate::config::SttEngine::parse(provider) {
+        config.voice_server.stt_engine = engine;
+    }
+}
+
+pub(crate) fn voice_list_models_controller() -> BoundRegisteredController {
+    BoundRegisteredController::typed(
+        super::super::registry::voice_schemas("voice_list_models"),
+        deserialize_params::<VoiceListModelsParams>,
+        run_voice_list_models,
+    )
+}
+
 pub(crate) fn handle_voice_list_models(
     ctx: DispatchCtx,
     params: Map<String, Value>,
 ) -> ControllerFuture {
+    voice_list_models_controller().invoke(ctx, params)
+}
+
+fn run_voice_list_models(ctx: DispatchCtx, p: VoiceListModelsParams) -> ControllerFuture {
     Box::pin(async move {
-        let p = deserialize_params::<VoiceListModelsParams>(params)?;
         let config = ctx.load_config().await?;
         let provider_id = p.provider_id.trim();
         let capability = p.capability.as_deref().unwrap_or("both");
@@ -310,12 +357,23 @@ pub(crate) fn handle_voice_list_models(
     })
 }
 
+pub(crate) fn voice_test_provider_controller() -> BoundRegisteredController {
+    BoundRegisteredController::typed(
+        super::super::registry::voice_schemas("voice_test_provider"),
+        deserialize_params::<VoiceTestProviderParams>,
+        run_voice_test_provider,
+    )
+}
+
 pub(crate) fn handle_voice_test_provider(
     ctx: DispatchCtx,
     params: Map<String, Value>,
 ) -> ControllerFuture {
+    voice_test_provider_controller().invoke(ctx, params)
+}
+
+fn run_voice_test_provider(ctx: DispatchCtx, p: VoiceTestProviderParams) -> ControllerFuture {
     Box::pin(async move {
-        let p = deserialize_params::<VoiceTestProviderParams>(params)?;
         let config = ctx.load_config().await?;
         let start = std::time::Instant::now();
 
@@ -425,194 +483,6 @@ pub(crate) fn handle_voice_test_provider(
     })
 }
 
-// ---------------------------------------------------------------------------
-// Voice server lifecycle handlers
-// ---------------------------------------------------------------------------
-
-pub(crate) fn handle_voice_server_start(
-    ctx: DispatchCtx,
-    params: Map<String, Value>,
-) -> ControllerFuture {
-    Box::pin(async move {
-        use crate::voice::server::{global_server, VoiceServerConfig};
-        use tinyvoice_bus::hotkey::ActivationMode;
-
-        let config = ctx.load_config().await?;
-
-        let hotkey = params
-            .get("hotkey")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&config.voice_server.hotkey)
-            .to_string();
-
-        let activation_mode = match params.get("activation_mode").and_then(|v| v.as_str()) {
-            Some("push") => ActivationMode::Push,
-            Some("tap") => ActivationMode::Tap,
-            Some(other) => {
-                log::warn!(
-                    "[voice_server] unrecognized activation_mode '{}', defaulting to Push",
-                    other
-                );
-                ActivationMode::Push
-            }
-            None => match config.voice_server.activation_mode {
-                crate::config::VoiceActivationMode::Push => ActivationMode::Push,
-                crate::config::VoiceActivationMode::Tap => ActivationMode::Tap,
-            },
-        };
-
-        let skip_cleanup = params
-            .get("skip_cleanup")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(config.voice_server.skip_cleanup);
-
-        let server_config = VoiceServerConfig {
-            hotkey,
-            activation_mode,
-            skip_cleanup,
-            context: None,
-            min_duration_secs: config.voice_server.min_duration_secs,
-            silence_threshold: config.voice_server.silence_threshold,
-            custom_dictionary: config.voice_server.custom_dictionary.clone(),
-        };
-
-        // Check if a server is already running with a different config.
-        if let Some(existing) = crate::voice::server::try_global_server() {
-            let existing_status = existing.status().await;
-            if existing_status.state != crate::voice::server::ServerState::Stopped {
-                if existing_status.hotkey != server_config.hotkey
-                    || existing_status.activation_mode != server_config.activation_mode
-                {
-                    return Err(format!(
-                        "voice server already running (hotkey={}, mode={:?}); \
-                         stop it first before starting with different config",
-                        existing_status.hotkey, existing_status.activation_mode
-                    ));
-                }
-                // Same config, already running — return current status.
-                return serde_json::to_value(existing_status)
-                    .map_err(|e| format!("serialize error: {e}"));
-            }
-        }
-
-        let server = global_server(server_config);
-        let config_clone = config.clone();
-        let server_for_err = server.clone();
-        let run_ctx = ctx.clone();
-
-        tokio::spawn(async move {
-            if let Err(e) = server.run(&run_ctx, &config_clone).await {
-                log::warn!("[voice_server] server exited with error: {e}");
-                server_for_err.set_last_error(&e).await;
-            }
-        });
-
-        // Give the server a moment to start.
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-        if let Some(s) = crate::voice::server::try_global_server() {
-            let status = s.status().await;
-            serde_json::to_value(status).map_err(|e| format!("serialize error: {e}"))
-        } else {
-            Err("voice server failed to initialize".to_string())
-        }
-    })
-}
-
-pub(crate) fn handle_voice_server_stop(
-    _ctx: DispatchCtx,
-    _params: Map<String, Value>,
-) -> ControllerFuture {
-    Box::pin(async move {
-        if let Some(server) = crate::voice::server::try_global_server() {
-            server.stop().await;
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            let status = server.status().await;
-            serde_json::to_value(status).map_err(|e| format!("serialize error: {e}"))
-        } else {
-            // Not running — return a stopped status rather than an error.
-            let status = crate::voice::server::VoiceServerStatus {
-                state: crate::voice::server::ServerState::Stopped,
-                hotkey: String::new(),
-                activation_mode: tinyvoice_bus::hotkey::ActivationMode::Push,
-                transcription_count: 0,
-                last_error: None,
-            };
-            serde_json::to_value(status).map_err(|e| format!("serialize error: {e}"))
-        }
-    })
-}
-
-pub(crate) fn handle_voice_server_status(
-    _ctx: DispatchCtx,
-    _params: Map<String, Value>,
-) -> ControllerFuture {
-    Box::pin(async move {
-        if let Some(server) = crate::voice::server::try_global_server() {
-            let status = server.status().await;
-            serde_json::to_value(status).map_err(|e| format!("serialize error: {e}"))
-        } else {
-            let status = crate::voice::server::VoiceServerStatus {
-                state: crate::voice::server::ServerState::Stopped,
-                hotkey: String::new(),
-                activation_mode: tinyvoice_bus::hotkey::ActivationMode::Push,
-                transcription_count: 0,
-                last_error: None,
-            };
-            serde_json::to_value(status).map_err(|e| format!("serialize error: {e}"))
-        }
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Overlay STT notify handler
-// ---------------------------------------------------------------------------
-
-pub(crate) fn handle_overlay_stt_notify(
-    _ctx: DispatchCtx,
-    params: Map<String, Value>,
-) -> ControllerFuture {
-    Box::pin(async move {
-        let p = deserialize_params::<OverlaySttNotifyParams>(params)?;
-        log::debug!(
-            "[overlay_stt_notify] state={:?}, has_text={}, text_len={}",
-            p.state,
-            p.text.is_some(),
-            p.text.as_deref().map_or(0, |t| t.len())
-        );
-
-        use crate::voice::dictation_listener::{
-            publish_dictation_event, publish_transcription, DictationEvent,
-        };
-
-        match p.state {
-            OverlaySttState::RecordingStarted => {
-                publish_dictation_event(DictationEvent {
-                    event_type: "pressed".to_string(),
-                    hotkey: "chat_button".to_string(),
-                    activation_mode: "toggle".to_string(),
-                });
-            }
-            OverlaySttState::TranscriptionDone => {
-                let text = p.text.ok_or_else(|| {
-                    "invalid params: `text` is required for transcription_done".to_string()
-                })?;
-                publish_transcription(text);
-                publish_dictation_event(DictationEvent {
-                    event_type: "released".to_string(),
-                    hotkey: "chat_button".to_string(),
-                    activation_mode: "toggle".to_string(),
-                });
-            }
-            OverlaySttState::Cancelled | OverlaySttState::Error => {
-                publish_dictation_event(DictationEvent {
-                    event_type: "released".to_string(),
-                    hotkey: "chat_button".to_string(),
-                    activation_mode: "toggle".to_string(),
-                });
-            }
-        }
-
-        Ok(serde_json::json!({ "ok": true }))
-    })
-}
+#[cfg(test)]
+#[path = "provider_server_tests.rs"]
+mod tests;

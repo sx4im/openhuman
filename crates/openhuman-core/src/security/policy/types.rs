@@ -54,6 +54,25 @@ pub enum CommandRiskLevel {
     High,
 }
 
+/// OpenHuman's fail-closed classification for an acting command.
+///
+/// This is host policy vocabulary. Module contracts report structural facts;
+/// they do not classify commands or decide which autonomy tier may run them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandClass {
+    /// No side effects are expected.
+    Read,
+    /// Changes local or remote state.
+    Write,
+    /// Performs a network operation.
+    Network,
+    /// Installs or updates software.
+    Install,
+    /// Performs a destructive or privilege-sensitive operation.
+    Destructive,
+}
+
 /// What the harness should do with an acting tool call of a given
 /// [`CommandClass`] under the session's [`AutonomyLevel`]. Computed by
 /// [`SecurityPolicy::gate_decision`]; the harness translates `Prompt` into an
@@ -80,7 +99,7 @@ pub enum ToolOperation {
 #[derive(Debug)]
 pub struct ActionTracker {
     /// Timestamps of recent actions (kept within the last hour).
-    actions: Mutex<Vec<Instant>>,
+    actions: Arc<Mutex<Vec<Instant>>>,
 }
 
 impl Default for ActionTracker {
@@ -92,7 +111,7 @@ impl Default for ActionTracker {
 impl ActionTracker {
     pub fn new() -> Self {
         Self {
-            actions: Mutex::new(Vec::new()),
+            actions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -116,13 +135,23 @@ impl ActionTracker {
         actions.retain(|t| *t > cutoff);
         actions.len()
     }
+
+    /// Shares the action history with a short-lived policy derived from this
+    /// tracker. Ordinary `Clone` intentionally snapshots history for separate
+    /// policies; live flow gates use this handle so rebuilding the tier view
+    /// does not reset one run's action budget.
+    pub(crate) fn shared_clone(&self) -> Self {
+        Self {
+            actions: Arc::clone(&self.actions),
+        }
+    }
 }
 
 impl Clone for ActionTracker {
     fn clone(&self) -> Self {
         let actions = self.actions.lock();
         Self {
-            actions: Mutex::new(actions.clone()),
+            actions: Arc::new(Mutex::new(actions.clone())),
         }
     }
 }

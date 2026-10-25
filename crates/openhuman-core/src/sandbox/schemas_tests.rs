@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::all::assert_schema_controller_parity;
 use crate::core::runtime::context::CoreContext;
 use crate::core::runtime::DispatchCtx;
 use crate::core::runtime::DomainSet;
@@ -11,20 +12,13 @@ fn scoped_ctx(config: crate::config::Config) -> std::sync::Arc<CoreContext> {
 }
 
 #[test]
-fn all_schemas_are_in_sandbox_namespace() {
-    for schema in all_controller_schemas() {
-        assert_eq!(schema.namespace, "sandbox");
-    }
-}
-
-#[test]
-fn registered_controllers_match_schemas() {
-    let schemas = all_controller_schemas();
-    let controllers = all_registered_controllers();
-    assert_eq!(schemas.len(), controllers.len());
-    for (s, c) in schemas.iter().zip(controllers.iter()) {
-        assert_eq!(s.function, c.schema.function);
-    }
+fn sandbox_schema_catalog_matches_registered_controllers() {
+    crate::core::all::expect_schema_namespace(&all_controller_schemas(), "sandbox");
+    assert_schema_controller_parity(
+        &all_controller_schemas(),
+        &all_registered_controllers(),
+        "status",
+    );
 }
 
 #[tokio::test]
@@ -223,10 +217,11 @@ async fn handle_validate_policy_errors_instead_of_passing_when_tinybox_is_unavai
 
 #[tokio::test]
 async fn every_sandbox_method_answers_component_disabled_when_sandbox_is_off() {
+    type ControllerHandler = fn(DispatchCtx, Map<String, Value>) -> ControllerFuture;
     let mut set = crate::core::runtime::ComponentSet::all();
     set.sandbox = false;
     let ctx = crate::core::runtime::context::CoreContext::for_test_with_components(set);
-    let handlers: [fn(DispatchCtx, Map<String, Value>) -> ControllerFuture; 4] = [
+    let handlers: [ControllerHandler; 4] = [
         handle_status,
         handle_resolve_policy,
         handle_cleanup_orphans,

@@ -1,24 +1,12 @@
-use super::{
-    all_controller_schemas, all_registered_controllers, controller_value, schemas, string_param,
-};
+use super::{all_controller_schemas, all_registered_controllers, controller_value, string_param};
 use crate::core::runtime::context::CoreContext;
 use crate::core::runtime::DispatchCtx;
 use crate::core::runtime::DomainSet;
 use serde_json::{Map, Value};
 
 #[test]
-fn every_schema_is_in_the_modules_namespace() {
-    for schema in all_controller_schemas() {
-        assert_eq!(schema.namespace, "modules");
-        assert_ne!(
-            schema.function, "unknown",
-            "an advertised function fell through to the unknown arm"
-        );
-    }
-}
-
-#[test]
 fn registered_controllers_match_the_advertised_schemas() {
+    crate::core::all::expect_schema_namespace(&all_controller_schemas(), "modules");
     // Two lists that must agree: one drives `/schema`, the other dispatch.
     let advertised: Vec<&str> = all_controller_schemas()
         .iter()
@@ -29,11 +17,6 @@ fn registered_controllers_match_the_advertised_schemas() {
         .map(|c| c.schema.function)
         .collect();
     assert_eq!(advertised, registered);
-}
-
-#[test]
-fn an_unknown_function_falls_through_to_the_unknown_arm() {
-    assert_eq!(schemas("nope").function, "unknown");
 }
 
 #[test]
@@ -79,6 +62,7 @@ async fn forgetting_sites_reports_how_many_went() {
     for site in ["shop.test", "books.test"] {
         std::fs::write(sites.join(format!("{site}.json")), b"{}").unwrap();
     }
+    let workspace = config.workspace_dir.clone();
     let ctx = CoreContext::for_test_with_config(DomainSet::full(), config);
 
     let (one, every) = CoreContext::scope(ctx.clone(), async {
@@ -88,16 +72,24 @@ async fn forgetting_sites_reports_how_many_went() {
             Value::String("https://www.shop.test/cart".to_string()),
         );
         let one = super::handle_browser_forget_sites(DispatchCtx::new(ctx.clone()), one).await;
-        (
-            one,
-            super::handle_browser_forget_sites(DispatchCtx::new(ctx.clone()), Map::new()).await,
-        )
+        let every =
+            super::handle_browser_forget_sites(DispatchCtx::new(ctx.clone()), Map::new()).await;
+
+        let reopened = crate::modules::site_memory_host::SiteStore::open(&workspace)
+            .expect("reopen active site store");
+        assert!(reopened.load("shop.test").await.unwrap().hints.is_empty());
+        assert!(reopened.load("books.test").await.unwrap().hints.is_empty());
+        assert_eq!(reopened.forget(None).await.unwrap(), 0);
+
+        (one, every)
     })
     .await;
 
     assert_eq!(one.unwrap()["forgotten"], 1);
     assert_eq!(every.unwrap()["forgotten"], 1);
-    assert!(!sites.join("books.test.json").exists());
+
+    assert!(sites.join("shop.test.json").exists());
+    assert!(sites.join("books.test.json").exists());
 }
 
 #[test]
@@ -135,4 +127,37 @@ async fn a_blank_or_unreadable_site_forgets_nothing() {
             .unwrap_err();
         assert!(error.contains("must name a site"), "{error}");
     }
+}
+
+#[test]
+fn computer_status_load_keeps_permissive_false_default() {
+    assert!(!super::computer_status_load(&Map::new()));
+    for (value, expected) in [
+        (Value::Null, false),
+        (serde_json::json!("true"), false),
+        (serde_json::json!(1), false),
+        (Value::Bool(false), false),
+        (Value::Bool(true), true),
+    ] {
+        let params = Map::from_iter([("load".into(), value)]);
+        assert_eq!(super::computer_status_load(&params), expected);
+    }
+}
+
+#[test]
+fn computer_status_legacy_catalog_keeps_its_handler_and_fixture_contract() {
+    let controllers = all_registered_controllers()
+        .into_iter()
+        .filter(|controller| controller.schema.method_name() == "modules.computer_status")
+        .collect::<Vec<_>>();
+    assert_eq!(controllers.len(), 1);
+    assert!(std::ptr::fn_addr_eq(
+        controllers[0].handler,
+        super::handle_computer_status as crate::core::all::ControllerHandler
+    ));
+    crate::core::all::verify_parameter_schema(
+        &controllers[0].schema,
+        &super::computer_status_parameter_contract(),
+    )
+    .expect("legacy catalogue keeps its authored schema examples");
 }

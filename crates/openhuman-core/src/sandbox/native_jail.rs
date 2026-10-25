@@ -5,7 +5,8 @@ use std::{collections::HashMap, ffi::OsString, path::Path, time::Duration};
 #[cfg(feature = "modules")]
 use std::collections::BTreeMap;
 
-use super::types::{SandboxExecResult, SandboxIsolation, SandboxPolicy, SandboxStatus};
+use super::shell_exec::ShellRunOutcome;
+use super::types::{SandboxIsolation, SandboxPolicy, SandboxStatus};
 use crate::config::Config;
 
 #[cfg(feature = "modules")]
@@ -89,7 +90,9 @@ pub(crate) async fn require_backend(_config: &Config, _expected: &str) -> anyhow
     anyhow::bail!("TinyBox module support is disabled; native jail execution is unavailable")
 }
 
-/// Run a command inside TinyBox's native jail and keep its resource lifecycle module-owned.
+/// Run a command inside TinyBox's native jail and keep its resource lifecycle
+/// module-owned. With `yield_after`, a command still running then comes back
+/// as [`ShellRunOutcome::Running`] and keeps running in the jail.
 pub(crate) async fn execute(
     ctx: &crate::core::runtime::DispatchCtx,
     config: &Config,
@@ -99,8 +102,9 @@ pub(crate) async fn execute(
     extra_env: &HashMap<OsString, OsString>,
     timeout: Duration,
     explicitly_requested: bool,
+    yield_after: Option<Duration>,
     meter: Option<super::shell_progress::ShellOutputMeter>,
-) -> anyhow::Result<SandboxExecResult> {
+) -> anyhow::Result<ShellRunOutcome> {
     #[cfg(feature = "modules")]
     {
         let ctx = ctx.clone();
@@ -120,6 +124,7 @@ pub(crate) async fn execute(
                 &extra_env,
                 timeout,
                 explicitly_requested,
+                yield_after,
                 meter,
             )
             .await
@@ -138,6 +143,7 @@ pub(crate) async fn execute(
             extra_env,
             timeout,
             explicitly_requested,
+            yield_after,
             meter,
         );
         anyhow::bail!("TinyBox module support is disabled; native jail execution is unavailable")
@@ -154,8 +160,9 @@ async fn execute_owned(
     extra_env: &HashMap<OsString, OsString>,
     timeout: Duration,
     explicitly_requested: bool,
+    yield_after: Option<Duration>,
     meter: Option<super::shell_progress::ShellOutputMeter>,
-) -> anyhow::Result<SandboxExecResult> {
+) -> anyhow::Result<ShellRunOutcome> {
     let status = tinybox::jail_status(config)
         .await
         .map_err(|_| anyhow::anyhow!("TinyBox native jail status is unavailable"))?;
@@ -188,7 +195,8 @@ async fn execute_owned(
     // TinyBox adds its own per-call scratch directory to the writable grants and
     // points TMPDIR, TMP and TEMP at it unless the caller overrides them.
     run.jail = Some(jail_request(config, policy, isolation)?);
-    super::shell_exec::run(ctx, config, run).await
+    run.yield_after = yield_after;
+    super::shell_exec::run_yielding(ctx, config, run).await
 }
 
 /// The caller's environment overrides, which must be UTF-8 to cross the bus.
@@ -255,6 +263,8 @@ fn jail_request(
                 .collect();
             credential_denials(stores, &policy.workspace_root, &policy.read_write_mounts)?
         },
+        // No hard resource limits are requested by the host.
+        resources: None,
     })
 }
 
@@ -275,7 +285,9 @@ fn credential_denials(
 ) -> anyhow::Result<Vec<String>> {
     let granted: Vec<std::path::PathBuf> = std::iter::once(root)
         .chain(read_write.iter().map(std::path::PathBuf::as_path))
-        .filter_map(|path| path.canonicalize().ok())
+        // A root or grant that doesn't exist yet still sits where its nearest
+        // existing ancestor resolves; dropping it skipped the check for it.
+        .map(crate::config::ops::canonical_prefix)
         .collect();
     let mut denied = Vec::new();
     for store in stores {

@@ -1,11 +1,8 @@
 //! Socket.IO live-event bridge to the desktop shell.
 //!
 //! `spawn_web_channel_bridge` spawns one forwarding task per source. Domain
-//! broadcast channels: web-chat events (`openhuman::web_chat`), dictation hotkeys
-//! and transcription results (`openhuman::voice::dictation_listener`), overlay
-//! attention bubbles (`openhuman::desktop::overlay::subscribe_attention_events`,
-//! see `desktop/overlay/README.md`), core notifications
-//! (`openhuman::desktop::notifications`), and shell companion state
+//! broadcast channels: web-chat events (`openhuman::web_chat`), core
+//! notifications (`openhuman::desktop::notifications`), and shell companion state
 //! (`COMPANION_STATE_BUS`). `DomainEvent`s read off `openhuman::core::bus::BUS`:
 //! session expiry, MCP setup secret requests, memory sync and tree-build
 //! progress, channel listener health, and active-workspace changes. Web-chat
@@ -14,11 +11,9 @@
 //! connected client, most under both a colon- and an underscore-separated
 //! event name for frontend compatibility. `COMPANION_STATE_BUS` is a broadcast
 //! channel dedicated to shell-originated companion lifecycle events: the
-//! companion implementation itself lives in the Tauri shell, but the native
-//! macOS notch WKWebView has no Tauri IPC bridge and connects to the
-//! embedded core's Socket.IO endpoint directly, so this module keeps a
-//! transport-only seam for it rather than reintroducing a core-side
-//! companion domain.
+//! companion implementation itself lives in the Tauri shell; companion
+//! clients that use Socket.IO receive lifecycle state through this
+//! transport-only seam rather than a core-side companion domain.
 //!
 //! The socketioxide/axum transport bodies (the actual `SocketIo` server,
 //! connection handlers, and `spawn_web_channel_bridge`) are gated behind the
@@ -40,7 +35,7 @@ use socketioxide::SocketIo;
 use crate::core_host::web_chat::{GuardrailPayload, WebChannelEvent};
 
 /// Shell-originated companion lifecycle events that still need to reach
-/// Socket.IO-only surfaces such as the native macOS notch WKWebView.
+/// Companion clients that receive lifecycle state through Socket.IO.
 static COMPANION_STATE_BUS: once_cell::sync::Lazy<tokio::sync::broadcast::Sender<Value>> =
     once_cell::sync::Lazy::new(|| {
         let (tx, _rx) = tokio::sync::broadcast::channel(64);
@@ -49,10 +44,9 @@ static COMPANION_STATE_BUS: once_cell::sync::Lazy<tokio::sync::broadcast::Sender
 
 /// Publish a shell-side companion state payload for Socket.IO clients.
 ///
-/// The companion implementation lives in the Tauri shell, but the notch
-/// WKWebView has no Tauri IPC bridge and connects directly to the embedded
-/// core's Socket.IO endpoint. Keeping this transport-only seam here avoids
-/// reintroducing the removed core companion domain.
+/// The companion implementation lives in the Tauri shell. Keeping this
+/// transport-only seam here avoids reintroducing the removed core companion
+/// domain.
 pub fn publish_companion_state_changed(payload: Value) -> usize {
     COMPANION_STATE_BUS.send(payload).unwrap_or_default()
 }
@@ -70,6 +64,23 @@ fn subscribe_companion_state_changed() -> tokio::sync::broadcast::Receiver<Value
 /// events (read-only) but cannot trigger executable work.
 #[derive(Clone, Copy, Debug)]
 struct AuthedConnection;
+
+/// Tenant captured from the server-side context when the socket connects.
+/// The per-process bearer authenticates the connection but does not encode a
+/// SaaS profile, so never accept tenant selection from a later event payload.
+#[derive(Clone, Debug)]
+struct SocketTenant(crate::core_host::agent::plan_review::SocketReviewScope);
+
+/// Bind replay tenancy from the HTTP request extensions retained by
+/// Socket.IO. Its async connect callback is spawned independently of the
+/// Axum request task, so task-local ambient context is not a reliable carrier.
+fn socket_tenant_from_request_extensions(
+    extensions: &axum::http::Extensions,
+) -> Option<SocketTenant> {
+    let dispatch = extensions.get::<crate::core_host::core::runtime::DispatchCtx>()?;
+    let scope = crate::core_host::agent::plan_review::socket_scope_for_dispatch(dispatch)?;
+    Some(SocketTenant(scope))
+}
 
 /// Connection-time payload the client passes via Socket.IO's `auth` field.
 ///
@@ -222,6 +233,7 @@ struct ChatCancelPayload {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ThreadSubscribePayload {
     thread_id: String,
 }
@@ -285,6 +297,14 @@ pub fn attach_socketio() -> (socketioxide::layer::SocketIoLayer, SocketIo) {
                 return;
             }
             socket.extensions.insert(AuthedConnection);
+            let Some(tenant) = socket_tenant_from_request_extensions(
+                &socket.req_parts().extensions,
+            ) else {
+                log::warn!("[socketio] rejecting socket without a tenant scope in SaaS mode");
+                let _ = socket.clone().disconnect();
+                return;
+            };
+            socket.extensions.insert(tenant);
 
             log::info!("[socketio] client connected id={client_id} (authenticated)");
             // Join a room named after the client ID for targeted event delivery.
@@ -559,10 +579,8 @@ pub fn attach_socketio() -> (socketioxide::layer::SocketIoLayer, SocketIo) {
 ///
 /// This function sets up event bridges:
 /// 1. **Web Channel Bridge**: Forwards chat-related events (messages, tool calls) to specific clients.
-/// 2. **Dictation Bridge**: Forwards hotkey events to all clients.
 /// 3. **Overlay Bridge**: Forwards attention bubble events to all clients.
 /// 4. **Core Notification Bridge**: Forwards core notification events to all clients.
-/// 5. **Transcription Bridge**: Forwards real-time speech-to-text results to all clients.
 pub fn spawn_web_channel_bridge(io: SocketIo) {
     // 1. Web channel events → per-client rooms.
     let io_web = io.clone();
@@ -583,44 +601,15 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
         log::debug!("[socketio] web_channel bridge stopped");
     });
 
-    let io_overlay = io.clone();
     let io_notify = io.clone();
-    let io_transcription = io.clone();
     let io_auth = io.clone();
     let io_memory_sync = io.clone();
     let io_channel_status = io.clone();
     let io_companion = io.clone();
     let io_workspace = io.clone();
 
-    // 2. Dictation hotkey events → broadcast to all connected clients.
-    tokio::spawn(async move {
-        let mut rx = crate::core_host::voice::dictation_listener::subscribe_dictation_events();
-        loop {
-            let event = match rx.recv().await {
-                Ok(event) => event,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    log::warn!("[socketio] dropped {skipped} events due to lag");
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            };
-
-            if let Ok(payload) = serde_json::to_value(&event) {
-                log::debug!(
-                    "[socketio] broadcast dictation:{} to all clients",
-                    event.event_type
-                );
-                // Support both colon and underscore versions for compatibility with different frontends.
-                let _ = io.emit("dictation:toggle", &payload);
-                let _ = io.emit("dictation_toggle", &payload);
-            }
-        }
-        log::debug!("[socketio] dictation bridge stopped");
-    });
-
-    // Shell companion state → broadcast to all clients. The main renderer also
-    // receives a Tauri event directly; this path preserves the Socket.IO-only
-    // native notch surface.
+    // Shell companion state → broadcast to Socket.IO clients. The main
+    // renderer also receives a Tauri event directly.
     tokio::spawn(async move {
         let mut rx = subscribe_companion_state_changed();
         loop {
@@ -642,35 +631,10 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
         log::debug!("[socketio] companion state bridge stopped");
     });
 
-    // 3. Overlay attention events → broadcast to all clients.
-    tokio::spawn(async move {
-        let mut rx = crate::core_host::desktop::overlay::subscribe_attention_events();
-        loop {
-            let event = match rx.recv().await {
-                Ok(event) => event,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    log::warn!("[socketio] dropped {skipped} events due to lag");
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            };
-
-            if let Ok(payload) = serde_json::to_value(&event) {
-                log::debug!(
-                    "[socketio] broadcast overlay:attention source={:?}",
-                    event.source
-                );
-                let _ = io_overlay.emit("overlay:attention", &payload);
-                let _ = io_overlay.emit("overlay_attention", &payload);
-            }
-        }
-        log::debug!("[socketio] overlay attention bridge stopped");
-    });
-
-    // 4. Core notification events → broadcast to all connected clients so
+    // 3. Core notification events → broadcast to all connected clients so
     //    the in-app notification center picks them up regardless of which
-    //    chat session is active. Pattern mirrors the overlay attention
-    //    bridge above — fire-and-forget, no per-client routing.
+    //    chat session is active. This is a fire-and-forget broadcast with no
+    //    per-client routing.
     tokio::spawn(async move {
         let mut rx = crate::core_host::desktop::notifications::subscribe_core_notifications();
         loop {
@@ -696,7 +660,7 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
         log::debug!("[socketio] core_notification bridge stopped");
     });
 
-    // 6. SessionExpired events → broadcast to all clients so the UI can
+    // 5. SessionExpired events → broadcast to all clients so the UI can
     //    proactively tear down user-scoped state and route to onboarding
     //    instead of waiting for the next poll to discover the JWT is gone.
     //    Subscribes to the global event bus and filters for
@@ -825,33 +789,7 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
         log::debug!("[socketio] workspace_changed bridge stopped");
     });
 
-    // 5. Transcription results → broadcast to all connected clients.
-    tokio::spawn(async move {
-        let mut rx = crate::core_host::voice::dictation_listener::subscribe_transcription_results();
-        loop {
-            let text = match rx.recv().await {
-                Ok(text) => text,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    log::warn!(
-                        "[socketio] dropped {} transcription events due to lag",
-                        skipped
-                    );
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-            };
-
-            log::debug!(
-                "[socketio] broadcast dictation:transcription ({} chars) to all clients",
-                text.len()
-            );
-            let payload = serde_json::json!({ "text": text });
-            let _ = io_transcription.emit("dictation:transcription", &payload);
-        }
-        log::debug!("[socketio] transcription bridge stopped");
-    });
-
-    // 8. Memory sync stage + tree-build progress → broadcast to all clients
+    // 6. Memory sync stage + tree-build progress → broadcast to all clients
     //    so the UI can show real-time progress bars and refresh the graph.
     tokio::spawn(async move {
         let bus = {
@@ -1008,7 +946,7 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
         log::debug!("[socketio] memory_sync bridge stopped");
     });
 
-    // 10. Channel listener health → broadcast `channel:connection-updated` to
+    // 8. Channel listener health → broadcast `channel:connection-updated` to
     //     all clients so the Messaging tab reflects the *live* connection state
     //     instead of a stale, credential-presence-only "Connected" (issue
     //     #3712). The supervised listener publishes `ChannelConnected` when it
@@ -1273,11 +1211,11 @@ fn replay_parked_approval(socket: &SocketRef, thread_id: &str) {
 /// plan review is a live, in-memory park (no SQLite row), but it reaches the
 /// UI the same fire-and-forget way, so the same reconciliation applies.
 fn replay_parked_plan_review(socket: &SocketRef, thread_id: &str) {
-    let Ok(tenant) = crate::core_host::core::runtime::DispatchCtx::ambient().tenant() else {
+    let Some(tenant) = socket.extensions.get::<SocketTenant>() else {
         return;
     };
-    let Some(row) = crate::core_host::agent::plan_review::gate::global()
-        .parked_review_for_thread(&tenant, thread_id)
+    let Some(row) =
+        crate::core_host::agent::plan_review::parked_review_for_socket(&tenant.0, thread_id)
     else {
         return;
     };
@@ -1289,7 +1227,7 @@ fn replay_parked_plan_review(socket: &SocketRef, thread_id: &str) {
         thread_id,
         &client_id,
         row.tool_call_id.as_deref(),
-        row.expires_at.as_deref(),
+        Some(row.expires_at.as_str()),
     );
     event.ts = Some(crate::core_host::web_chat::unix_epoch_ms());
     let Ok(payload) = serde_json::to_value(&event) else {

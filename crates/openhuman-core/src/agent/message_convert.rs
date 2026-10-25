@@ -71,7 +71,23 @@ fn dialect_message_to_row(message: DialectMessage) -> TranscriptMessage {
 
 /// Lift typed rows through the owner contract, retaining the product legacy-marker adapter.
 pub(crate) fn chat_message_to_message(msg: &TranscriptMessage) -> Message {
-    let mut message = tinyagents_runtime::transcript::transcript_to_message(msg);
+    // A release wrote legacy assistant envelopes into `content` while also
+    // persisting their typed `tool_calls` field. `normalized()` intentionally
+    // leaves typed rows alone, so lift just the duplicated envelope body for
+    // replay while preserving the already typed calls and durable source row.
+    let replay_row = if msg.role == "assistant" && !msg.tool_calls.is_empty() {
+        let lifted = TranscriptMessage::from_legacy("assistant", msg.content.clone());
+        if !lifted.tool_calls.is_empty() {
+            let mut row = msg.clone();
+            row.content = lifted.content;
+            row
+        } else {
+            msg.clone()
+        }
+    } else {
+        msg.clone()
+    };
+    let mut message = tinyagents_runtime::transcript::transcript_to_message(&replay_row);
     if msg.parts.is_none() {
         if let Message::User(user) = &mut message {
             user.content = user_content_blocks(msg.content.clone());

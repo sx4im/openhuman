@@ -189,6 +189,36 @@ async fn media_tools_deliver_images_and_videos_through_the_backend_proxy() {
     let files_dir = tmp.path().join("Files");
     config.files_dir_override = Some(files_dir.clone());
 
+    // The source-backed product catalog is assembled after TinyHumans installs
+    // its media registration. Keep these hosted tools in the core catalog as
+    // well as exercising their generators below.
+    let security = Arc::new(openhuman_core::security::SecurityPolicy::from_config(
+        &config.autonomy,
+        &config.workspace_dir,
+        &config.action_dir,
+    ));
+    let registered = openhuman_core::tools::ops::all_tools(
+        Arc::new(config.clone()),
+        &security,
+        openhuman_core::security::AuditLogger::disabled(),
+        &config.browser,
+        &config.http_request,
+        &action_dir,
+        &config,
+    );
+    for expected in [
+        "media_generate_image",
+        "media_generate_video",
+        "media_list_models",
+    ] {
+        assert!(
+            registered
+                .iter()
+                .any(|candidate| candidate.name() == expected),
+            "the host-registered media source must expose `{expected}`"
+        );
+    }
+
     let generators = managed_generators(&config).expect("backend transport is installed");
     let tools = media_tools_from(
         generators,

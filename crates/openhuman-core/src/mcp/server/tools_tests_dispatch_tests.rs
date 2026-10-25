@@ -1,5 +1,38 @@
 use super::*;
 
+/// Points the ambient workspace at a SQLite test backend: validating tool
+/// arguments calls the tinymcp module, which reaches the host's installed
+/// storage, and the in-memory workspace default cannot serve it.
+struct AmbientStorage {
+    _fixture: crate::storage::test_support::SqliteBackend,
+    _guard: crate::storage::test_support::InstalledBackendGuard,
+}
+
+impl AmbientStorage {
+    fn install() -> Self {
+        let fixture = crate::storage::test_support::sqlite_backend().expect("SQLite test backend");
+        let guard = crate::storage::test_support::install_for_test(
+            &fixture.url,
+            std::sync::Arc::clone(&fixture.backend),
+        );
+        unsafe {
+            std::env::set_var(crate::storage::STORAGE_URL_VAR, &fixture.url);
+        }
+        Self {
+            _fixture: fixture,
+            _guard: guard,
+        }
+    }
+}
+
+impl Drop for AmbientStorage {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var(crate::storage::STORAGE_URL_VAR);
+        }
+    }
+}
+
 #[tokio::test]
 async fn call_tool_records_write_argument_rejection() {
     let _env_lock = crate::config::TEST_ENV_LOCK.lock().await;
@@ -7,6 +40,7 @@ async fn call_tool_records_write_argument_rejection() {
     unsafe {
         std::env::set_var("OPENHUMAN_WORKSPACE", tmp.path());
     }
+    let _storage = AmbientStorage::install();
     let config = config_rpc::load_config_with_timeout()
         .await
         .expect("config");
@@ -81,6 +115,7 @@ async fn call_tool_validates_memory_arguments_before_dispatch() {
     unsafe {
         std::env::set_var("OPENHUMAN_WORKSPACE", tmp.path());
     }
+    let _storage = AmbientStorage::install();
     let err = call_tool(
         &crate::core::runtime::DispatchCtx::ambient(),
         "memory.forget",
@@ -123,6 +158,13 @@ async fn call_tool_judges_the_policy_of_the_explicit_context_across_scopes() {
     let mut allowing = crate::config::Config::default();
     allowing.workspace_dir = tmp_allow.path().to_path_buf();
     allowing.action_dir = tmp_allow.path().to_path_buf();
+    // Validating tool arguments calls the tinymcp module, which reaches the
+    // host's installed storage.
+    let storage = crate::storage::test_support::sqlite_backend().expect("SQLite test backend");
+    let _storage_guard =
+        crate::storage::test_support::install_for_test(&storage.url, Arc::clone(&storage.backend));
+    denying.storage.url = Some(storage.url.clone());
+    allowing.storage.url = Some(storage.url.clone());
     let deny_core = CoreContext::for_test_with_config(DomainSet::full(), denying);
     let allow_core = CoreContext::for_test_with_config(DomainSet::full(), allowing);
 

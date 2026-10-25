@@ -122,10 +122,8 @@ impl ProfileCapabilities {
                     | crate::core::all::DomainGroup::Flows
                     | crate::core::all::DomainGroup::Mcp
             )
-            && !matches!(
-                name,
-                "http_request" | "spawn_agent" | "spawn_async_subagent" | "use_skill"
-            )
+            && !matches!(name, "http_request" | "use_skill")
+            && !super::provider_settings::is_profile_spawn_tool(name)
             && !name.starts_with("delegate_")
             && !name.starts_with("mcp_")
             && crate::tools::toolpacks::pack_for_tool(name)
@@ -184,7 +182,6 @@ impl ProfileCapabilities {
                         &config.browser,
                         &config.http_request,
                         &config.action_dir,
-                        &config.agents,
                         config,
                     )
                 });
@@ -306,3 +303,7 @@ impl ToolHook<OpenHumanRunContext> for ProfilePermission {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "capabilities_tests.rs"]
+mod tests;

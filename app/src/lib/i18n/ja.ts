@@ -531,6 +531,8 @@ const messages: TranslationMap = {
   'desktop.pendingUnavailable':
     '保留中のデスクトップ承認を読み込めませんでした。更新して再試行してください。',
   'desktop.unsupported': 'このランタイムではデスクトップ制御は利用できません。',
+  'desktop.unsupportedWindows':
+    'Windows ではデスクトップ制御はまだ利用できません。ブラウザ制御は Windows でも利用できます。',
   'desktop.localOnly': 'この設定はこのコンピュータにのみ適用されます。',
   'desktop.permissions': 'システム権限',
   'desktop.openSettings': '設定を開く',
@@ -711,6 +713,15 @@ const messages: TranslationMap = {
 
   // Developer Options / Developer & Diagnostics
   'devOptions.titleDiagnostics': '開発者向けと診断',
+  'devOptions.doctor.run': '診断を実行',
+  'devOptions.doctor.runLive': 'ライブチェックを実行',
+  'devOptions.doctor.liveWarning':
+    'ライブチェックではモデルまたは埋め込みの呼び出しにトークンを消費する場合があります。続行しますか？',
+  'devOptions.doctor.severity.pass': '合格',
+  'devOptions.doctor.severity.info': '情報',
+  'devOptions.doctor.severity.warn': '警告',
+  'devOptions.doctor.severity.error': 'エラー',
+  'devOptions.doctor.severity.skipped': 'スキップ',
   'devOptions.diagnostics': '診断',
   'devOptions.toolPolicyDiagnosticsDesc':
     'ツールインベントリ、ポリシー状態、MCP 許可リスト、および最近のブロック',
@@ -718,7 +729,6 @@ const messages: TranslationMap = {
   'devOptions.toolPolicyDiagnostics.unavailable': '診断情報は利用できません',
 
   // Voice / Dictation
-  'voice.pushToTalk': 'プッシュトゥトーク',
 
   // Misc
   'misc.somethingWentWrong': '問題が発生しました',
@@ -1326,13 +1336,9 @@ const messages: TranslationMap = {
   'team.deleting': '削除中...',
 
   // Voice
-  'voice.tapToToggle': 'タップで切り替え',
   'voice.settingsSaved': '音声設定を保存しました。',
   'voice.failedToLoadSettings': '音声設定の読み込みに失敗しました',
   'voice.failedToSaveSettings': '音声設定の保存に失敗しました',
-  'voice.debug.alwaysOn': '常時リスニング',
-  'voice.debug.alwaysOnDesc':
-    'マイクを常時開き、ホットキーなしで発話をエージェントに自動送信します。画面ロック中は一時停止します。',
   'voice.providers.saved': '音声プロバイダーを保存しました。',
   'voice.providers.failedToSave': '音声プロバイダーの保存に失敗しました',
   'voice.mode.start': '音声チャットを開始',
@@ -1340,7 +1346,7 @@ const messages: TranslationMap = {
   'voice.mode.connecting': '接続中…',
   'voice.mode.listening': '聞き取り中',
   'voice.mode.speaking': '発話中',
-  'voice.pageDesc': '音声エンジン、ルーティング、プッシュトゥトークの設定。',
+  'voice.pageDesc': '音声エンジンとプロバイダーのルーティング。',
   'voice.providers.title': '音声プロバイダー',
   'voice.providers.cardDesc': '使用するエンジンを有効にします。キーはこのデバイスに保存されます。',
   'voice.providers.cap.stt': '音声からテキストへ',
@@ -1416,29 +1422,6 @@ const messages: TranslationMap = {
   // External voice providers
 
   // Push-to-talk (PTT)
-  'pttSettings.title': 'プッシュトゥトーク',
-  'pttSettings.clearShortcut': 'クリア',
-  'pttSettings.description':
-    '他のアプリを使用している間にOpenHumanと話すには、キーを押しながら話します。キーを離すと送信され、「エージェントの返信を読み上げる」がオンになっている場合、OpenHumanが返信を読み上げます。',
-  'pttSettings.shortcutLabel': 'ホットキー',
-  'pttSettings.shortcutPlaceholder': 'キーを押してください（例：F13）',
-  'pttSettings.shortcutUnsetHint':
-    'プッシュトゥトークは無効です：有効にするにはホットキーを選択してください。',
-  'pttSettings.speakRepliesLabel': 'エージェントの返信を読み上げる',
-  'pttSettings.showOverlayLabel': '押している間オーバーレイを表示',
-  'pttSettings.errorConflictsWithDictation':
-    'このショートカットはすでに音声入力に使用されています。別のキーを選択してください。',
-  'pttSettings.errorModifierOnly':
-    '通常のキー（例: F13）を選択してください。修飾キーのみのショートカットはプッシュトゥトークでは機能しません。',
-  'pttSettings.errorEmpty': '割り当てるキーを選択してください。',
-  'pttSettings.errorAccessibility':
-    'このショートカットにはmacOSのアクセシビリティ権限が必要です。システム設定 → プライバシーとセキュリティ → アクセシビリティを開き、OpenHumanを有効にしてください。',
-  'pttSettings.errorShortcutInUse':
-    '別のアプリがこのショートカットを既に使用しています。別のものを選択してください。',
-  'pttSettings.errorUnsupportedWayland':
-    'Waylandセッションでは、OpenHumanのグローバルショートカットはまだサポートされていません。X11セッションに切り替えるか、アプリ内の音声入力トグルを使用してください。',
-  'pttOverlay.listening': '聞き取り中…',
-  'pttOverlay.idle': '待機中',
 
   // Autocomplete
 
@@ -1509,6 +1492,8 @@ const messages: TranslationMap = {
   'chat.failedToLoadMessages': 'メッセージの読み込みに失敗しました',
   'chat.thinkingDots': '思考中...',
   'chat.status.thinkingElapsed': '思考中 · {elapsed}',
+  'chat.status.compacting': 'これまでの会話を要約中…',
+  'chat.status.compactingElapsed': 'これまでの会話を要約中 · {elapsed}',
   'chat.status.waitingApproval': '承認を待っています',
   'chat.status.waitingReview': 'レビューを待っています',
   'chat.status.waitingAnswer': '回答を待っています',
@@ -2124,11 +2109,6 @@ const messages: TranslationMap = {
   'chat.todos.ofTotal': '{done} / {total} 件',
   'chat.todos.receipt': '進捗を更新しました · {done}/{total}',
   'chat.subagents.ranFor': '{duration}間実行',
-  'chat.subagents.ofTotal': '{complete} / {total} 件',
-  'chat.subagents.runningCount': '{count}件実行中',
-  'chat.subagents.failedCount': '{count}件失敗',
-  'chat.subagents.incompleteCount': '{count}件未完了',
-  'chat.subagents.settled': '子の実行が完了しました。結果を処理しています。',
   'conversations.planReview.title': 'プランの確認',
   'conversations.planReview.subtitle':
     '承認して実行、却下して破棄、またはフィードバックを送信して修正します。',
@@ -2165,7 +2145,6 @@ const messages: TranslationMap = {
   'conversations.mcpUi.confirmAllow': '許可',
   'conversations.mcpUi.confirmDeny': '拒否',
   'conversations.tools.delegatedTo': '{agent} に委任',
-  'conversations.tools.parallelAgentsAggregating': '結果を集約中',
   'conversations.tools.openInBrowser': 'ブラウザで開く',
   'conversations.tools.status.running': '実行中',
   'conversations.tools.status.done': '完了',
@@ -2264,25 +2243,6 @@ const messages: TranslationMap = {
     '再試行に失敗しました。最新のアプリビルドをダウンロードして再試行してください。',
   'daemon.serviceBlockingGate.retrying': '再試行中...',
   'daemon.serviceBlockingGate.title': 'OpenHuman コアが利用できません',
-  // Worktree manager (#3376): isolated worker git worktrees
-  'worktree.label': 'ワークツリー',
-  'worktree.dirty': '未コミットの変更',
-  'worktree.clean': 'クリーン',
-  'worktree.removing': '削除中…',
-  'worktree.removeFailed': 'ワークツリーの削除に失敗しました',
-  'worktree.diffFailed': '差分の読み込みに失敗しました',
-  'worktree.diffLoading': '差分を読み込み中…',
-  'worktree.diffEmpty': 'HEAD との変更はありません。',
-  'worktree.dirtyConfirm':
-    'このワークツリーには未コミットの変更があります。削除するとその作業は破棄されますが、ワーカーブランチは保持されます。',
-  'worktree.action.open': 'フォルダを開く',
-  'worktree.action.diff': '差分',
-  'worktree.action.hideDiff': '差分を非表示',
-  'worktree.action.remove': '削除',
-  'worktree.action.removeAnyway': '破棄して削除',
-  'worktree.action.preserve': '保持',
-  // Orchestration tab (#3375): multi-agent workflow runs.
-  'orchestration.detail.stop': '停止',
   'notifications.card.dismiss': '通知を閉じる',
   'notifications.card.importanceTitle': '重要度: {pct}%',
   'notifications.center.empty': '通知はまだありません',
@@ -2792,10 +2752,6 @@ const messages: TranslationMap = {
   'oauth.button.loopbackTimeout':
     'サインインがタイムアウトしました：ブラウザでのOAuthリダイレクトが完了しませんでした。もう一度お試しください。',
   'openhuman.team_list_teams': 'チーム一覧',
-  'overlay.ariaAttention': '注意メッセージ',
-  'overlay.ariaOrb': 'OpenHumanオーバーレイ',
-  'overlay.ariaVoiceActive': '音声入力がアクティブです',
-  'overlay.orbTitle': 'ドラッグで移動 · ダブルクリックで位置をリセット',
   'pages.settings.account.migration': 'インポート',
   'pages.settings.account.migrationDesc':
     '他のローカルアシスタントからメモリーとノートを引き継ぎます',
@@ -3825,27 +3781,6 @@ const messages: TranslationMap = {
   'skills.install.urlLabel': 'スキルURL',
   'skills.install.urlPlaceholder': 'https://raw.githubusercontent.com/owner/repo/main/SKILL.md',
   'skills.search.placeholder': 'スキルを検索…',
-  'skills.setup.voice.activation': 'アクティベーション',
-  'skills.setup.voice.activeDescPrefix': 'Fn',
-  'skills.setup.voice.activeDescSuffix': 'Fn',
-  'skills.setup.voice.activeTitle': 'ボイスインテリジェンスが有効です',
-  'skills.setup.voice.customizeSettings': '設定をカスタマイズ',
-  'skills.setup.voice.downloadSttBtn': '音声設定を開く',
-  'skills.setup.voice.enableDesc': 'マイクを使用してハンズフリーでテキストを入力します。',
-  'skills.setup.voice.hotkey': 'ホットキー',
-  'skills.setup.voice.startBtn': '起動中...',
-  'skills.setup.voice.startError': '音声サーバーの起動に失敗しました',
-  'skills.setup.voice.starting': '起動中...',
-  'skills.setup.voice.stepEnable': '音声サーバーを起動',
-  'skills.setup.voice.stepSetup': '音声認識の設定が必要です',
-  'skills.setup.voice.stepSuccess': '準備完了',
-  'skills.setup.voice.sttNotReady': '音声認識モデルの準備ができていません',
-  'skills.setup.voice.sttNotReadyDesc':
-    'Voice Intelligence は動作する音声認識エンジンが必要です。設定 › 音声 で選択してください。',
-  'skills.setup.voice.sttReady': '音声認識モデルの準備が完了しました',
-  'skills.setup.voice.sttReturnHint':
-    '音声設定で音声認識エンジンを構成し、ここに戻って音声を開始してください。',
-  'skills.setup.voice.title': '音声インテリジェンス',
   'skills.uninstall.description':
     'これにより、スキルディレクトリとそのすべてのバンドルリソースが完全に削除されます。エージェントは次のターンからこれを認識しなくなります。',
   'upsell.global.limitMessage':
@@ -4129,8 +4064,6 @@ const messages: TranslationMap = {
     'OPENHUMAN_APPROVAL_GATE=0 のオーバーライドが検出されましたが無視されました: デスクトップアプリでは承認ゲートが常に有効に保たれます。',
 
   // Run queue
-  'notch.ready': '準備完了',
-  'notch.listening': '聞き取り中…',
 
   // Code block chrome
   'codeBlock.copy': 'コピー',
@@ -4771,6 +4704,10 @@ const messages: TranslationMap = {
     '現在、メモリーに接続できません。保存済みの内容は失われていません。少し待ってから再試行してください。',
   'memory.outOfCredits.title': 'クレジット不足',
   'memory.outOfCredits.action': 'チャージする',
+  'memory.error.planRequired':
+    '現在のプランにはメモリが含まれていないため、OpenHuman は学んだことを保存したり参照したりできません。メモリを有効にするにはプランをアップグレードするか、設定で別のメモリオプションに切り替えてください。',
+  'memory.planRequired.title': 'メモリはご利用のプランに含まれていません',
+  'memory.planRequired.action': 'プランを見る',
   'onboarding.custom.search.skipForNow': '今はスキップ',
   'onboarding.custom.search.ready': 'Web検索の準備ができました。',
   'onboarding.custom.search.notReady':
@@ -5261,11 +5198,10 @@ const messages: TranslationMap = {
   'conversations.tools.reviewLearnings.active': '学習内容をレビュー中',
   'conversations.tools.reviewLearnings.done': '学習内容をレビューしました',
   'conversations.tools.updateLearnings.active': '学習内容を更新中',
+  'orchestration.detail.stop': '停止',
   'conversations.tools.updateLearnings.done': '学習内容を更新しました',
   'conversations.tools.delegateTask.active': 'タスクを委任中',
   'conversations.tools.delegateTask.done': 'タスクを委任しました',
-  'conversations.tools.runAgentsInParallel.active': 'エージェントを並列実行中',
-  'conversations.tools.runAgentsInParallel.done': 'エージェントを並列実行しました',
   'conversations.tools.messageAgent.active': 'エージェントにメッセージ送信中',
   'conversations.tools.messageAgent.done': 'エージェントにメッセージを送信しました',
   'conversations.tools.waitForAgent.active': 'エージェントを待機中',
@@ -5302,6 +5238,8 @@ const messages: TranslationMap = {
   'conversations.tools.checkGoal.done': '目標を確認しました',
   'conversations.tools.completeGoal.active': '目標を達成中',
   'conversations.tools.completeGoal.done': '目標を達成しました',
+  'conversations.tools.resumeGoal.active': '目標を再開中',
+  'conversations.tools.resumeGoal.done': '目標を再開しました',
   'conversations.tools.scheduleTask.active': 'タスクをスケジュール中',
   'conversations.tools.scheduleTask.done': 'タスクをスケジュールしました',
   'conversations.tools.checkSchedules.active': 'スケジュールを確認中',

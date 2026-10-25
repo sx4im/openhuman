@@ -15,6 +15,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SidebarSlotOutlet, SidebarSlotProvider } from '../../components/layout/shell/SidebarSlot';
+import { draftStorageKey } from '../../features/conversations/hooks/useThreadDraft';
 import { threadApi } from '../../services/api/threadApi';
 import { chatCancel, chatRemoveQueueItem, chatSend } from '../../services/chatService';
 import { CoreRpcError } from '../../services/coreRpcClient';
@@ -34,8 +35,9 @@ import runModeReducer from '../../store/runModeSlice';
 import socketReducer from '../../store/socketSlice';
 import themeReducer from '../../store/themeSlice';
 import threadGoalReducer from '../../store/threadGoalSlice';
-import threadReducer from '../../store/threadSlice';
+import threadReducer, { setSelectedThread } from '../../store/threadSlice';
 import threadTodosReducer from '../../store/threadTodosSlice';
+import { userScopedStorage } from '../../store/userScopedStorage';
 import type { Thread, ThreadMessage } from '../../types/thread';
 
 // ── Hoisted mock state ─────────────────────────────────────────────────────
@@ -973,46 +975,6 @@ describe('Conversations — smoke render (#1123 welcome-lock removal)', () => {
       })
     );
     expect(vi.mocked(chatSend).mock.calls[0][0]).not.toHaveProperty('model');
-  });
-
-  it('auto-sends a dictation transcript (autoSend) straight to chat without the composer', async () => {
-    const { thread } = await renderSelectedConversation();
-
-    // Hotkey dictation dispatches this event with autoSend:true (see
-    // useDictationHotkey). Conversations must route it directly to chatSend,
-    // bypassing the text composer.
-    await act(async () => {
-      window.dispatchEvent(
-        new CustomEvent('dictation://insert-text', {
-          detail: { text: '  play highway to hell  ', autoSend: true },
-        })
-      );
-    });
-
-    await waitFor(() => {
-      expect(chatSend).toHaveBeenCalledWith(
-        expect.objectContaining({
-          threadId: thread.id,
-          message: 'play highway to hell',
-          locale: 'en',
-          reasoningEffort: 'default',
-        })
-      );
-      expect(vi.mocked(chatSend).mock.calls[0][0]).not.toHaveProperty('model');
-    });
-  });
-
-  it('ignores a blank autoSend dictation event (no send)', async () => {
-    await renderSelectedConversation();
-    vi.mocked(chatSend).mockClear();
-
-    await act(async () => {
-      window.dispatchEvent(
-        new CustomEvent('dictation://insert-text', { detail: { text: '   ', autoSend: true } })
-      );
-    });
-
-    expect(chatSend).not.toHaveBeenCalled();
   });
 
   it('blocks duplicate sends while the first send is still pending', async () => {
@@ -2285,6 +2247,55 @@ describe('Conversations — smoke render (#1123 welcome-lock removal)', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Send message' })).not.toBeDisabled();
     });
+  });
+
+  it('restores the draft when saving the prompt locally fails', async () => {
+    vi.mocked(threadApi.appendMessage).mockRejectedValueOnce(new Error('disk full'));
+    const { textarea } = await renderSelectedConversation();
+    await act(async () => {
+      setComposerText(textarea, 'do not lose me');
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    });
+    await waitFor(() => expect(threadApi.appendMessage).toHaveBeenCalled());
+    expect(chatSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(textarea).toHaveTextContent('do not lose me'));
+  });
+
+  it('gives a failed draft back to its own thread after the user switched away', async () => {
+    const saveDraft = vi.spyOn(userScopedStorage, 'setItem').mockResolvedValue(undefined);
+    let rejectPersist!: (reason: unknown) => void;
+    vi.mocked(threadApi.appendMessage).mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectPersist = reject;
+      })
+    );
+    const { store, textarea, thread } = await renderSelectedConversation();
+    await act(async () => {
+      setComposerText(textarea, 'draft for the first thread');
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    });
+    await waitFor(() => expect(threadApi.appendMessage).toHaveBeenCalled());
+
+    await act(async () => {
+      store!.dispatch(setSelectedThread('another-thread'));
+    });
+    await act(async () => {
+      rejectPersist(new Error('disk full'));
+    });
+
+    const composer = await screen.findByRole('textbox', { name: 'Message input' });
+    expect(composer).not.toHaveTextContent('draft for the first thread');
+    await waitFor(() =>
+      expect(saveDraft).toHaveBeenCalledWith(
+        draftStorageKey(thread.id),
+        'draft for the first thread'
+      )
+    );
+    saveDraft.mockRestore();
   });
 
   it('sends with Enter when the composer is not composing text', async () => {

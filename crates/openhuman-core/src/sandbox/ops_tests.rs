@@ -126,7 +126,7 @@ async fn run_unsandboxed(
 ) -> anyhow::Result<SandboxExecResult> {
     let state = tempfile::tempdir()?;
     let policy = unsandboxed_policy(workspace, state.path());
-    execute_unsandboxed(
+    let outcome = execute_unsandboxed(
         &crate::core::runtime::DispatchCtx::host_default(),
         &crate::config::Config::default(),
         &policy,
@@ -135,8 +135,13 @@ async fn run_unsandboxed(
         env,
         timeout,
         None,
+        None,
     )
-    .await
+    .await?;
+    match outcome {
+        ShellRunOutcome::Finished(result) => Ok(result),
+        ShellRunOutcome::Running(_) => anyhow::bail!("a run without a yield point kept running"),
+    }
 }
 
 // The `/tmp` path and Unix builtins (`false`) are Unix-only, so these

@@ -1,7 +1,12 @@
 use super::*;
 
 fn default_policy() -> SecurityPolicy {
-    SecurityPolicy::default()
+    // These tests exercise the autonomy gates. The shipped config leaves
+    // autonomy disabled, so enable it explicitly in the shared test fixture.
+    SecurityPolicy {
+        enabled: true,
+        ..SecurityPolicy::default()
+    }
 }
 
 fn readonly_policy() -> SecurityPolicy {
@@ -76,6 +81,9 @@ fn turn_workspace_policy() -> (tempfile::TempDir, PathBuf, SecurityPolicy) {
 mod action_dir_tests;
 #[path = "policy_allowlist_tests.rs"]
 mod allowlist_tests;
+#[cfg(feature = "modules")]
+#[path = "policy_classifier_parity_tests.rs"]
+mod classifier_parity_tests;
 #[path = "policy_config_and_action_tests.rs"]
 mod config_and_action_tests;
 #[path = "policy_injection_tests.rs"]

@@ -2,6 +2,7 @@
 //! routed execution.
 
 use super::docker;
+use super::shell_exec::{ComeBack, ShellRunOutcome};
 use super::types::{
     ElevatedOp, SandboxBackendHandle, SandboxBackendKind, SandboxExecRequest, SandboxExecResult,
     SandboxPolicy, SandboxStatus, ELEVATED_TOOLS,
@@ -321,6 +322,39 @@ pub(crate) async fn execute_in_sandbox_metered(
     timeout: Duration,
     meter: Option<super::shell_progress::ShellOutputMeter>,
 ) -> anyhow::Result<SandboxExecResult> {
+    let outcome = execute_in_sandbox_yielding(
+        ctx,
+        policy,
+        command,
+        working_dir,
+        extra_env,
+        timeout,
+        ComeBack::default(),
+        meter,
+    )
+    .await?;
+    match outcome {
+        ShellRunOutcome::Finished(result) => Ok(result),
+        ShellRunOutcome::Running(_) => {
+            anyhow::bail!("a sandboxed run without a yield point returned while running")
+        }
+    }
+}
+
+/// [`execute_in_sandbox_metered`] for a call that may come back first: on the
+/// native backends a command still running at `come_back.yield_after` is
+/// handed back as [`ShellRunOutcome::Running`]; Docker cannot leave a command
+/// running, so there `come_back.deadline_instead` bounds it.
+pub(crate) async fn execute_in_sandbox_yielding(
+    ctx: &DispatchCtx,
+    policy: &SandboxPolicy,
+    command: &str,
+    working_dir: &Path,
+    extra_env: HashMap<OsString, OsString>,
+    timeout: Duration,
+    come_back: ComeBack,
+    meter: Option<super::shell_progress::ShellOutputMeter>,
+) -> anyhow::Result<ShellRunOutcome> {
     // The saved backend is an operator's explicit isolation requirement. It
     // must be checked at the spawn boundary, including callers that resolved
     // their policy from an older or default RuntimeConfig.
@@ -377,6 +411,7 @@ pub(crate) async fn execute_in_sandbox_metered(
                 working_dir,
                 &extra_env,
                 timeout,
+                come_back.yield_after,
                 meter,
             )
             .await
@@ -399,11 +434,15 @@ pub(crate) async fn execute_in_sandbox_metered(
                 &extra_env,
                 timeout,
                 explicitly_requested,
+                come_back.yield_after,
                 meter,
             )
             .await
         }
         SandboxBackendKind::Docker => {
+            let timeout = come_back
+                .deadline_instead
+                .map_or(timeout, |deadline| timeout.min(deadline));
             crate::config::ensure_usable_cwd(&policy.workspace_root)?;
             let request = SandboxExecRequest {
                 command: command.to_string(),
@@ -417,7 +456,9 @@ pub(crate) async fn execute_in_sandbox_metered(
                     anyhow::anyhow!("Cannot read module configuration: {error}")
                 })?,
             };
-            docker::docker_exec(&config, policy, &request).await
+            docker::docker_exec(&config, policy, &request)
+                .await
+                .map(ShellRunOutcome::Finished)
         }
     }
 }
@@ -483,8 +524,9 @@ async fn execute_unsandboxed(
     working_dir: &Path,
     extra_env: &HashMap<OsString, OsString>,
     timeout: Duration,
+    yield_after: Option<Duration>,
     meter: Option<super::shell_progress::ShellOutputMeter>,
-) -> anyhow::Result<SandboxExecResult> {
+) -> anyhow::Result<ShellRunOutcome> {
     let mut env = std::collections::BTreeMap::new();
     for (name, value) in extra_env {
         let (Some(name), Some(value)) = (name.to_str(), value.to_str()) else {
@@ -494,18 +536,12 @@ async fn execute_unsandboxed(
     }
     std::fs::create_dir_all(&policy.state_dir)
         .map_err(|error| anyhow::anyhow!("Cannot prepare sandbox state directory: {error}"))?;
-    super::shell_exec::run_host(
-        ctx,
-        config,
-        command,
-        working_dir,
-        &policy.state_dir,
-        env,
-        timeout,
-        false,
-        meter,
-    )
-    .await
+    let mut run =
+        super::shell_exec::NativeShellRun::new(command, working_dir, &policy.state_dir, timeout);
+    run.meter = meter;
+    run.env = env;
+    run.yield_after = yield_after;
+    super::shell_exec::run_yielding(ctx, config, run).await
 }
 
 /// Check whether a tool operation is an elevated op that must run on the

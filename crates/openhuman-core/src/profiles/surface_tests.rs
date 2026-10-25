@@ -42,6 +42,20 @@ fn the_saas_planes_never_overlap() {
 }
 
 #[test]
+fn doctor_report_is_available_to_both_authorized_saas_scopes() {
+    let doctor = "openhuman.doctor_report";
+    assert!(visible_in(true, Scope::Operator, doctor, false));
+    assert!(visible_in(true, Scope::User, doctor, false));
+    assert!(!visible_in(true, Scope::None, doctor, false));
+    assert!(!visible_in(
+        true,
+        Scope::User,
+        "openhuman.config_get_config",
+        false
+    ));
+}
+
+#[test]
 fn chat_is_open_but_other_channel_methods_are_not() {
     assert!(visible_in(
         true,
@@ -135,6 +149,19 @@ fn delete_purge_and_the_channel_relay_are_open_to_users() {
             !visible_in(true, Scope::Operator, method, false),
             "{method} is not on the operator plane"
         );
+    }
+}
+
+/// A user reads their own threads' live agent state: the goal, the plan, and
+/// the whole run state (goal, plan and the agent's notes) in one call.
+#[test]
+fn the_live_agent_state_reads_are_open_to_users() {
+    for method in [
+        "openhuman.threads_goal_get",
+        "openhuman.threads_todos_get",
+        "openhuman.threads_state_get",
+    ] {
+        assert!(visible_in(true, Scope::User, method, false), "{method}");
     }
 }
 

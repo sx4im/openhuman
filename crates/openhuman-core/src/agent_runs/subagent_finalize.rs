@@ -2,8 +2,8 @@
 //!
 //! # Why this exists
 //!
-//! Every spawn path (`spawn_subagent`, `spawn_async_subagent`,
-//! `spawn_parallel_agents`, `continue_subagent`, `dispatch`) creates an
+//! Every spawn path (`spawn_subagent`, `spawn_subagent`,
+//! `continue_subagent`, `dispatch`) creates an
 //! `agent_runs` row at `status = "running"` and, on completion or user-input
 //! pause, fires **both**:
 //!   * `BUS.publish(DomainEvent::SubagentCompleted/Failed/AwaitingUser)` —
@@ -15,7 +15,7 @@
 //! [`progress_bridge`](crate::web_chat::progress_bridge),
 //! which consumes that progress channel. That works for synchronous subagents
 //! (they finish inside the turn, sink still alive) but **leaks** for detached
-//! `spawn_async_subagent` runs: they outlive the parent turn, so when they
+//! `spawn_subagent` runs: they outlive the parent turn, so when they
 //! finish the progress sink is already dropped and `let _ = tx.send(...)` fails
 //! silently. The ledger row stays `running` forever, and every thread reopen
 //! re-renders it as a perpetual agent timeline row.

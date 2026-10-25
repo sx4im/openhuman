@@ -97,7 +97,7 @@ async fn inherited_origin_preserves_a_non_cli_origin_verbatim() {
     }
 }
 
-/// Regression: a detached sub-agent (`spawn_async_subagent`, the
+/// Regression: a detached sub-agent (`spawn_subagent`, the
 /// orchestration spawn task) starts on a fresh task, and without explicit
 /// propagation its tools reach the approval gate as `Unknown` and every
 /// external-effect call is refused — the parent's label silently lost at

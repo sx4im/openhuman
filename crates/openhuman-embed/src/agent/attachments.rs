@@ -89,7 +89,6 @@ impl Agent {
                 &config.browser,
                 &config.http_request,
                 &config.action_dir,
-                &Default::default(),
                 config,
             )
             .iter()

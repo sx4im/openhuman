@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { toThreadMessageLike } from '../../providers/assistantUiMessages';
 import type { PersistedTurnState } from '../../types/turnState';
 import reducer, {
   beginInferenceTurn,
@@ -222,7 +223,7 @@ describe('chatRuntimeSlice', () => {
   });
 
   /**
-   * A detached `spawn_async_subagent` child outlives the turn that spawned it.
+   * A detached `spawn_subagent` child outlives the turn that spawned it.
    * Settling it on the parent's `completed` snapshot made the Background tasks
    * panel report "none running" — and the row read "Cancelled" — while the
    * sub-agent was still making tool calls. Its own `subagent_completed` event
@@ -1377,6 +1378,72 @@ describe('subagent event reducers (Phase 3)', () => {
       detail: 'go research', // carried from the collapsed spawn row's prompt
     });
     expect(rows[0].subagent).toMatchObject({ taskId: 'task-1', agentId: 'researcher' });
+  });
+
+  it('reattaches a resumed task to its newest parent spawn call', () => {
+    const rowId = 't1:subagent:task-1:researcher';
+    let state = reducer(
+      reducer(
+        undefined,
+        setToolTimelineForThread({
+          threadId: 't1',
+          entries: [
+            { id: 'spawn-original', name: 'spawn_subagent', round: 0, seq: 0, status: 'success' },
+            { id: 'spawn-resume', name: 'spawn_subagent', round: 0, seq: 1, status: 'running' },
+          ],
+        })
+      ),
+      subagentSpawned({
+        threadId: 't1',
+        requestId: 'request-1',
+        round: 0,
+        rowId,
+        taskId: 'task-1',
+        agentId: 'researcher',
+        spawnEventId: 'request-1:4',
+        parentCallId: 'spawn-original',
+      })
+    );
+    state = reducer(state, subagentAwaitingUser({ threadId: 't1', rowId, question: 'Continue?' }));
+
+    state = reducer(
+      state,
+      subagentSpawned({
+        threadId: 't1',
+        requestId: 'request-2',
+        round: 0,
+        rowId,
+        taskId: 'task-1',
+        agentId: 'researcher',
+        spawnEventId: 'request-2:2',
+        parentCallId: 'spawn-resume',
+      })
+    );
+
+    const activity = state.toolTimelineByThread.t1.find(entry => entry.id === rowId)!;
+    expect(activity).toMatchObject({ status: 'running' });
+    expect(activity.subagent).toMatchObject({ status: 'running', parentCallId: 'spawn-resume' });
+    expect(activity.subagent?.awaitingQuestion).toBeUndefined();
+    const rendered = toThreadMessageLike(
+      {
+        id: 'm1',
+        content: '',
+        extraMetadata: {},
+        sender: 'agent',
+        type: 'text',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      state.toolTimelineByThread.t1
+    );
+    expect(rendered.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool-call',
+          toolCallId: 'spawn-resume',
+          toolName: 'task',
+        }),
+      ])
+    );
   });
 
   it('subagentToolCallReceived appends and de-dupes on callId; result settles it', () => {

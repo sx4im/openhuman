@@ -233,7 +233,7 @@ fn path_within(path: &Path, dir: &Path) -> bool {
     canonical_prefix(path).starts_with(canonical_prefix(dir))
 }
 
-fn canonical_prefix(path: &Path) -> PathBuf {
+pub(crate) fn canonical_prefix(path: &Path) -> PathBuf {
     let mut rest = Vec::new();
     let mut cursor = path;
     loop {

@@ -2,10 +2,10 @@ use crate::config::Config;
 use crate::cron::job_builder::{create_agent_job, AgentJobInput};
 use crate::cron::origin::{current_job_origin, current_turn_may_skip_approval};
 use crate::security::SecurityPolicy;
-use crate::tools::schema_cache::static_schema;
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
+use tinyagents_harness_tools::static_schema;
 use tinytools::{PermissionLevel, Tool, ToolCallOptions, ToolExposure, ToolResult};
 use {
     crate::cron, tinyflows_bus::schedule::types::DeliveryConfig,
@@ -47,7 +47,9 @@ impl Tool for CronAddTool {
          automatically; do not set `delivery` or copy a reply target for that. Only set \
          `delivery` to override it (`proactive` for an in-app notification, `none` for silent). \
          A job created with no conversation defaults to `proactive`. In its scheduled run the \
-         agent's final reply is what gets delivered; `NO_REPLY` skips the delivery.\n\
+         agent's final reply is what gets delivered. Reminders and recurring messages always \
+         deliver. A conditional check must put its condition and \"otherwise reply NO_REPLY\" \
+         in its `prompt`; only such a job can skip a run.\n\
          Agent jobs must be scheduled at least 5 minutes apart; a tighter cron expression or \
          every_ms is rejected."
     }

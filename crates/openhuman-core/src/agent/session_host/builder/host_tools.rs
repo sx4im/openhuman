@@ -93,7 +93,7 @@ impl HostTurnTools {
     /// specifically, and a host that cannot override a tool it collides with
     /// has no way to correct one.
     ///
-    /// First and not last because [`dedup_visible_tool_specs`] keeps the first
+    /// First and not last because TinyAgents' `dedup_visible_tool_specs` keeps the first
     /// occurrence. Appending would advertise the config-derived spec while the
     /// host believed it had replaced it -- the model told about one tool and a
     /// different one answering, which is the version of this bug that is
@@ -102,7 +102,8 @@ impl HostTurnTools {
     /// Returns `None` for an empty belt, which is also a host that supplied no
     /// gate: there is nothing to admit.
     ///
-    /// [`dedup_visible_tool_specs`]: super::dedup_visible_tool_specs
+    /// Tool schema deduplication is owned by
+    /// `tinyagents_runtime::dedup_visible_tool_specs`.
     pub(super) fn merge_into(
         self,
         agent_id: &str,
@@ -440,6 +441,25 @@ impl OpenHumanSessionHost {
             false,
             None,
             None,
+        )
+    }
+
+    pub(crate) fn from_config_with_definition_and_turn_model_source(
+        ctx: &crate::core::runtime::DispatchCtx,
+        config: &Config,
+        definition: &crate::agent_registry::host_definition::AgentDefinition,
+        source: crate::agent::tinyagents::TurnModelSource,
+        model: String,
+    ) -> Result<Self> {
+        OpenHumanSessionHost::build_session_agent_inner_with_turn_model_source(
+            ctx,
+            config,
+            &definition.id,
+            Some(definition),
+            false,
+            None,
+            None,
+            Some((source, model)),
         )
     }
 }

@@ -227,6 +227,44 @@ fn the_factory_runs_once_per_session_build() {
     );
 }
 
+#[test]
+fn invalid_dynamic_prompt_fails_before_the_host_tool_factory_runs() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let mut definition = definition();
+    definition.system_prompt = tinyagents_definition::PromptSource::Dynamic(());
+    definition.extensions.prompt_builder = None;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let host: crate::agent::HostTools = {
+        let calls = Arc::clone(&calls);
+        Arc::new(move |_| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            crate::agent::HostTurnTools::default()
+        })
+    };
+
+    let result = crate::agent::OpenHumanSessionHost::from_config_with_host_tools(
+        &crate::core::runtime::DispatchCtx::ambient(),
+        &config,
+        &definition,
+        &host,
+        None,
+    );
+    let error = result
+        .err()
+        .expect("a dynamic prompt without a builder must be rejected");
+
+    assert!(
+        format!("{error:#}").contains("dynamic prompt but has no builder"),
+        "unexpected error: {error:#}"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "prompt validation must fail before invoking host code"
+    );
+}
+
 /// A session built the ordinary way must be byte-identical to before this
 /// seam existed -- the factory is opt-in, and a `None` host adds nothing.
 #[test]
@@ -475,6 +513,7 @@ fn the_factory_is_told_the_context_the_session_is_built_under() {
     let tmp = tempfile::TempDir::new().unwrap();
     let config = test_config(&tmp);
     let explicit = CoreContext::for_test(DomainSet::full(), None);
+    crate::agent::session_host::test_support::install_model_fixture_in(explicit.extensions());
     let seen = Arc::new(std::sync::Mutex::new(Vec::<DispatchCtx>::new()));
 
     let host: crate::agent::HostTools = {

@@ -343,6 +343,8 @@ test("a Git-recorded move preserves only the original writer and allowance", () 
     git("add", ".");
     git("commit", "-m", "original writer");
     git("update-ref", "refs/remotes/upstream/main", "HEAD");
+    // A pull request run sets GITHUB_BASE_REF, which selects origin/<base>.
+    git("update-ref", `refs/remotes/origin/${process.env.GITHUB_BASE_REF || "main"}`, "HEAD");
     git("switch", "-c", "move");
     mkdirSync(join(root, newPath, ".."), { recursive: true });
     git("mv", oldPath, newPath);

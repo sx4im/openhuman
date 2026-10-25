@@ -34,6 +34,10 @@ mod triggers;
 
 // ── Public re-exports (match original ops.rs public surface) ───────────────
 
+#[cfg(feature = "flows")]
+pub(crate) use connections::flow_connection_entries;
+#[cfg(all(test, feature = "flows"))]
+pub(crate) use connections::title_case_toolkit;
 pub use connections::{
     active_connection_ids, composio_authorize, composio_delete_connection,
     composio_list_connections, ComposioDeleteResult,
@@ -55,7 +59,7 @@ pub use triggers::{
 };
 // The `composio.{get,set}_user_scopes` handlers' storage half.
 pub(crate) use scope_prefs::{
-    ensure_migrated as ensure_user_scopes_migrated, load_or_default as load_user_scope_pref,
+    ensure_migrated as ensure_user_scopes_migrated, load as load_user_scope_pref,
     save as save_user_scope_pref,
 };
 

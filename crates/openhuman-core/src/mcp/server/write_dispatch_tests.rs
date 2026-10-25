@@ -59,6 +59,7 @@ async fn audit_write_rejection_records_failure_row() {
     let mut config = Config::default();
     config.workspace_dir = tmp.path().join("workspace");
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::mcp::test_module_port::install(&config);
 
     let err = ToolCallError::InvalidParams("bad write request".into());
     audit_write_rejection(
@@ -159,13 +160,20 @@ async fn test_dispatch_write_tool_rpc_error_records_audit_and_returns_tool_error
     let mut config = Config::default();
     config.workspace_dir = tmp.path().join("workspace");
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::mcp::test_module_port::install(&config);
+    let ctx = crate::core::runtime::DispatchCtx::new(
+        crate::core::runtime::CoreContext::for_test_with_config(
+            crate::core::runtime::DomainSet::full(),
+            config.clone(),
+        ),
+    );
 
     // Omit the required `text` so the handler (or the missing registration)
     // yields a failure instead of a stored item.
     let params = serde_json::Map::new();
 
     let result = dispatch_write_tool(
-        &crate::core::runtime::DispatchCtx::ambient(),
+        &ctx,
         "memory.learn",
         "openhuman.memory_learn",
         &params,
@@ -207,6 +215,7 @@ async fn test_audit_write_success_path() {
     let mut config = Config::default();
     config.workspace_dir = tmp.path().join("workspace");
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::mcp::test_module_port::install(&config);
 
     audit_write(
         &config,
@@ -249,9 +258,16 @@ async fn test_dispatch_write_tool_unregistered_rpc_is_a_tool_error() {
     let mut config = Config::default();
     config.workspace_dir = tmp.path().join("workspace");
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::mcp::test_module_port::install(&config);
+    let ctx = crate::core::runtime::DispatchCtx::new(
+        crate::core::runtime::CoreContext::for_test_with_config(
+            crate::core::runtime::DomainSet::full(),
+            config.clone(),
+        ),
+    );
 
     let val = dispatch_write_tool(
-        &crate::core::runtime::DispatchCtx::ambient(),
+        &ctx,
         "memory.forget",
         "openhuman.memory_no_such_method",
         &Map::new(),

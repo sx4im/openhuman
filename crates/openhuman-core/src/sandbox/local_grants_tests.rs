@@ -42,6 +42,66 @@ mod with_module {
     }
 
     #[test]
+    fn a_grant_containing_a_credential_store_is_refused() {
+        // A synthetic home under a temp dir: the process home can sit under a
+        // floor-forbidden root (`/root`), which would refuse every grant.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let project = home.join("project");
+        std::fs::create_dir_all(&project).expect("project dir");
+        let mut read_only = vec![
+            home.display().to_string(),
+            "/".into(),
+            project.display().to_string(),
+            // Resolves to `home`; a lexical check alone would admit it.
+            format!("{}/..", project.display()),
+            "relative/project".into(),
+        ];
+        #[cfg(unix)]
+        {
+            let link = tmp.path().join("link-to-home");
+            std::os::unix::fs::symlink(&home, &link).expect("symlink");
+            read_only.push(link.display().to_string());
+        }
+        let reply = LocalGrants {
+            read_only,
+            read_write: vec![home.display().to_string()],
+        };
+        let grants = admit_grants_under(reply, false, Some(&home));
+        assert_eq!(grants.read_only, [project]);
+        assert!(grants.read_write.is_empty(), "{:?}", grants.read_write);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_credential_store_symlinked_out_of_home_is_refused_at_its_target() {
+        // `~/.ssh` -> `<tmp>/dotfiles/ssh`: the target holds the keys, and none
+        // of its own components is called `.ssh`.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path().join("home");
+        let dotfiles = tmp.path().join("dotfiles");
+        let target = dotfiles.join("ssh");
+        let unrelated = tmp.path().join("work");
+        for dir in [&home, &target, &unrelated] {
+            std::fs::create_dir_all(dir).expect("dir");
+        }
+        std::os::unix::fs::symlink(&target, home.join(".ssh")).expect("symlink");
+        std::fs::write(target.join("id_ed25519"), "key").expect("key file");
+        let reply = LocalGrants {
+            read_only: vec![
+                target.display().to_string(),
+                dotfiles.display().to_string(),
+                target.join("id_ed25519").display().to_string(),
+                unrelated.display().to_string(),
+            ],
+            read_write: vec![target.display().to_string()],
+        };
+        let grants = admit_grants_under(reply, false, Some(&home));
+        assert_eq!(grants.read_only, [unrelated]);
+        assert!(grants.read_write.is_empty(), "{:?}", grants.read_write);
+    }
+
+    #[test]
     fn proc_is_admitted_only_through_allow_proc() {
         let reply = || LocalGrants {
             read_only: vec!["/proc".into(), "/proc/1/environ".into()],

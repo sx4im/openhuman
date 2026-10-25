@@ -9,6 +9,7 @@ fn config_with_rules(tmp: &tempfile::TempDir) -> crate::config::Config {
         ..crate::config::Config::default()
     };
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::agent::session_host::test_support::install_managed_model_fixture(&config);
     config
 }
 
@@ -62,6 +63,7 @@ async fn goal_session_prompt(rules: serde_json::Value) -> (String, Vec<String>) 
         std::sync::Arc::new(tinyagents_harness::testkit::ScriptedModel::new(Vec::new()));
     let mut host = crate::agent::SessionHostBuilder::new()
         .chat_model_with_config(model, std::sync::Arc::new(config))
+        .model_name("test/session-fixture".to_string())
         .tools(crate::agent::goals::goal_tools(action_dir.path()))
         .action_dir(action_dir.path().to_path_buf())
         .tool_dispatcher(Box::new(tinytools_agent::dialect::XmlDialect))

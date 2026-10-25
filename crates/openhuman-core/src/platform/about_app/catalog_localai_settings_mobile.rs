@@ -81,7 +81,7 @@ Capability {
         name: "Desktop Control",
         domain: "desktop",
         category: CapabilityCategory::Settings,
-        description: "Let agents inspect and control native desktop apps through a local, permission-aware connection. Desktop actions are discovered on demand. Switched off by [components] computer = false, which unregisters the desktop tools and answers the desktop.* RPCs with COMPONENT_DISABLED:computer while keeping this machine's own consent setting untouched.",
+        description: "Let agents inspect and control native desktop apps through a local, permission-aware connection. macOS only for now; Windows and Linux are not supported yet. Desktop actions are discovered on demand. Switched off by [components] computer = false, which unregisters the desktop tools and answers the desktop.* RPCs with COMPONENT_DISABLED:computer while keeping this machine's own consent setting untouched.",
         how_to: "Connections → Computer → Desktop; enable access and grant operating system permissions when requested",
         status: CapabilityStatus::Beta,
         privacy: DESKTOP_TO_JEV,
@@ -209,7 +209,7 @@ Capability {
         name: "Log Out and Clear App Data",
         domain: "settings",
         category: CapabilityCategory::Settings,
-        description: "Sign out and permanently clear local app data, including workflow data.",
+        description: "Sign out and permanently clear the signed-in account's local app data, including workflow data. Other accounts on the device are kept. Not available on the legacy single-folder data layout.",
         how_to: "Settings > Log Out & Clear App Data",
         status: CapabilityStatus::Stable,
         privacy: None,
@@ -369,8 +369,8 @@ Capability {
         category: CapabilityCategory::Settings,
         description: "Dedicated action directory for agent tools (shell, file, git), separate \
                       from internal application state. Agent tools default their working directory \
-                      and path resolution to the action sandbox, preventing accidental modification \
-                      of memory databases, session transcripts, tokens, and other internal state.",
+                      and path resolution to the action sandbox, preventing accidental changes to \
+                      local internal files or records in the configured storage backend.",
         how_to: "Settings → Agent OS access",
         status: CapabilityStatus::Stable,
         privacy: None,

@@ -9,7 +9,6 @@ fn registry_names_for(cfg: &Config, tmp: &TempDir) -> Vec<String> {
         &BrowserConfig::default(),
         &crate::config::HttpRequestConfig::default(),
         tmp.path(),
-        &HashMap::new(),
         cfg,
     );
     tool_names(&tools)

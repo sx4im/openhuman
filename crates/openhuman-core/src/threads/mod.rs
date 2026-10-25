@@ -14,8 +14,6 @@ pub mod store;
 #[cfg(test)]
 mod transcript_host_tests;
 pub mod turn_state;
-pub(crate) mod worker_mirror;
-pub(crate) mod worker_thread;
 
 pub use error::{ThreadsError, THREAD_NOT_FOUND_KIND};
 pub use rpc_models::*;

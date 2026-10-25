@@ -199,7 +199,14 @@ impl Config {
                     );
                 }
             } else {
-                let corrupted_path = config_path.with_extension("toml.corrupted");
+                // Keep an earlier corrupted copy: `rename` would replace it.
+                let mut corrupted_path = config_path.with_extension("toml.corrupted");
+                if tokio::fs::try_exists(&corrupted_path).await.unwrap_or(true) {
+                    let ts = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.as_secs());
+                    corrupted_path = config_path.with_extension(format!("toml.corrupted.{ts}"));
+                }
                 match fs::rename(&config_path, &corrupted_path).await {
                     Ok(()) => {
                         tracing::debug!(

@@ -10,23 +10,15 @@ mod settings;
 
 pub use api_keys::{clear_api_key, set_api_key};
 pub use embed::{embed, test_connection};
+pub(crate) use embed::{probe_dimensions_for_inspection, InspectionEmbeddingError};
 pub use settings::{get_settings, update_settings};
 
 #[cfg(test)]
-use tinyinference_embeddings::probe::redact_secrets;
-
-#[cfg(test)]
 use settings::remember_active_custom_profile;
-#[cfg(test)]
-use tinyinference_embeddings::probe::{classify_embed_probe, EmbedProbe};
-#[cfg(test)]
-use tinyinference_embeddings::served_models::{
-    check_requested_model_served, fetch_served_model_ids, normalize_embed_model_id,
-    reject_model_not_served,
-};
 
 use crate::config::Config;
 use crate::security::credentials::AuthService;
+use tinyinference_providers::route::split_custom_provider;
 
 use super::factory::create_embedding_provider_with_config;
 
@@ -58,11 +50,11 @@ fn build_embedder(
     dims: usize,
 ) -> anyhow::Result<Box<dyn tinyinference_embeddings::EmbeddingModel>> {
     let api_key = resolve_api_key(config, provider_name);
-    let custom_endpoint = provider_name.strip_prefix("custom:").map(|s| s.to_string());
-    let provider_slug = if provider_name.starts_with("custom:") {
+    let (provider_slug, custom_endpoint) = split_custom_provider(provider_name);
+    let provider_slug = if custom_endpoint.is_some() {
         "custom"
     } else {
-        provider_name
+        &provider_slug
     };
     create_embedding_provider_with_config(
         config,
@@ -75,15 +67,28 @@ fn build_embedder(
 }
 
 pub(crate) fn resolve_api_key(config: &Config, provider_name: &str) -> String {
-    let slug = if provider_name.starts_with("custom:") {
-        "custom"
-    } else {
-        provider_name
-    };
+    let (slug, endpoint) = split_custom_provider(provider_name);
+    let slug = if endpoint.is_some() { "custom" } else { &slug };
     let cred_provider = format!("embeddings:{slug}");
     let auth = AuthService::from_config(config);
     auth.get_provider_bearer_token(&cred_provider, None)
         .ok()
         .flatten()
         .unwrap_or_default()
+}
+
+pub(crate) fn resolve_api_key_read_only(
+    config: &Config,
+    provider_name: &str,
+) -> Result<String, crate::security::credentials::profiles::ReadOnlyAuthProfileError> {
+    let slug = if provider_name.starts_with("custom:") {
+        "custom"
+    } else {
+        provider_name
+    };
+    let cred_provider = format!("embeddings:{slug}");
+    Ok(
+        AuthService::get_provider_bearer_token_read_only(config, &cred_provider, None)?
+            .unwrap_or_default(),
+    )
 }

@@ -33,8 +33,10 @@ use super::types::{ModuleRecord, ModuleSource, ModuleState, ModuleStatus};
 use super::{linked, registry, report, runtime, source};
 use crate::config::Config;
 use tinybus::module::{
-    Availability, LoadError, ModuleClient, ModuleSource as ResolverSource, Resolver, ResolverInputs,
+    AccessFuture, Availability, FailureReporter, LoadError, ModuleAccess, ModuleClient,
+    ModuleSource as ResolverSource, ProxyFailure, ReleaseRecord, Resolver, ResolverInputs,
 };
+use tinybus::Proxy;
 
 /// Environment variable naming a directory of bundled release archives, for
 /// headless hosts (the Docker image, the CLI tarball, bench bundles).
@@ -90,7 +92,8 @@ pub(crate) fn resolve_bundled_dir(
 }
 
 /// Library file stems of every module whose component is off, for skipping
-/// their search-path artifacts. Both `name` and `libname` spellings.
+/// their search-path artifacts. Both `name` and `libname` spellings, for the
+/// source build (`lib_name`) and the release download (`<id>_module`).
 #[must_use]
 pub fn disabled_lib_stems(config: &Config) -> Vec<String> {
     registry::ALL
@@ -98,7 +101,13 @@ pub fn disabled_lib_stems(config: &Config) -> Vec<String> {
         .filter(|record| disabled_component(config, record.id).is_some())
         .flat_map(|record| {
             let stem = record.source.lib_name.to_string();
-            [format!("lib{stem}"), stem]
+            let released = format!("{}_module", record.id);
+            [
+                format!("lib{stem}"),
+                stem,
+                format!("lib{released}"),
+                released,
+            ]
         })
         .collect()
 }
@@ -141,10 +150,27 @@ pub fn resolver(config: &Config) -> Resolver {
                     linked_factories.insert(record.id.to_string(), factory);
                 }
             }
+            ModuleSource::Release if record.id == "tinymcp" || record.id == "tinyeventqueues" => {
+                // These modules require a per-module storage callback, which
+                // TinyBus can bind only on its verified local-file path.
+                // Route a staged release through that rung; the callback-aware
+                // client below supplies the unique destination at load time.
+                if let Some(path) = source::local_artifact(record.id) {
+                    sources.insert(
+                        record.id.to_string(),
+                        ResolverSource::LocalFile {
+                            path: path.to_string_lossy().into_owned(),
+                        },
+                    );
+                }
+            }
             ModuleSource::Release => {}
         }
     }
     let gate_config = Arc::clone(&shared);
+    let module_config_source = Arc::clone(&shared);
+    let mut search_skip = disabled_lib_stems(config);
+    search_skip.extend(super::search_path::configured_module_lib_stems());
     Resolver::new(ResolverInputs {
         enabled: config.modules.enabled,
         install_dir: install_dir(config),
@@ -152,15 +178,27 @@ pub fn resolver(config: &Config) -> Resolver {
         bundled_dir: bundled_releases_dir(),
         sources,
         linked: linked_factories,
-        search_skip: disabled_lib_stems(config),
+        search_skip,
         gate: Some(Arc::new(move |id| disabled_component(&gate_config, id))),
         on_resolved: Some(Arc::new(on_resolved)),
         records: registry::release_records(),
         terminal_marker: tinytools::status::MODULE_FAULT_MARKER.to_string(),
         runtime: Arc::new(|| Box::pin(runtime::runtime())),
-        module_config: Arc::new(move |id| module_config(&shared, id)),
+        module_config: Arc::new(move |id| {
+            let value = module_config(&module_config_source, id);
+            if id == super::connectors::MODULE_ID {
+                super::connectors::note_module_config_for_load(&module_config_source, &value);
+            }
+            value
+        }),
         reporter: report::reporter(),
     })
+}
+
+/// The staged artifact the callback-bound module fixture loads in isolation.
+#[cfg(test)]
+pub(crate) fn local_artifact_for_test(id: &str) -> Option<std::path::PathBuf> {
+    source::local_artifact(id)
 }
 
 /// A `tinybus::module::ModuleClient` that loads modules lazily through
@@ -171,7 +209,112 @@ pub fn resolver(config: &Config) -> Resolver {
 /// facade before the first call when artifacts ship with the host.
 #[must_use]
 pub fn client(config: Config) -> ModuleClient {
-    ModuleClient::new(resolver(&config))
+    ModuleClient::new(CallbackAccess {
+        resolver: resolver(&config),
+        config,
+    })
+}
+
+/// The two modules that connect to storage through a capability scoped to
+/// their exact verified module instance.
+fn needs_storage_callback(id: &str) -> bool {
+    id == "tinymcp" || id == "tinyeventqueues"
+}
+
+/// Serializes creation and retention of module-scoped storage callback bindings.
+type StorageCallbackLoads = tokio::sync::Mutex<
+    std::collections::HashMap<
+        String,
+        (
+            std::sync::Arc<tinybus::module::HostCallbackBinding>,
+            tinystoragedrivers_busproxy::ServedStorage,
+        ),
+    >,
+>;
+
+static STORAGE_CALLBACK_LOADS: std::sync::LazyLock<StorageCallbackLoads> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+async fn ensure_loaded_with_storage_callback(
+    resolver: &Resolver,
+    config: &Config,
+    id: &str,
+) -> Result<(), String> {
+    let mut loads = STORAGE_CALLBACK_LOADS.lock().await;
+    if let Some((binding, _served)) = loads.get(id) {
+        if matches!(state_of(id), ModuleState::Ready) {
+            // Already serving with this binding: a binding is spent once the
+            // module takes it, so re-presenting it would be refused. The module
+            // is process-wide, so every later workspace's client finds it
+            // already serving.
+            return Ok(());
+        }
+        let mut module_config = module_config(config, id);
+        module_config["storage_callback"] = serde_json::json!(binding.unique_name().as_str());
+        return resolver
+            .ensure_loaded_with_host_callbacks(id, std::sync::Arc::clone(binding), module_config)
+            .await;
+    }
+
+    let runtime = resolver
+        .runtime()
+        .await
+        .map_err(|error| error.to_string())?;
+    let (binding, served) = super::storage_host::prepare_module_callbacks(runtime)
+        .await
+        .map_err(|error| error.to_string())?;
+    let mut module_config = module_config(config, id);
+    module_config["storage_callback"] = serde_json::json!(binding.unique_name().as_str());
+    resolver
+        .ensure_loaded_with_host_callbacks(id, std::sync::Arc::clone(&binding), module_config)
+        .await?;
+    loads.insert(id.to_owned(), (binding, served));
+    Ok(())
+}
+
+/// Module access that grants storage callbacks only while loading the two
+/// modules whose contracts require them.
+struct CallbackAccess {
+    resolver: Resolver,
+    config: Config,
+}
+
+impl ModuleAccess for CallbackAccess {
+    fn find(&self, id: &str) -> Option<&'static ReleaseRecord> {
+        self.resolver.find(id)
+    }
+
+    fn enabled(&self) -> bool {
+        self.resolver.enabled()
+    }
+
+    fn reporter(&self) -> &FailureReporter {
+        self.resolver.reporter()
+    }
+
+    fn ensure_loaded<'a>(&'a self, id: &'a str) -> AccessFuture<'a, Result<(), String>> {
+        Box::pin(async move {
+            let loaded = if needs_storage_callback(id) {
+                ensure_loaded(&self.config, id).await
+            } else {
+                self.resolver.ensure_loaded(id).await
+            };
+            // The client collapses this message into a bare "module
+            // unavailable"; keep the reason where an operator can grep it.
+            if let Err(error) = &loaded {
+                tracing::warn!(module = id, %error, "[modules] ensure_loaded refused the module");
+            }
+            loaded
+        })
+    }
+
+    fn proxy<'a>(
+        &'a self,
+        bus_name: &'a str,
+        object_path: &'a str,
+    ) -> AccessFuture<'a, Result<Proxy, ProxyFailure>> {
+        self.resolver.proxy(bus_name, object_path)
+    }
 }
 
 /// A client whose every call goes to `proxy` instead of loading a module. The
@@ -269,7 +412,27 @@ pub async fn ensure_loaded_within(
     id: &str,
     within: Option<Duration>,
 ) -> Result<(), LoadError> {
-    resolver(config).ensure_loaded_within(id, within).await
+    let resolver = resolver(config);
+    let result = if needs_storage_callback(id) {
+        if let Some(component) = disabled_component(config, id) {
+            Err(LoadError::Disabled(component))
+        } else {
+            let load = ensure_loaded_with_storage_callback(&resolver, config, id);
+            match within {
+                Some(within) => tokio::time::timeout(within, load)
+                    .await
+                    .map_err(|_| LoadError::StillLoading)?
+                    .map_err(LoadError::Failed),
+                None => load.await.map_err(LoadError::Failed),
+            }
+        }
+    } else {
+        resolver.ensure_loaded_within(id, within).await
+    };
+    if id == super::connectors::MODULE_ID && result.is_ok() {
+        super::connectors::note_load_resolution_ready();
+    }
+    result
 }
 
 /// The state of `id` as the resolution table reports it, without touching it.
@@ -286,14 +449,21 @@ pub fn state_of(id: &str) -> ModuleState {
 
 /// Configuration crossing into a first-party compiled module.
 ///
-/// Credentials are intentionally absent. TinyMemory calls back into the host
-/// for embedding and chat compute; the other modules need no host config.
-fn module_config(config: &Config, id: &str) -> serde_json::Value {
+/// Credentials and callback destinations are intentionally absent. TinyMemory
+/// receives only its compute configuration; TinyMCP and TinyEventQueues get a
+/// unique storage callback destination from the verified loader.
+pub(super) fn module_config(config: &Config, id: &str) -> serde_json::Value {
     if id == super::search::MODULE_ID {
         return super::search::load_configuration(config);
     }
     if id == super::desktop::MODULE_ID {
         return super::desktop::module_config(config);
+    }
+    // The queue manifest and pipeline the inbound event queues run; the
+    // storage host declares the same manifest on the module's scope.
+    #[cfg(feature = "inbound-queues")]
+    if id == super::event_queues::MODULE_ID {
+        return crate::inbound::module_config(config);
     }
     if id == super::connectors::MODULE_ID {
         // The connector module takes its route and credential from here and

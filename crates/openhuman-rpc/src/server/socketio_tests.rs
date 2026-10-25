@@ -1,7 +1,38 @@
 use super::{
     channel_connection_update_payload, event_alias, origin_is_allowed_with_extra,
-    publish_companion_state_changed, subscribe_companion_state_changed,
+    publish_companion_state_changed, socket_tenant_from_request_extensions,
+    subscribe_companion_state_changed, ThreadSubscribePayload,
 };
+
+#[tokio::test]
+async fn socket_connect_reads_dispatch_context_from_request_extensions_after_spawn() {
+    let dispatch = crate::core_host::core::runtime::DispatchCtx::process_default();
+    let expected = crate::core_host::agent::plan_review::socket_scope_for_dispatch(&dispatch);
+    let mut extensions = axum::http::Extensions::new();
+    extensions.insert(dispatch);
+
+    // Mirrors socketioxide's async connect handler boundary: request parts
+    // retain Axum extensions, while the callback itself runs in a new task.
+    let actual = tokio::spawn(async move {
+        socket_tenant_from_request_extensions(&extensions).map(|tenant| tenant.0)
+    })
+    .await
+    .expect("spawned connect callback completes");
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn thread_subscribe_cannot_choose_a_profile_for_review_replay() {
+    let payload = serde_json::from_value::<ThreadSubscribePayload>(serde_json::json!({
+        "thread_id": "thread-1",
+        "profile_id": "victim-profile",
+    }));
+    assert!(
+        payload.is_err(),
+        "tenant selection is not a client payload field"
+    );
+}
 
 #[test]
 fn companion_state_transport_delivers_payload_to_bridge() {
@@ -213,4 +244,98 @@ fn origin_allowlist_rejects_unparseable_origin() {
         Some("javascript:alert(1)"),
         None
     ));
+}
+
+/// Install the per-process RPC bearer once (it is a process-wide `OnceLock`
+/// that sibling tests may already have seeded) and return the live value.
+fn ensure_rpc_token() -> String {
+    // Idempotent: a no-op when a sibling test already seeded the bearer.
+    crate::core_host::core::auth::init_rpc_token_with_value("socketio-handshake-tests-token")
+        .expect("seed rpc bearer");
+    crate::core_host::core::auth::get_rpc_token()
+        .expect("rpc bearer installed")
+        .to_string()
+}
+
+/// Drive one Engine.IO v4 long-polling session: open, send the Socket.IO
+/// CONNECT with `auth`, then poll until the server either emits `ready` or
+/// disconnects the namespace. Returns everything the server sent.
+async fn polling_handshake(base: &str, auth: serde_json::Value) -> String {
+    let http = reqwest::Client::new();
+    let open = http
+        .get(format!("{base}/socket.io/?EIO=4&transport=polling"))
+        .send()
+        .await
+        .expect("engine.io open")
+        .text()
+        .await
+        .unwrap();
+    let open: serde_json::Value =
+        serde_json::from_str(open.trim_start_matches('0')).expect("engine.io open packet");
+    let sid = open["sid"].as_str().expect("engine.io sid").to_owned();
+    let url = format!("{base}/socket.io/?EIO=4&transport=polling&sid={sid}");
+    http.post(&url)
+        .body(format!("40{auth}"))
+        .send()
+        .await
+        .expect("socket.io connect");
+    let mut received = String::new();
+    for _ in 0..3 {
+        let batch = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            http.get(&url).send().await.ok()?.text().await.ok()
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        received.push_str(&batch);
+        received.push('\u{1e}');
+        if received.contains("\"ready\"") || received.split('\u{1e}').any(|p| p == "41") {
+            break;
+        }
+    }
+    received
+}
+
+/// H5: the handshake bearer gate, end to end over a real socket. Only the
+/// per-process core bearer gets `ready`; a missing or wrong token is
+/// disconnected before any event reaches the client.
+#[tokio::test]
+async fn only_the_core_bearer_completes_the_socketio_handshake() {
+    // Loopback-only fixture; bounded so a stalled poll fails fast instead of
+    // waiting out every retry.
+    tokio::time::timeout(std::time::Duration::from_secs(30), handshake_bearer_gate())
+        .await
+        .expect("socket.io handshake test timed out");
+}
+
+async fn handshake_bearer_gate() {
+    let token = ensure_rpc_token();
+    let (layer, _io) = super::attach_socketio();
+    // The serving router stamps every request with its dispatch context; the
+    // connect handler refuses a socket that arrives without one.
+    let app = axum::Router::new().layer(layer).layer(axum::Extension(
+        crate::core_host::core::runtime::DispatchCtx::host_default(),
+    ));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    for (auth, label) in [
+        (
+            serde_json::json!({ "token": "not-the-core-token" }),
+            "wrong",
+        ),
+        (serde_json::json!({}), "absent"),
+    ] {
+        let received = polling_handshake(&base, auth).await;
+        assert!(!received.contains("\"ready\""), "{label}: {received}");
+        assert!(
+            received.split('\u{1e}').any(|packet| packet == "41"),
+            "{label} token must be disconnected: {received}"
+        );
+    }
+
+    let received = polling_handshake(&base, serde_json::json!({ "token": token })).await;
+    assert!(received.contains("\"ready\""), "valid token: {received}");
 }

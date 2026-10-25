@@ -699,3 +699,20 @@ async fn validate_parent_path_uses_same_cache_as_validate_path() {
         "validate_path must reuse the cache hydrated by validate_parent_path"
     );
 }
+
+#[test]
+fn an_empty_or_relative_trusted_root_grants_nothing() {
+    for root in ["", ".", "rel/dir"] {
+        let policy = trusted_policy(
+            StdPathBuf::from("/ws"),
+            vec![TrustedRoot {
+                path: root.into(),
+                access: TrustedAccess::ReadWrite,
+            }],
+        );
+        assert!(
+            !policy.is_within_trusted_root(StdPath::new("/usr/local/x"), true),
+            "trusted root {root:?} must not cover an unrelated absolute path"
+        );
+    }
+}

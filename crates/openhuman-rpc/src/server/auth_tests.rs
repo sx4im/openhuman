@@ -97,6 +97,12 @@ fn verify_external_inference_bearer_for_config_accepts_stored_key() {
         }
     }
     let tmp = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("make test workspace private");
+    }
     let _key = FixtureKey {
         key: std::env::var_os("OPENHUMAN_KEYRING_MASTER_KEY"),
         file: std::env::var_os("OPENHUMAN_KEYRING_MASTER_KEY_FILE"),

@@ -364,6 +364,18 @@ fn snapshot_config_json_redacts_the_storage_url_credentials() {
     );
 }
 
+#[test]
+fn snapshot_config_json_redacts_the_inbound_queue_url_credentials() {
+    let mut cfg = Config::default();
+    cfg.inbound.queue_url = Some("amqp://app:hunter2@broker.internal/vhost".into());
+    let snapshot = snapshot_config_json(&cfg).unwrap();
+    assert!(!snapshot.to_string().contains("hunter2"));
+    assert_eq!(
+        snapshot["config"]["inbound"]["queue_url"],
+        "amqp://***@broker.internal/vhost"
+    );
+}
+
 // ── agent_server_status ────────────────────────────────────────
 
 #[test]
@@ -570,4 +582,51 @@ async fn apply_search_settings_rejects_unknown_search_engine() {
     .expect_err("unknown engine should be rejected");
 
     assert!(err.contains("unknown search engine"), "{err}");
+}
+
+#[tokio::test]
+async fn reset_local_data_refuses_the_shared_root_of_a_legacy_layout() {
+    let temp = tempdir().unwrap();
+    let default_openhuman_dir = temp.path().join("default-openhuman");
+    // Legacy single-user layout: the config dir IS the shared root, which also
+    // holds every signed-in account under `users/`.
+    let sibling_file = default_openhuman_dir.join("users/other-user/config.toml");
+    let user_marker = crate::config::active_user_marker_path(&default_openhuman_dir);
+    tokio::fs::create_dir_all(sibling_file.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(&sibling_file, "api_key = 'sibling'\n")
+        .await
+        .unwrap();
+    tokio::fs::write(&user_marker, "user_id = 'other-user'\n")
+        .await
+        .unwrap();
+
+    let err = reset_local_data_for_paths(&default_openhuman_dir, &default_openhuman_dir)
+        .await
+        .unwrap_err();
+
+    assert!(err.contains("legacy"), "{err}");
+    // A refusal changes nothing: not the root, not a sibling, not a marker.
+    assert!(sibling_file.exists());
+    assert!(user_marker.exists());
+}
+
+#[tokio::test]
+async fn reset_local_data_refuses_a_target_outside_users() {
+    let temp = tempdir().unwrap();
+    let default_openhuman_dir = temp.path().join("default-openhuman");
+    for target in [
+        temp.path().join("elsewhere"),
+        default_openhuman_dir.join("users"),
+        default_openhuman_dir.join("users").join(".."),
+        default_openhuman_dir.join("users/a/b"),
+    ] {
+        tokio::fs::create_dir_all(&target).await.unwrap();
+        let err = reset_local_data_for_paths(&target, &default_openhuman_dir)
+            .await
+            .unwrap_err();
+        assert!(err.contains("refusing"), "{target:?}: {err}");
+        assert!(target.exists(), "{target:?} was deleted");
+    }
 }

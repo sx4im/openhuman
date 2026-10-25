@@ -22,21 +22,6 @@
 //! path the event is published at, so the broker can filter by domain and never
 //! wake a process for events it did not ask for.
 
-/// Voice-domain events.
-#[non_exhaustive]
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum VoiceEvent {
-    /// A PTT session committed a transcript to a thread. Carries only
-    /// length/timing — never the raw text, per the PII-safe logging rule.
-    PttTranscriptCommitted {
-        thread_id: String,
-        session_id: u64,
-        text_len: usize,
-        held_ms: u64,
-        finalized_by_watchdog: bool,
-    },
-}
-
 /// A tool call made while answering a committed turn: name and id only.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ConversationToolCall {
@@ -258,7 +243,7 @@ pub enum DomainEvent {
     /// A BYO (bring-your-own-key) chat provider rejected the configured API
     /// key with `401` / `403` — the third-party key is invalid or revoked.
     ///
-    /// Published by `inference::provider::ops::http_error::
+    /// Published by `inference::provider::http_error::
     /// log_byo_provider_auth_failure` (once per failure episode, via the
     /// `auth_error_registry` latch — the underlying 401 repeats per retry).
     /// The same rejection demotes the raw error from Sentry (it's
@@ -384,13 +369,8 @@ pub enum DomainEvent {
         job_id: String,
         success: bool,
         output: String,
-    },
-    /// A cron job requests delivery of its output to a channel.
-    CronDeliveryRequested {
-        job_id: String,
-        channel: String,
-        target: String,
-        output: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tenant: Option<crate::core::runtime::Tenant>,
     },
 
     /// A proactive message (morning briefing, welcome, cron output, etc.)
@@ -668,9 +648,9 @@ pub enum DomainEvent {
 
     // ── Plan review (interactive plan-mode gate) ────────────────────────
     /// An interactive turn parked on a thread-scoped plan the user must
-    /// review before execution. Published by
-    /// [`crate::plan_review::gate::PlanReviewGate::request_review`]
-    /// and bridged to the web channel as a `plan_review_request` socket event.
+    /// review before execution. Published by the OpenHuman notifier for
+    /// TinyAgents' plan-review store and bridged to the web channel as a
+    /// `plan_review_request` socket event.
     PlanReviewRequested {
         /// Unique id correlating the decision back to the parked turn.
         request_id: String,
@@ -986,6 +966,63 @@ pub enum DomainEvent {
         routed: bool,
     },
 
+    // ── Inbound event queues ────────────────────────────────────────────
+    /// The inbound event queues ended an event without delivering it: a
+    /// redelivery of an event already taken, a gate or noise filter, or an
+    /// invalid envelope. `source` is the module source (`composio:<toolkit>`,
+    /// `webhook:<tunnel>`); `event_id` is the source's own id.
+    InboundEventDropped {
+        source: String,
+        event_id: String,
+        /// The module's reason, snake case (e.g. `duplicate`, `noise`).
+        reason: String,
+    },
+    /// Triage of a queued inbound event asked to run again later; the queue
+    /// redelivers it at `defer_until_ms` instead of dropping it.
+    InboundDeferred {
+        source: String,
+        event_id: String,
+        /// Unix epoch milliseconds the triage asked to run again at.
+        defer_until_ms: i64,
+        /// Already scrubbed; safe to log.
+        reason: String,
+    },
+    /// A queued inbound event will not be delivered: triage reached a terminal
+    /// state, or the delivery ran out of attempts. It is parked in the
+    /// dead-letter queue (`inbound.dead`, `inbound.redrive`).
+    InboundDeadLettered {
+        source: String,
+        event_id: String,
+        /// The delivery attempt that gave up.
+        attempt: u32,
+        /// Already scrubbed; safe to log.
+        detail: String,
+    },
+    /// A pinned source's batch ran on its agent and the agent's final text is
+    /// stored. Carries no text: a subscriber is woken by this and reads the
+    /// result over `inbound.results` (keyed by `turn_id`).
+    InboundTurnCompleted {
+        /// The configured source (`x:mentions`).
+        source: String,
+        /// The key the batch was debounced by.
+        key: String,
+        /// The queues' turn id, the result's key.
+        turn_id: String,
+        /// The source's ids of the events the batch carried.
+        event_ids: Vec<String>,
+        /// The pinned agent that ran.
+        agent_id: String,
+    },
+    /// A pinned source's batch failed for good (its last attempt failed, or
+    /// it failed after its delivery was acknowledged); stored as `failed`.
+    InboundTurnFailed {
+        source: String,
+        key: String,
+        turn_id: String,
+        /// Already scrubbed; safe to log.
+        detail: String,
+    },
+
     // ── Device pairing ──────────────────────────────────────────────────
     /// A mobile device completed the X25519 handshake and is now paired.
     DevicePaired {
@@ -1270,10 +1307,6 @@ pub enum DomainEvent {
         tenant: Option<crate::core::runtime::Tenant>,
     },
 
-    // ── Voice ────────────────────────────────────────────────────────────
-    /// A voice domain event (PTT, transcription lifecycle, etc.).
-    Voice(VoiceEvent),
-
     // ── Task sources ─────────────────────────────────────────────────────
     /// A task source completed a fetch pass.
     TaskSourceFetched {
@@ -1304,8 +1337,8 @@ pub enum DomainEvent {
         thread_id: String,
         goal_id: String,
         status: String,
-        /// Full goal snapshot (owned by `tinyagents-graph`'s goal shape, so
-        /// kept as a raw `Value` rather than a typed field here). `None`
+        /// Full goal snapshot (kept as a raw `Value` rather than a typed
+        /// field to keep this event independent of the harness tool type). `None`
         /// until the publish site is updated to pass it through.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         goal: Option<serde_json::Value>,
@@ -1316,7 +1349,7 @@ pub enum DomainEvent {
     /// or reordered). Drives the desktop todo drawer.
     ThreadTodosChanged {
         thread_id: String,
-        /// Full todo-list snapshot, owned by `tinyagents-graph`'s todo shape.
+        /// Full todo-list snapshot, kept independent of the harness tool type.
         todos: serde_json::Value,
     },
     // ── Plan mode ───────────────────────────────────────────────────────
@@ -1386,7 +1419,6 @@ impl DomainEvent {
 
             Self::CronJobTriggered { .. }
             | Self::CronJobCompleted { .. }
-            | Self::CronDeliveryRequested { .. }
             | Self::ProactiveMessageRequested { .. }
             | Self::CronSystemJobDue { .. }
             | Self::FlowRunProgress { .. }
@@ -1425,6 +1457,12 @@ impl DomainEvent {
 
             Self::NotificationIngested { .. } | Self::NotificationTriaged { .. } => "notification",
 
+            Self::InboundEventDropped { .. }
+            | Self::InboundDeferred { .. }
+            | Self::InboundDeadLettered { .. }
+            | Self::InboundTurnCompleted { .. }
+            | Self::InboundTurnFailed { .. } => "inbound",
+
             Self::DevicePaired { .. }
             | Self::DeviceRevoked { .. }
             | Self::DevicePeerOnline { .. }
@@ -1456,8 +1494,6 @@ impl DomainEvent {
             | Self::ThreadTodosChanged { .. }
             | Self::ThreadRunModeChanged { .. } => "agent",
 
-            Self::Voice(_) => "voice",
-
             Self::ApprovalRequested { .. }
             | Self::ApprovalDecided { .. }
             | Self::ApprovalGateOverrideIgnored { .. }
@@ -1482,124 +1518,6 @@ impl DomainEvent {
             | Self::McpServerReconnected { .. }
             | Self::McpServerReconnectFailed { .. }
             | Self::McpServerParked { .. } => "mcp_client",
-        }
-    }
-
-    /// Stable variant name without payload (avoids Debug format coupling).
-    pub fn variant_name(&self) -> &'static str {
-        match self {
-            Self::AgentTurnStarted { .. } => "AgentTurnStarted",
-            Self::AgentTurnCompleted { .. } => "AgentTurnCompleted",
-            Self::ConversationTurnCommitted { .. } => "ConversationTurnCommitted",
-            Self::AgentError { .. } => "AgentError",
-            Self::SubagentSpawned { .. } => "SubagentSpawned",
-            Self::SubagentCompleted { .. } => "SubagentCompleted",
-            Self::SubagentFailed { .. } => "SubagentFailed",
-            Self::SubagentAwaitingUser { .. } => "SubagentAwaitingUser",
-            Self::AgentOrchestrationSpawned { .. } => "AgentOrchestrationSpawned",
-            Self::AgentOrchestrationCompleted { .. } => "AgentOrchestrationCompleted",
-            Self::AgentOrchestrationFailed { .. } => "AgentOrchestrationFailed",
-            Self::AgentOrchestrationClosed { .. } => "AgentOrchestrationClosed",
-            Self::RunQueueMessageQueued { .. } => "RunQueueMessageQueued",
-            Self::RunQueueFollowupDispatched { .. } => "RunQueueFollowupDispatched",
-            Self::RunQueueInterrupted { .. } => "RunQueueInterrupted",
-            Self::RunQueueMessageDelivered { .. } => "RunQueueMessageDelivered",
-            Self::RunQueueSteerRequeued { .. } => "RunQueueSteerRequeued",
-            Self::MonitorStatusChanged { .. } => "MonitorStatusChanged",
-            Self::MonitorLine { .. } => "MonitorLine",
-            Self::MemoryStored { .. } => "MemoryStored",
-            Self::MemoryRecalled { .. } => "MemoryRecalled",
-            Self::ChannelInboundMessage { .. } => "ChannelInboundMessage",
-            Self::ChannelMessageReceived { .. } => "ChannelMessageReceived",
-            Self::ChannelMessageProcessed { .. } => "ChannelMessageProcessed",
-            Self::ChannelReactionReceived { .. } => "ChannelReactionReceived",
-            Self::ChannelReactionSent { .. } => "ChannelReactionSent",
-            Self::ChannelConnected { .. } => "ChannelConnected",
-            Self::ChannelDisconnected { .. } => "ChannelDisconnected",
-            Self::CronJobTriggered { .. } => "CronJobTriggered",
-            Self::CronJobCompleted { .. } => "CronJobCompleted",
-            Self::CronDeliveryRequested { .. } => "CronDeliveryRequested",
-            Self::ProactiveMessageRequested { .. } => "ProactiveMessageRequested",
-            Self::CronSystemJobDue { .. } => "CronSystemJobDue",
-            Self::FlowRunProgress { .. } => "FlowRunProgress",
-            Self::FlowRunStarted { .. } => "FlowRunStarted",
-            Self::FlowRunFinished { .. } => "FlowRunFinished",
-            Self::FlowChanged { .. } => "FlowChanged",
-            Self::WorkflowLoaded { .. } => "WorkflowLoaded",
-            Self::WorkflowStopped { .. } => "WorkflowStopped",
-            Self::WorkflowStartFailed { .. } => "WorkflowStartFailed",
-            Self::WorkflowExecuted { .. } => "WorkflowExecuted",
-            Self::WorkflowsChanged { .. } => "WorkflowsChanged",
-            Self::ToolExecutionStarted { .. } => "ToolExecutionStarted",
-            Self::ToolExecutionCompleted { .. } => "ToolExecutionCompleted",
-            Self::WorkspacePrepared { .. } => "WorkspacePrepared",
-            Self::WorkspaceViolation { .. } => "WorkspaceViolation",
-            Self::WorkspaceCleanup { .. } => "WorkspaceCleanup",
-            Self::WebhookIncomingRequest { .. } => "WebhookIncomingRequest",
-            Self::WebhookReceived { .. } => "WebhookReceived",
-            Self::WebhookRegistered { .. } => "WebhookRegistered",
-            Self::WebhookUnregistered { .. } => "WebhookUnregistered",
-            Self::WebhookProcessed { .. } => "WebhookProcessed",
-            Self::ComposioTriggerReceived { .. } => "ComposioTriggerReceived",
-            Self::ComposioConnectionCreated { .. } => "ComposioConnectionCreated",
-            Self::ComposioConnectionDeleted { .. } => "ComposioConnectionDeleted",
-            Self::ComposioIntegrationsChanged { .. } => "ComposioIntegrationsChanged",
-            Self::ComposioActionExecuted { .. } => "ComposioActionExecuted",
-            Self::ComposioConfigChanged { .. } => "ComposioConfigChanged",
-            Self::TriggerEvaluated { .. } => "TriggerEvaluated",
-            Self::TriggerEscalated { .. } => "TriggerEscalated",
-            Self::TriggerEscalationFailed { .. } => "TriggerEscalationFailed",
-            Self::NotificationIngested { .. } => "NotificationIngested",
-            Self::NotificationTriaged { .. } => "NotificationTriaged",
-            Self::DevicePaired { .. } => "DevicePaired",
-            Self::DeviceRevoked { .. } => "DeviceRevoked",
-            Self::DevicePeerOnline { .. } => "DevicePeerOnline",
-            Self::DevicePeerOffline { .. } => "DevicePeerOffline",
-            Self::DeviceTunnelFrame { .. } => "DeviceTunnelFrame",
-            Self::SystemStartup { .. } => "SystemStartup",
-            Self::SystemShutdown { .. } => "SystemShutdown",
-            Self::SystemRestartRequested { .. } => "SystemRestartRequested",
-            Self::SystemShutdownRequested { .. } => "SystemShutdownRequested",
-            Self::AutonomyConfigChanged => "AutonomyConfigChanged",
-            Self::AgentPathsChanged => "AgentPathsChanged",
-            Self::ActiveWorkspaceChanged { .. } => "ActiveWorkspaceChanged",
-            Self::HealthChanged { .. } => "HealthChanged",
-            Self::HealthRestarted { .. } => "HealthRestarted",
-            Self::KeyringConsentRequired => "KeyringConsentRequired",
-            Self::KeyringDecryptFailed { .. } => "KeyringDecryptFailed",
-            Self::SessionExpired { .. } => "SessionExpired",
-            Self::CredentialChanged { .. } => "CredentialChanged",
-            Self::ApprovalRequested { .. } => "ApprovalRequested",
-            Self::ApprovalDecided { .. } => "ApprovalDecided",
-            Self::FlowApprovalRequested { .. } => "FlowApprovalRequested",
-            Self::PlanReviewRequested { .. } => "PlanReviewRequested",
-            Self::PlanReviewDecided { .. } => "PlanReviewDecided",
-            Self::ExternalTransferPending { .. } => "ExternalTransferPending",
-            Self::ApprovalGateOverrideIgnored { .. } => "ApprovalGateOverrideIgnored",
-            Self::ApprovalGateDisabled { .. } => "ApprovalGateDisabled",
-            Self::ArtifactReady { .. } => "ArtifactReady",
-            Self::ArtifactFailed { .. } => "ArtifactFailed",
-            Self::ArtifactPending { .. } => "ArtifactPending",
-            Self::McpServerInstalled { .. } => "McpServerInstalled",
-            Self::McpServerConnected { .. } => "McpServerConnected",
-            Self::McpServerDisconnected { .. } => "McpServerDisconnected",
-            Self::McpClientToolExecuted { .. } => "McpClientToolExecuted",
-            Self::McpToolRejected { .. } => "McpToolRejected",
-            Self::McpServerProbeTimedOut { .. } => "McpServerProbeTimedOut",
-            Self::McpServerTransportDropped { .. } => "McpServerTransportDropped",
-            Self::McpServerReconnected { .. } => "McpServerReconnected",
-            Self::McpServerReconnectFailed { .. } => "McpServerReconnectFailed",
-            Self::McpServerParked { .. } => "McpServerParked",
-            Self::EmbeddingModelUnhealthy { .. } => "EmbeddingModelUnhealthy",
-            Self::ProviderApiKeyRejected { .. } => "ProviderApiKeyRejected",
-            Self::TaskSourceFetched { .. } => "TaskSourceFetched",
-            Self::TaskSourceTaskIngested { .. } => "TaskSourceTaskIngested",
-            Self::TaskSourceFetchFailed { .. } => "TaskSourceFetchFailed",
-            Self::ThreadGoalUpdated { .. } => "ThreadGoalUpdated",
-            Self::ThreadGoalCleared { .. } => "ThreadGoalCleared",
-            Self::ThreadTodosChanged { .. } => "ThreadTodosChanged",
-            Self::ThreadRunModeChanged { .. } => "ThreadRunModeChanged",
-            Self::Voice(_) => "Voice",
         }
     }
 
@@ -1645,81 +1563,6 @@ impl DomainEvent {
             | Self::McpServerReconnected { qualified_name, .. }
             | Self::McpServerReconnectFailed { qualified_name, .. }
             | Self::McpServerParked { qualified_name, .. } => Some(qualified_name.as_str()),
-            _ => None,
-        }
-    }
-
-    /// A one-line summary for the developer Event Log, for the variants whose
-    /// name and [`Self::agent_hint`] are not enough to act on.
-    ///
-    /// The Event Log envelope (`GET /events/domain`) carries the domain, the
-    /// variant name, the agent hint and a timestamp — no payload. A variant
-    /// whose whole point is a failure *reason* would otherwise reach the UI
-    /// with the reason discarded: a transport that broke and one that timed
-    /// out are the same row (#5931). This is the opt-in escape hatch. A
-    /// variant with something a reader needs returns a short rendering of it;
-    /// every other variant returns `None` and its row is unchanged.
-    ///
-    /// What comes back is shown verbatim to anyone who can open the Event Log
-    /// and lands in the log's NDJSON download, so it carries no payload
-    /// content, no credentials and no un-redacted endpoint — the MCP arms
-    /// pass through strings `tinymcp` has already rendered and
-    /// endpoint-redacted — and no `workspace_dir`, which is on the event for
-    /// subscribers to filter on, not for a shared panel to print.
-    #[must_use]
-    pub fn log_detail(&self) -> Option<String> {
-        /// Long enough for a rendered transport error, short enough that one
-        /// row cannot push the rest of the log off the screen. Counted in
-        /// `char`s, so a multi-byte error cannot be split mid-character.
-        const MAX_DETAIL_CHARS: usize = 160;
-
-        let clip = |text: &str| clip_to_chars(text, MAX_DETAIL_CHARS);
-
-        match self {
-            Self::McpServerProbeTimedOut {
-                probe_timeout_secs,
-                consecutive_timeouts,
-                teardown_after,
-                ..
-            } => Some(format!(
-                "no answer in {probe_timeout_secs}s; timeout {consecutive_timeouts} of \
-                 {teardown_after} before teardown"
-            )),
-            Self::McpServerTransportDropped {
-                outcome,
-                detail,
-                elapsed_ms,
-                ..
-            } => {
-                let mut summary = format!("session ended: {outcome}");
-                if let Some(elapsed_ms) = elapsed_ms {
-                    summary.push_str(&format!(" after {elapsed_ms}ms"));
-                }
-                if let Some(detail) = detail {
-                    summary.push_str(" — ");
-                    summary.push_str(&clip(detail));
-                }
-                Some(summary)
-            }
-            Self::McpServerReconnected {
-                tool_count,
-                after_failures,
-                ..
-            } => Some(format!(
-                "connected with {tool_count} tools after {after_failures} failed attempt(s)"
-            )),
-            Self::McpServerReconnectFailed {
-                error,
-                failures,
-                retry_in_secs,
-                ..
-            } => Some(format!(
-                "attempt {failures} failed, retrying in {retry_in_secs}s — {}",
-                clip(error)
-            )),
-            Self::McpServerParked { error, .. } => {
-                Some(format!("parked, not retrying — {}", clip(error)))
-            }
             _ => None,
         }
     }
@@ -1788,6 +1631,9 @@ impl DomainEvent {
         }
     }
 }
+
+mod log_detail;
+mod variant_names;
 
 #[cfg(test)]
 #[path = "events_tests.rs"]

@@ -410,6 +410,7 @@ pub async fn clear_credential(
 
     let mut effective_config = config.clone();
     let mut cleared_source_api_key = false;
+    let mut carried_api_key = false;
     if matches!(
         kind,
         None | Some(CredentialKind::Session) | Some(CredentialKind::Local)
@@ -437,16 +438,28 @@ pub async fn clear_credential(
                     // the effective credential a moment ago (#6318).
                     api_key::store_api_key(&effective_config, key).map_err(|e| e.to_string())?;
                     logs.push("api key carried forward to the signed-out workspace".to_string());
+                    carried_api_key = true;
                 }
-                // Either the key was just moved to the post-teardown config
-                // above, or `kind` is `None` and it must be removed outright.
-                // `config` here is still the pre-teardown, user-scoped
-                // reference, so this clears the *source* location — never
-                // leave that copy behind, or a later login to the same
-                // account (or an api-key clear against the wrong location)
-                // would silently resurrect it (#6318).
-                cleared_source_api_key =
-                    api_key::clear_api_key(config).map_err(|e| e.to_string())?;
+                // With a storage backend the auth profiles are one secret in
+                // the acting scope (`profiles::persistence::STORAGE_SECRET_NAME`),
+                // not a file per state directory, so the source and the
+                // destination above are the same record: clearing the
+                // "source" would delete the key just carried forward.
+                let shares_store =
+                    carried_api_key && matches!(crate::storage::secrets::current(), Ok(Some(_)));
+                if shares_store {
+                    log::debug!("[credentials] api key kept: the storage profile store is shared");
+                } else {
+                    // Either the key was just moved to the post-teardown config
+                    // above, or `kind` is `None` and it must be removed outright.
+                    // `config` here is still the pre-teardown, user-scoped
+                    // reference, so this clears the *source* location — never
+                    // leave that copy behind, or a later login to the same
+                    // account (or an api-key clear against the wrong location)
+                    // would silently resurrect it (#6318).
+                    cleared_source_api_key =
+                        api_key::clear_api_key(config).map_err(|e| e.to_string())?;
+                }
             }
         }
     }

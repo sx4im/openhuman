@@ -30,6 +30,7 @@ pub(super) fn test_config(tmp: &tempfile::TempDir) -> Config {
         ..Config::default()
     };
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::agent::session_host::test_support::install_managed_model_fixture(&config);
     config
 }
 
@@ -39,10 +40,7 @@ pub(super) fn unique_thread(tag: &str) -> String {
 
 /// A root transcript for `thread_id` with the given prose rows, as the
 /// session persistence writes one.
-fn write_thread_transcript(workspace_dir: &Path, stem: &str, thread_id: &str, rows: &[&str]) {
-    let path = workspace_dir
-        .join("session_raw")
-        .join(format!("{stem}.jsonl"));
+fn seed_legacy_thread_transcript(workspace_dir: &Path, stem: &str, thread_id: &str, rows: &[&str]) {
     let messages: Vec<_> = rows
         .iter()
         .enumerate()
@@ -74,7 +72,14 @@ fn write_thread_transcript(workspace_dir: &Path, stem: &str, thread_id: &str, ro
         thread_id: Some(thread_id.to_string()),
         task_id: None,
     };
-    crate::util::classic_transcript_fixture::write_classic(&path, &messages, &meta);
+    let history = crate::storage::sessions::workspace_transcripts("orchestrator", workspace_dir)
+        .open_stem(stem, meta)
+        .expect("open the legacy root in the workspace transcript store");
+    for message in messages {
+        history
+            .append(message)
+            .expect("persist the legacy root message");
+    }
 }
 
 fn prose(history: &[TranscriptEntry]) -> Vec<String> {
@@ -117,7 +122,7 @@ async fn checkout_cold_boots_from_the_thread_transcript_and_checkin_keeps_it_war
     let tmp = tempfile::tempdir().unwrap();
     let config = test_config(&tmp);
     let thread_id = unique_thread("cold");
-    write_thread_transcript(
+    seed_legacy_thread_transcript(
         &config.workspace_dir,
         "1789918422_orchestrator_thread",
         &thread_id,
@@ -566,13 +571,13 @@ fn chat_agent_id_selects_the_web_chat_agent_and_defaults_to_the_orchestrator() {
         "unset falls back to what the app runs"
     );
 
-    config.agent.chat_agent_id = Some("planner".to_string());
-    assert_eq!(pick_target_agent_id(&config), "planner");
+    config.agent.chat_agent_id = Some("summarizer".to_string());
+    assert_eq!(pick_target_agent_id(&config), "summarizer");
 
     // Padding is an operator typo in a hand-edited config.toml, not a request
     // for an agent whose id has spaces in it.
-    config.agent.chat_agent_id = Some("  planner  ".to_string());
-    assert_eq!(pick_target_agent_id(&config), "planner");
+    config.agent.chat_agent_id = Some("  summarizer  ".to_string());
+    assert_eq!(pick_target_agent_id(&config), "summarizer");
 
     // Blank is "unset", not "an agent named empty string": a turn routed at an
     // id the registry cannot answer would fail chat outright.

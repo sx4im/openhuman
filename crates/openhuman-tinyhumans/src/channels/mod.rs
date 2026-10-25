@@ -27,6 +27,7 @@ use tinychannels_bus::{ChannelBackendRequest, ChannelBackendResult};
 use crate::install::InstallOptions;
 
 /// The id the callback registers under.
+#[cfg(feature = "channels")]
 pub const CALLBACK_ID: &str = "tinyhumans";
 
 /// Serves one callback request.
@@ -39,7 +40,7 @@ pub(crate) async fn serve(
     use ChannelBackendResult as Result;
     match request {
         Request::ProgressiveTransport(request) => Ok(Result::ProgressiveTransport(
-            delivery::execute(&ctx, request).await,
+            delivery::execute(&ctx, *request).await,
         )),
         Request::SendReaction { channel, reaction } => {
             messaging::send_reaction(&ctx.config, &channel, reaction)

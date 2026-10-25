@@ -69,26 +69,10 @@ export function isActiveTimelineStatus(status: string | undefined): boolean {
   return status === 'running' || status === 'awaiting_user';
 }
 
-/**
- * Every `subagent:*` timeline row spawned by one `spawn_parallel_agents` tool
- * call — the workers sharing `subagent.parentCallId === parentCallId` (see
- * {@link SubagentActivity.parentCallId}) — in the order they were issued
- * (`seq`). Used by `ParallelAgentsCard` (`features/conversations/aui/
- * ParallelAgentsCard.tsx`) to render the vendored `SubagentList` above the
- * per-child `TaskCard` rows for a `spawn_parallel_agents` call.
- */
-export function selectSubagentChildrenByParentCallId(
-  timeline: ToolTimelineEntry[],
-  parentCallId: string
-): ToolTimelineEntry[] {
-  return timeline
-    .filter(entry => entry.subagent?.parentCallId === parentCallId)
-    .sort((a, b) => a.seq - b.seq);
-}
-
 /** Live progress of the running turn, as the socket handlers maintain it. */
 export interface InferenceStatus {
-  phase: 'thinking' | 'tool_use' | 'subagent';
+  /** `compacting`: summarizing earlier conversation before the next model call. */
+  phase: 'thinking' | 'compacting' | 'tool_use' | 'subagent';
   iteration: number;
   maxIterations: number;
   activeTool?: string;
@@ -125,8 +109,8 @@ export interface SubagentActivity {
    * Identity (`<request_id>:<seq>`) of the `subagent_spawned` event that last
    * started or resumed this delegation.
    *
-   * `continue_subagent` announces a resume by republishing `subagent_spawned`
-   * for the same task/agent, so "an existing row got spawned again" is the
+   * Resuming a paused task republishes `subagent_spawned` for the same
+   * task/agent, so "an existing row got spawned again" is the
    * only resume signal the frontend gets — and a Socket.IO redelivery of the
    * ORIGINAL spawn is indistinguishable from it by shape alone. Comparing
    * identities separates them: a redelivery repeats the pair the core stamped
@@ -203,25 +187,6 @@ export interface SubagentActivity {
    * tool sequence. Absent on legacy/test rows that predate streaming.
    */
   transcript?: SubagentTranscriptItem[];
-  /**
-   * Absolute path to this worker's isolated `git worktree` checkout, when it
-   * ran with `isolation = "worktree"` (#3376). `undefined` for non-isolated
-   * (read-only or shared-workspace) workers. Scaffold-only: the open/diff/
-   * remove action buttons that consume this land in a follow-up PR.
-   */
-  worktreePath?: string;
-  /**
-   * Files (relative to the worktree root) this worker changed, collected from
-   * `git status` after the run. Drives the future diff/overlap UI. Absent or
-   * empty for non-isolated workers and clean worktrees.
-   */
-  changedFiles?: string[];
-  /**
-   * `true` when the worker's worktree had uncommitted changes after the run.
-   * A dirty worktree must not be auto-removed — the cleanup UI will require an
-   * explicit user choice. `undefined` for non-isolated workers.
-   */
-  isDirty?: boolean;
 }
 
 /**
@@ -1428,7 +1393,7 @@ export function toolTimelineFromPersisted(
  * intact preserves the truthful "was waiting for the user" history — and the
  * pulse is already stopped by the row-level `cancelled` above.
  *
- * A detached sub-agent (`spawn_async_subagent`, `mode === 'async'`) is the
+ * A detached sub-agent (`spawn_subagent`, `mode === 'async'`) is the
  * exception, and the parent's snapshot is never allowed to settle it. It is a
  * fire-and-forget task that deliberately outlives the turn that spawned it, so
  * the parent's lifecycle says nothing about whether the child is alive — and
@@ -2011,9 +1976,8 @@ const chatRuntimeSlice = createSlice({
       // event-seen map, so guard here.
       const existing = entries.find(e => e.id === rowId);
       if (existing) {
-        // ...with one exception. `continue_subagent` republishes
-        // `subagent_spawned` for the SAME task/agent when it resumes a paused
-        // child (continue_subagent.rs:330), and that is the only signal the
+        // ...with one exception. Resuming a paused task republishes
+        // `subagent_spawned` for the SAME task/agent, and that is the only signal the
         // frontend gets that the pause is over. Swallowing it left the row
         // stuck on `awaiting_user` for the rest of the run: the card kept
         // asking a question the user had already answered.
@@ -2041,6 +2005,9 @@ const chatRuntimeSlice = createSlice({
             existing.subagent.status = 'running';
             existing.subagent.awaitingQuestion = undefined;
             existing.subagent.spawnEventId = spawnEventId;
+            // Reattach the resumed task card to the newest parent call so the
+            // completed spawn from its earlier turn does not claim this work.
+            if (parentCallId) existing.subagent.parentCallId = parentCallId;
           }
         }
         return;
@@ -2171,24 +2138,10 @@ const chatRuntimeSlice = createSlice({
         outputChars?: number;
         /** The sub-agent's final assistant text; see {@link SubagentActivity.output}. */
         output?: string;
-        worktreePath?: string;
-        changedFiles?: string[];
-        isDirty?: boolean;
       }>
     ) => {
-      const {
-        threadId,
-        rowId,
-        taskId,
-        success,
-        iterations,
-        elapsedMs,
-        outputChars,
-        output,
-        worktreePath,
-        changedFiles,
-        isDirty,
-      } = action.payload;
+      const { threadId, rowId, taskId, success, iterations, elapsedMs, outputChars, output } =
+        action.payload;
       // Settle a still-in-flight row: `running`, or `awaiting_user` (a subagent
       // paused for input that then completes must not stay stuck at
       // awaiting_user). Already-terminal rows are left as-is.
@@ -2200,10 +2153,10 @@ const chatRuntimeSlice = createSlice({
       // running, and a background delivery (a `chat_done` with no
       // `inference_start`) then froze it as its own trail: a card that spun
       // forever under the reply announcing the child's result. Both ids are
-      // turn-independent, so a run resumed by `continue_subagent` (same task
-      // id) also settles the earlier turn's card for it. That is how a paused
+      // turn-independent, so a run resumed with the same task id also settles
+      // the earlier turn's card for it. That is how a paused
       // `awaiting_user` card clears: the resumed run's completion carries the
-      // new `continue_subagent` call as its parent, never the original spawn.
+      // newest `spawn_subagent` call as its parent, never the original spawn.
       // Restored past-turn timelines too, like `subagentCancelResolved`: they
       // hold persisted (core-id) rows the process-source panel shows.
       const coreRowId = taskId !== undefined ? `subagent:${taskId}` : undefined;
@@ -2228,9 +2181,6 @@ const chatRuntimeSlice = createSlice({
         if (elapsedMs !== undefined) s.elapsedMs = elapsedMs;
         if (outputChars !== undefined) s.outputChars = outputChars;
         if (output !== undefined) s.output = output;
-        if (worktreePath !== undefined) s.worktreePath = worktreePath;
-        if (changedFiles !== undefined) s.changedFiles = changedFiles;
-        if (isDirty !== undefined) s.isDirty = isDirty;
       }
     },
     /**
@@ -2610,6 +2560,17 @@ const chatRuntimeSlice = createSlice({
     },
     clearPendingPlanReviewForThread: (state, action: PayloadAction<{ threadId: string }>) => {
       delete state.pendingPlanReviewByThread[action.payload.threadId];
+    },
+    clearPendingPlanReviewIfRequest: (
+      state,
+      action: PayloadAction<{ threadId: string; requestId: string }>
+    ) => {
+      if (
+        state.pendingPlanReviewByThread[action.payload.threadId]?.requestId ===
+        action.payload.requestId
+      ) {
+        delete state.pendingPlanReviewByThread[action.payload.threadId];
+      }
     },
     setWorkflowProposalForThread: (
       state,
@@ -3344,6 +3305,7 @@ export const {
   resolvePendingApprovalForThread,
   setPendingPlanReviewForThread,
   clearPendingPlanReviewForThread,
+  clearPendingPlanReviewIfRequest,
   setWorkflowProposalForThread,
   clearWorkflowProposalForThread,
   markWorkflowProposalCompleted,

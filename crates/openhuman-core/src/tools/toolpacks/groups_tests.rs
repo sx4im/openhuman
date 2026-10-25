@@ -117,7 +117,6 @@ fn process_default_affects_registered_tools_without_a_core_context() {
                 &browser,
                 &http,
                 std::path::Path::new("/tmp/openhuman-tool-groups"),
-                &std::collections::HashMap::new(),
                 &config,
             )
         };

@@ -137,7 +137,7 @@ async fn cancel_chat_inner(
     });
 
     // An unscoped stop also halts the thread's detached work. Async sub-agents
-    // (`spawn_async_subagent`) run on their own tasks and deliberately drop the
+    // (`spawn_subagent`) run on their own tasks and deliberately drop the
     // spawning turn's cancellation, so tearing the turn down leaves them
     // running — and when one finishes, background delivery starts a fresh
     // system turn on the thread, which reads as "Stop did nothing". Abort them

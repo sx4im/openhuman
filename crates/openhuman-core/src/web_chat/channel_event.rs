@@ -218,8 +218,8 @@ pub struct WebChannelEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue_item: Option<QueueItemPayload>,
     /// Session goal snapshot, carried on goal-lifecycle events. Left as a
-    /// raw `Value` because the goal shape is owned by `tinyagents-graph`,
-    /// not this crate.
+    /// raw `Value` so the wire event remains independent of the harness
+    /// tool's internal goal type.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal: Option<serde_json::Value>,
     /// Session todo-list snapshot, carried on todo-lifecycle events. Raw
@@ -453,22 +453,6 @@ pub struct SubagentProgressDetail {
     /// consistent agent labels across timeline, sub-mascots, and drawer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    /// Absolute path to the worker's isolated `git worktree` checkout
-    /// (on `subagent_completed`, when the worker ran with
-    /// `isolation = "worktree"`). Drives the inline worktree row's
-    /// open/diff/remove actions. `None` for non-isolated workers (#3376).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worktree_path: Option<String>,
-    /// Files (relative to the worktree root) the worker changed, snapshot
-    /// after the run (on `subagent_completed`). Absent for non-isolated
-    /// workers and clean worktrees.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub changed_files: Option<Vec<String>>,
-    /// Whether the worker's worktree had uncommitted changes after the run
-    /// (on `subagent_completed`). A dirty worktree must not be auto-removed —
-    /// the UI requires an explicit user decision. `None` for non-isolated.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dirty_status: Option<bool>,
     /// The parent turn's tool-call id that this sub-agent spawn is
     /// attributed to (on `subagent_spawned`), mirroring
     /// `AgentProgress::SubagentSpawned::parent_call_id`. Lets the UI

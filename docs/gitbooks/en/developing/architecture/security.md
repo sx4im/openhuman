@@ -98,7 +98,7 @@ Local PII detection belongs to [`tinymemory_api::safety`](https://github.com/tin
 - `crates/openhuman-core/src/tools/ops.rs` and `tools/impl/{browser,document,filesystem,network,presentation,system}/`: every executable tool consults `SecurityPolicy`.
 - `crates/openhuman-core/src/tools/impl/network/{gate,mcp,mcp_server_tools}.rs`: risk-classify outbound calls.
 - `crates/openhuman-core/src/memory/guard.rs`: wraps every memory write in `security::scrub::host_policy()`.
-- `crates/openhuman-core/src/tools/delegate.rs`: sub-agent dispatch goes through the autonomy gate.
+- `crates/openhuman-core/src/agent/subagent_host/`: sub-agent execution applies the host's tool policy and autonomy gate.
 - `crates/openhuman-core/src/security/credentials/`: uses `SecretStore` and `redact`.
 
 ## Tests

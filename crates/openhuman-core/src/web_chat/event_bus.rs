@@ -729,3 +729,7 @@ impl EventHandler<DomainEvent> for ApprovalSurfaceSubscriber {
 #[cfg(test)]
 #[path = "event_bus_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "plan_review_event_tests.rs"]
+mod plan_review_event_tests;

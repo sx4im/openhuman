@@ -69,3 +69,35 @@ async fn public_bind_uses_nonempty_env_token_without_writing_file() {
     assert!(!tmp.join("core.token").exists());
     std::fs::remove_dir_all(&tmp).ok();
 }
+
+/// `mode(0o600)` only applies on create: a token rewritten over an existing
+/// world-readable file must still end up owner-only.
+#[cfg(unix)]
+#[test]
+async fn rewriting_the_token_tightens_an_existing_file_to_owner_only() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("core.token");
+    std::fs::write(&path, "old").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    write_core_token_file(&path, "new-token").unwrap();
+
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "token file left at {mode:o}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "new-token");
+}
+
+/// A symlink planted at the token path must not redirect the bearer token.
+#[cfg(unix)]
+#[test]
+async fn the_token_is_not_written_through_a_symlink() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("elsewhere");
+    std::fs::write(&target, "untouched").unwrap();
+    let path = tmp.path().join("core.token");
+    std::os::unix::fs::symlink(&target, &path).unwrap();
+
+    assert!(write_core_token_file(&path, "secret-token").is_err());
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
+}

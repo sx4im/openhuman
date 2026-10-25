@@ -59,17 +59,6 @@ pub struct SubagentRunOptions {
     /// `{workspace_dir}/.openhuman/subagent_checkpoints/`.
     pub checkpoint_dir: Option<PathBuf>,
 
-    /// Per-worker isolated checkout for git-worktree isolation.
-    ///
-    /// When `Some`, the runner derives a [`WorkspaceDescriptor`] rooted at this
-    /// path (see `workspace_descriptor_for_subagent`) and threads it onto the
-    /// tinyagents run context, so acting tools (shell, git) resolve their CWD to
-    /// the worker's isolated worktree checkout via
-    /// `ToolExecutionContext.workspace` instead of the shared `Config.action_dir`.
-    /// When `None` (the default), behaviour is unchanged — tools fall through to
-    /// `security.action_dir`.
-    pub worktree_action_dir: Option<PathBuf>,
-
     /// SDK workspace descriptor threaded into the TinyAgents tool-execution
     /// context. When present it is attached to the run's `RunContext`
     /// (`RunContext::with_workspace`) and surfaced per tool call via
@@ -100,8 +89,8 @@ pub enum SubagentRunStatus {
     /// The sub-agent completed normally with a final response.
     Completed,
     /// The sub-agent called `ask_user_clarification` and is waiting
-    /// for the orchestrator to relay the user's answer via
-    /// `continue_subagent`.
+    /// for the orchestrator to relay the user's answer via a same-key async
+    /// spawn.
     AwaitingUser {
         question: String,
         options: Option<Vec<String>>,
@@ -113,8 +102,8 @@ pub enum SubagentRunStatus {
         /// failure in the runner was logged at `warn` and then reported as an
         /// ordinary `AwaitingUser` anyway. The orchestrator relayed a question
         /// and a `task_id`, and the failure only surfaced much later, when the
-        /// user had already answered and `continue_subagent` found nothing on
-        /// disk. Carrying the outcome here is what makes a failed write
+        /// user had already answered and the next spawn found nothing on disk.
+        /// Carrying the outcome here is what makes a failed write
         /// visible at pause time rather than at resume time (#5928).
         ///
         /// `None` does not mean resumption is impossible: a sub-agent with a
@@ -133,6 +122,9 @@ pub enum SubagentRunStatus {
     Incomplete {
         /// Short, machine-set reason the run stopped short (stuck vs. cap).
         reason: String,
+        /// Typed failure classification when the harness has one. It remains
+        /// separate from `reason`, which is user-facing summary text.
+        failure_cause: Option<tinyagents_harness::no_progress::ClassifiedStopCause>,
     },
     /// Cooperative cancellation won the subagent lifecycle. This is distinct
     /// from an incomplete run so callers never publish a completed result for

@@ -24,9 +24,12 @@ pub use edit::{
     edit_message, regenerate, EditMessageRequest, EditOrRegenerateResponse, RegenerateRequest,
 };
 pub use live_state::{
-    goal_get, todos_get, ThreadGoalGetResponse, ThreadLiveStateRequest, ThreadTodosGetResponse,
+    goal_get, state_get, todos_get, ThreadGoalGetResponse, ThreadLiveStateRequest,
+    ThreadStateGetResponse, ThreadTodosGetResponse,
 };
 pub use purge::threads_purge;
+#[cfg(test)]
+pub(crate) use purge::threads_purge_inner_with_snapshot_hook;
 pub use search::{thread_search, ThreadSearchHit, ThreadSearchRequest, ThreadSearchResponse};
 pub use title_generation::thread_generate_title;
 pub use transcript::{transcript_get, TranscriptGetRequest};

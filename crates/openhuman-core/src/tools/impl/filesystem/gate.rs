@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tinytools_std::filesystem::FsGate;
+use tinyagents_harness_tools::fs::filesystem::FsGate;
 
+use crate::security::policy::CommandClass;
 use crate::security::policy::{TrustedAccess, TrustedRoot};
 use crate::security::{AutonomyLevel, GateDecision, SecurityPolicy};
-use tinybox_bus::CommandClass;
 
 /// Clone `security` and scope it to `root`, a run's workspace descriptor root.
 ///
@@ -34,7 +34,10 @@ use tinybox_bus::CommandClass;
 /// The root always originates from trusted in-process code (the session
 /// builder, the sub-agent runner, or the `cwd` RPC parameter), never from
 /// model-supplied text.
-pub(super) fn security_scoped_to_root(security: &SecurityPolicy, root: &Path) -> SecurityPolicy {
+pub(in crate::tools::implementations) fn security_scoped_to_root(
+    security: &SecurityPolicy,
+    root: &Path,
+) -> SecurityPolicy {
     let mut scoped = security.clone();
     scoped.action_dir = root.to_path_buf();
     scoped.trusted_roots.push(TrustedRoot {

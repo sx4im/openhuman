@@ -30,7 +30,7 @@ impl OpenHumanSessionHost {
             request_id: None,
             thread_id: self.thread_id.clone(),
             stream: false,
-            session: Some(session),
+            session: self.session_history_locator.as_ref().map(|_| session),
             resume: ResumeMode::Session,
             cancellation,
             run_context: context.into_tinyagents(root_config),

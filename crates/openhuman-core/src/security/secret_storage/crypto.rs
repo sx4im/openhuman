@@ -42,6 +42,11 @@ pub(super) fn hex_encode(data: &[u8]) -> String {
 
 /// Decode a hex string into bytes.
 pub(super) fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
+    // Decoding slices by byte, so a non-ASCII character would split mid-char
+    // and panic. Hex is ASCII; reject anything else as invalid input.
+    if !hex.is_ascii() {
+        return Err("hex string is not ASCII".to_string());
+    }
     if !hex.len().is_multiple_of(2) {
         return Err("hex string has odd length".to_string());
     }

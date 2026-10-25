@@ -15,6 +15,11 @@ pub fn snapshot_config_json(config: &Config) -> Result<serde_json::Value, String
         value["search"][provider]["api_key"] = serde_json::Value::Null;
     }
     value["seltz"]["api_key"] = serde_json::Value::Null;
+    // A broker URL may carry credentials too; show it redacted.
+    if let Some(url) = config.inbound.queue_url.as_deref() {
+        value["inbound"]["queue_url"] =
+            serde_json::Value::String(crate::config::schema::storage::redact_url(url));
+    }
     // A storage URL may carry database credentials; show it redacted.
     if let Some(url) = config.storage.url.as_deref() {
         value["storage"]["url"] =

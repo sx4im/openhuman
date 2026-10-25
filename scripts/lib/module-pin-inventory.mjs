@@ -21,8 +21,8 @@ export const PIN_MAP = {
   tinyvoice: { submodule: "vendor/tinyvoice" },
   tinymcp: { submodule: "vendor/tinymcp" },
   tinyconnectors: { submodule: "vendor/tinyconnectors" },
-  tinymemes: { submodule: "vendor/tinymemes" },
   tinyflows: { submodule: "vendor/tinyflows" },
+  tinyeventqueues: { submodule: "vendor/tinyeventqueues" },
 };
 
 /**

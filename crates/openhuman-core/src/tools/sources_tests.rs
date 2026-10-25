@@ -46,7 +46,6 @@ fn assemble(tmp: &TempDir) -> Vec<String> {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
         None,
     )
@@ -90,19 +89,18 @@ fn registered_sources_append_in_registration_order_after_built_ins() {
 }
 
 #[test]
-fn a_source_receives_the_catalogue_context() {
+fn a_source_receives_the_catalogue_action_directory() {
     let tmp = TempDir::new().unwrap();
     let seen = Arc::new(std::sync::Mutex::new(None));
     let sink = Arc::clone(&seen);
     register_tool_source("test::ctx", move |ctx| {
-        *sink.lock().unwrap() = Some((ctx.action_dir.to_path_buf(), ctx.agents.len()));
+        *sink.lock().unwrap() = Some(ctx.action_dir.to_path_buf());
         Vec::new()
     });
     let _ = assemble(&tmp);
     unregister_tool_source("test::ctx");
-    let (action_dir, agents) = seen.lock().unwrap().clone().expect("source ran");
+    let action_dir = seen.lock().unwrap().clone().expect("source ran");
     assert_eq!(action_dir, tmp.path());
-    assert_eq!(agents, 0);
 }
 
 #[test]
@@ -120,8 +118,8 @@ fn unregistering_a_source_removes_its_tools() {
 fn anchored_sources_sit_where_the_catalogue_always_listed_them() {
     // The pre-refactor catalogue built a host's media / file-storage tools
     // right after the search tools (before hosting, web3 and image_info) and
-    // its place / market-data tools right after the delegation tool, ahead of
-    // the Composio tools; the order is a prompt-cache input.
+    // its place / market-data tools right after image_info, ahead of the
+    // Composio tools; the order is a prompt-cache input.
     let tmp = TempDir::new().unwrap();
     let anchor_tools = |names: &[&str]| -> Vec<Box<dyn Tool>> {
         names
@@ -174,9 +172,12 @@ fn anchored_sources_sit_where_the_catalogue_always_listed_them() {
     // hosting/web3, and follow the built-ins that precede the search tools.
     assert!(pos("file_read") < pos("anchor_fake_search_a"));
     assert!(pos("anchor_fake_search_b") < pos("image_info"));
-    // End sources, and sources with an unknown anchor, trail every built-in
-    // and keep registration order.
+    // The post-image-info anchor precedes Composio, while end sources and
+    // sources with an unknown anchor trail every built-in.
     assert!(pos("image_info") < pos("anchor_fake_delegate"));
+    if let Some(composio) = names.iter().position(|name| name.starts_with("composio")) {
+        assert!(pos("anchor_fake_delegate") < composio);
+    }
     assert!(pos("anchor_fake_delegate") < pos("anchor_fake_end"));
     assert!(pos("anchor_fake_end") < pos("anchor_fake_unknown"));
     // Sibling tests register sources on the same process-wide slot, so only

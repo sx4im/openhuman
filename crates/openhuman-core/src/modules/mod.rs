@@ -70,8 +70,12 @@ pub mod desktop;
 #[cfg(feature = "documents")]
 #[cfg(feature = "modules")]
 pub mod documents;
+#[cfg(feature = "inbound-queues")]
+pub mod event_queues;
 #[cfg(feature = "modules")]
 pub mod linked;
+#[path = "documents/memory_converter.rs"]
+pub(crate) mod memory_converter;
 #[cfg(feature = "modules")]
 pub mod ops;
 #[cfg(feature = "modules")]
@@ -90,29 +94,33 @@ mod search_path;
 pub(crate) mod site_memory_host;
 mod source;
 #[cfg(feature = "modules")]
-mod storage_grant_schemas;
+pub(crate) mod storage_grant_schemas;
 #[cfg(feature = "modules")]
 pub mod storage_grants;
 #[cfg(feature = "modules")]
 pub(crate) mod storage_host;
+#[cfg(feature = "modules")]
+pub(crate) mod storage_host_invocation;
 #[cfg(feature = "modules")]
 mod storage_host_linked;
 #[cfg(all(test, feature = "modules"))]
 mod storage_host_watching;
 #[cfg(feature = "modules")]
 mod storage_import_support;
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 mod storage_import_tinybox;
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 mod storage_import_tinyconnectors;
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 mod storage_import_tinyjuice;
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 mod storage_import_tinyjuice_savings;
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 mod storage_import_tinymcp;
-#[cfg(all(feature = "modules", feature = "web3"))]
+#[cfg(all(feature = "modules", feature = "web3", feature = "legacy-import"))]
 mod storage_import_tinywallet;
+#[cfg(feature = "modules")]
+pub mod storage_queue_manifest;
 pub mod tinybox;
 pub(crate) mod tinyflows;
 #[cfg(feature = "modules")]
@@ -161,24 +169,59 @@ pub fn client(config: crate::config::Config) -> tinybus::module::ModuleClient {
 
 pub use types::{LoadPolicy, ModuleRecord, ModuleSource, ModuleState, ModuleStatus, PlatformAsset};
 
+/// Why a legacy import did not finish on this call.
+#[derive(Debug)]
+pub enum LegacyImportError {
+    /// Another process holds the import claim, so nothing was imported yet.
+    ClaimHeld,
+    /// The import failed; it is retried at the next call.
+    Failed(String),
+}
+
 /// Imports tinymcp's legacy SQLite files under `data_dir` into the module's
-/// storage, once per directory. Never fails the caller: an error is logged and
-/// the import is retried at the next open.
+/// storage, once per directory. A failure is logged and the import is retried
+/// at the next open; [`LegacyImportError::ClaimHeld`] means the caller should
+/// not open yet.
 pub async fn import_legacy_mcp(
     ctx: &crate::core::runtime::DispatchCtx,
     data_dir: &std::path::Path,
-) {
-    #[cfg(feature = "modules")]
-    match storage_import_tinymcp::import_legacy(ctx, data_dir).await {
-        Ok(outcome) => {
-            log::debug!("[mcp] legacy storage import: {outcome:?}");
-            storage_grant_schemas::migrate_imported(ctx, storage_grant_schemas::tinymcp::MODULE_ID)
+) -> Result<(), LegacyImportError> {
+    #[cfg(all(feature = "modules", feature = "legacy-import"))]
+    {
+        match storage_import_tinymcp::import_legacy(ctx, data_dir).await {
+            Ok(outcome) => {
+                log::debug!("[mcp] legacy storage import: {outcome:?}");
+                storage_grant_schemas::migrate_imported(
+                    ctx,
+                    storage_grant_schemas::tinymcp::MODULE_ID,
+                )
                 .await;
+                Ok(())
+            }
+            Err(error) if error.is::<storage_import_support::ImportClaimHeld>() => {
+                log::debug!("[mcp] legacy storage import is held by another process");
+                Err(LegacyImportError::ClaimHeld)
+            }
+            Err(error) => {
+                log::warn!("[mcp] legacy storage import failed, will retry: {error:#}");
+                Err(LegacyImportError::Failed(format!(
+                    "legacy TinyMCP storage import failed: {error:#}"
+                )))
+            }
         }
-        Err(error) => log::warn!("[mcp] legacy storage import failed, will retry: {error:#}"),
+    }
+    #[cfg(all(feature = "modules", not(feature = "legacy-import")))]
+    {
+        let _ = (ctx, data_dir);
+        let error = "legacy storage import is unavailable: enable the `legacy-import` feature";
+        log::error!("[mcp] {error}");
+        Err(LegacyImportError::Failed(error.to_owned()))
     }
     #[cfg(not(feature = "modules"))]
-    let _ = (ctx, data_dir);
+    {
+        let _ = (ctx, data_dir);
+        Ok(())
+    }
 }
 
 /// What an importer's outcome says about whether it may be skipped next time.
@@ -189,7 +232,7 @@ trait Settled {
     fn settled(&self) -> bool;
 }
 
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 macro_rules! settled_outcome {
     ($($module:ident),*) => {$(
         impl Settled for $module::Outcome {
@@ -200,19 +243,19 @@ macro_rules! settled_outcome {
     )*};
 }
 
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 settled_outcome!(
     storage_import_tinyconnectors,
     storage_import_tinybox,
     storage_import_tinyjuice
 );
-#[cfg(feature = "modules")]
+#[cfg(all(feature = "modules", feature = "legacy-import"))]
 impl Settled for storage_import_tinyjuice_savings::Outcome {
     fn settled(&self) -> bool {
         matches!(self, Self::AlreadyDone | Self::Imported { .. })
     }
 }
-#[cfg(all(feature = "modules", feature = "web3"))]
+#[cfg(all(feature = "modules", feature = "web3", feature = "legacy-import"))]
 settled_outcome!(storage_import_tinywallet);
 
 /// The (importer, module scope, directory) triples this process already
@@ -280,7 +323,7 @@ pub async fn import_legacy_connectors(
     ctx: &crate::core::runtime::DispatchCtx,
     state_dir: &std::path::Path,
 ) {
-    #[cfg(feature = "modules")]
+    #[cfg(all(feature = "modules", feature = "legacy-import"))]
     import_once(
         ctx,
         "connectors",
@@ -289,6 +332,10 @@ pub async fn import_legacy_connectors(
         storage_import_tinyconnectors::import_legacy(ctx, state_dir),
     )
     .await;
+    #[cfg(all(feature = "modules", not(feature = "legacy-import")))]
+    log::error!(
+        "[connectors] legacy storage import is unavailable: enable the `legacy-import` feature"
+    );
     #[cfg(not(feature = "modules"))]
     let _ = (ctx, state_dir);
 }
@@ -302,7 +349,7 @@ pub async fn import_legacy_x402(
     ctx: &crate::core::runtime::DispatchCtx,
     workspace_dir: &std::path::Path,
 ) -> bool {
-    #[cfg(all(feature = "modules", feature = "web3"))]
+    #[cfg(all(feature = "modules", feature = "web3", feature = "legacy-import"))]
     return import_once(
         ctx,
         "x402",
@@ -311,6 +358,14 @@ pub async fn import_legacy_x402(
         storage_import_tinywallet::import_legacy(ctx, workspace_dir),
     )
     .await;
+    #[cfg(all(feature = "modules", feature = "web3", not(feature = "legacy-import")))]
+    {
+        let _ = (ctx, workspace_dir);
+        log::error!(
+            "[x402] legacy payments import is unavailable: enable the `legacy-import` feature"
+        );
+        return false;
+    }
     #[cfg(not(all(feature = "modules", feature = "web3")))]
     {
         let _ = (ctx, workspace_dir);
@@ -325,7 +380,7 @@ pub async fn import_legacy_tinybox(
     ctx: &crate::core::runtime::DispatchCtx,
     workspace_dir: &std::path::Path,
 ) {
-    #[cfg(feature = "modules")]
+    #[cfg(all(feature = "modules", feature = "legacy-import"))]
     import_once(
         ctx,
         "tinybox",
@@ -334,6 +389,10 @@ pub async fn import_legacy_tinybox(
         storage_import_tinybox::import_legacy(ctx, workspace_dir),
     )
     .await;
+    #[cfg(all(feature = "modules", not(feature = "legacy-import")))]
+    log::error!(
+        "[tinybox] legacy storage import is unavailable: enable the `legacy-import` feature"
+    );
     #[cfg(not(feature = "modules"))]
     let _ = (ctx, workspace_dir);
 }
@@ -393,7 +452,7 @@ pub async fn import_legacy_tinyjuice(
     root: &std::path::Path,
     ttl: Option<std::time::Duration>,
 ) {
-    #[cfg(feature = "modules")]
+    #[cfg(all(feature = "modules", feature = "legacy-import"))]
     import_once(
         ctx,
         "tinyjuice",
@@ -402,6 +461,10 @@ pub async fn import_legacy_tinyjuice(
         storage_import_tinyjuice::import_legacy(ctx, root, ttl),
     )
     .await;
+    #[cfg(all(feature = "modules", not(feature = "legacy-import")))]
+    log::error!(
+        "[tinyjuice] legacy storage import is unavailable: enable the `legacy-import` feature"
+    );
     #[cfg(not(feature = "modules"))]
     let _ = (ctx, root, ttl);
 }
@@ -414,27 +477,35 @@ pub async fn import_legacy_tinyjuice_savings(
     client: &tinybus::module::ModuleClient,
     workspace_dir: &std::path::Path,
 ) {
-    #[cfg(feature = "modules")]
+    #[cfg(all(feature = "modules", feature = "legacy-import"))]
     {
         let file = storage_import_tinyjuice_savings::legacy_file(workspace_dir);
+        let client = client.clone();
         import_once(
             ctx,
             "tinyjuice-savings",
             storage_grant_schemas::tinyjuice::MODULE_ID,
             &file,
-            storage_import_tinyjuice_savings::import_legacy(ctx, &file, |aggregate| async move {
-                client
-                    .call::<bool>(
-                        "tinyjuice",
-                        tinyjuice_bus::names::methods::IMPORT_SAVINGS,
-                        (aggregate,),
-                    )
-                    .await
-                    .map_err(|e| anyhow::anyhow!("ImportSavings: {e}"))
+            storage_import_tinyjuice_savings::import_legacy(ctx, &file, move |aggregate| {
+                let client = client.clone();
+                async move {
+                    client
+                        .call::<bool>(
+                            "tinyjuice",
+                            tinyjuice_bus::names::methods::IMPORT_SAVINGS,
+                            (aggregate,),
+                        )
+                        .await
+                        .map_err(|e| anyhow::anyhow!("ImportSavings: {e}"))
+                }
             }),
         )
         .await;
     }
+    #[cfg(all(feature = "modules", not(feature = "legacy-import")))]
+    log::error!(
+        "[tinyjuice-savings] legacy storage import is unavailable: enable the `legacy-import` feature"
+    );
     #[cfg(not(feature = "modules"))]
     let _ = (ctx, client, workspace_dir);
 }
@@ -442,3 +513,12 @@ pub async fn import_legacy_tinyjuice_savings(
 #[cfg(all(test, feature = "modules"))]
 #[path = "import_once_tests.rs"]
 mod import_once_tests;
+
+#[cfg(all(
+    test,
+    feature = "modules",
+    feature = "web3",
+    not(feature = "legacy-import")
+))]
+#[path = "legacy_import_boundary_tests.rs"]
+mod legacy_import_boundary_tests;

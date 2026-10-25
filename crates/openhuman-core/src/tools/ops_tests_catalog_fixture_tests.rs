@@ -39,8 +39,11 @@ fn full_product_features_enabled() -> bool {
         ("scheduler-gate", cfg!(feature = "scheduler-gate")),
         ("file-logging", cfg!(feature = "file-logging")),
         ("hosting", cfg!(feature = "hosting")),
-        ("tinymemes", cfg!(feature = "tinymemes")),
+        ("inbound-queues", cfg!(feature = "inbound-queues")),
         ("storage-sqlite", cfg!(feature = "storage-sqlite")),
+        ("storage-file", cfg!(feature = "storage-file")),
+        ("secret-file", cfg!(feature = "secret-file")),
+        ("legacy-import", cfg!(feature = "legacy-import")),
     ];
     let declared: std::collections::BTreeSet<_> = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -115,16 +118,48 @@ fn full_tool_catalog_names() -> Vec<String> {
     let browser = cfg.browser.clone();
     let http = cfg.http_request.clone();
 
-    let tools = all_tools(
-        Arc::new(cfg.clone()),
-        &security,
-        AuditLogger::disabled(),
-        &browser,
-        &http,
-        tmp.path(),
-        &HashMap::new(),
-        &cfg,
+    // Media generators belong to the host, so provide the same three tools
+    // through the generic source port the product host uses. Keep the source
+    // in this context's Extensions: a process-global test registration can
+    // leak into concurrently running catalog tests.
+    let extensions = crate::core::slots::Extensions::new();
+    #[cfg(feature = "media")]
+    crate::tools::sources::register_tool_source_in(&extensions, "catalog-test-media", |_| {
+        use std::sync::Arc;
+        use tinyagents_harness::tinyinference_image::MockImageGenerator;
+        use tinyagents_harness::tinyinference_video::{MockVideoGenerator, MockVideoScript};
+
+        crate::media::generation::media_tools_from(
+            crate::media::generation::MediaGenerators::new(
+                Arc::new(MockImageGenerator::new()),
+                Arc::new(MockVideoGenerator::new(MockVideoScript::delivers())),
+            ),
+            std::path::Path::new("."),
+            std::path::Path::new("./workspace"),
+            std::path::Path::new("./Files"),
+            tinyagents_harness::tinyinference_video::WaitPolicy::new(
+                std::time::Duration::from_millis(1),
+                std::time::Duration::from_secs(5),
+            ),
+        )
+    });
+    let context = crate::core::runtime::CoreContext::for_test_with_extensions(
+        crate::core::runtime::DomainSet::full(),
+        Some(tmp.path().to_path_buf()),
+        extensions,
     );
+
+    let tools = crate::core::runtime::CoreContext::sync_scope(context, || {
+        all_tools(
+            Arc::new(cfg.clone()),
+            &security,
+            AuditLogger::disabled(),
+            &browser,
+            &http,
+            tmp.path(),
+            &cfg,
+        )
+    });
 
     let mut names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
     names.push(tinyagents_harness::tool::discover::TOOL_SEARCH_NAME.to_string());
@@ -144,6 +179,17 @@ fn full_tool_catalog_names() -> Vec<String> {
     names
 }
 
+/// Tool families the core does not register itself: they come from tool
+/// sources the TinyHumans layer plugs in (`tools::sources`), which a
+/// core-only lib test cannot install. The frontend fixture still lists them
+/// because the shipped product has them, so a core-only run must not read
+/// their absence as drift.
+const HOSTED_TOOL_PREFIXES: &[&str] = &["media_"];
+
+fn is_hosted_tool(name: &str) -> bool {
+    HOSTED_TOOL_PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
 const REGENERATE_COMMAND: &str = "UPDATE_TOOL_CATALOG=1 cargo test -p openhuman --lib \
      --features \"$(bash scripts/ci/product-features.sh)\" \
      tools::ops::tests::catalog_fixture_tests::tool_catalog_matches_frontend_fixture";
@@ -157,6 +203,16 @@ fn tool_catalog_matches_frontend_fixture() {
 
     if std::env::var("UPDATE_TOOL_CATALOG").as_deref() == Ok("1") {
         assert!(full_product_features_enabled(), "{REGENERATE_COMMAND}");
+        // Keep the hosted families the fixture already lists: this build
+        // cannot see them, so regenerating must not drop them.
+        let mut names = names;
+        if let Ok(previous) = std::fs::read_to_string(&path) {
+            if let Ok(previous) = serde_json::from_str::<Vec<String>>(&previous) {
+                names.extend(previous.into_iter().filter(|n| is_hosted_tool(n)));
+                names.sort();
+                names.dedup();
+            }
+        }
         let json = serde_json::to_string_pretty(&names).expect("serialize tool catalog");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create fixture directory");
@@ -190,7 +246,10 @@ fn tool_catalog_matches_frontend_fixture() {
     let full_product = full_product_features_enabled();
     let added: Vec<&String> = names.iter().filter(|n| !expected.contains(n)).collect();
     let removed: Vec<&String> = if full_product {
-        expected.iter().filter(|n| !names.contains(n)).collect()
+        expected
+            .iter()
+            .filter(|n| !names.contains(n) && !is_hosted_tool(n))
+            .collect()
     } else {
         Vec::new()
     };

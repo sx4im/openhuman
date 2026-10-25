@@ -125,3 +125,58 @@ async fn tool_result_artifacts_are_readable_by_absolute_path_under_workspace_onl
         .await
         .is_err());
 }
+
+/// A relative action dir is still the agent's working root (tool paths are
+/// resolved against it), so it is granted as its absolute form; a relative
+/// trusted root itself grants nothing.
+#[test]
+fn from_config_grants_a_relative_action_dir_as_its_absolute_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let action = std::path::Path::new("relative-action-dir");
+
+    let policy = SecurityPolicy::from_config(
+        &crate::config::AutonomyConfig::default(),
+        &workspace,
+        action,
+    );
+    let absolute = std::path::absolute(action)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert!(
+        policy
+            .trusted_roots
+            .iter()
+            .any(|r| r.path == absolute && matches!(r.access, TrustedAccess::ReadWrite)),
+        "relative action dir not granted as {absolute}; got: {:?}",
+        policy.trusted_roots
+    );
+}
+
+/// Non-absolute configured roots are dropped from the policy, so nothing
+/// (the turn prompt included) presents them as grants.
+#[test]
+fn from_config_drops_non_absolute_trusted_roots() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let cfg = crate::config::AutonomyConfig {
+        trusted_roots: ["", ".", "rel/dir"]
+            .into_iter()
+            .map(|path| TrustedRoot {
+                path: path.into(),
+                access: TrustedAccess::ReadWrite,
+            })
+            .collect(),
+        ..crate::config::AutonomyConfig::default()
+    };
+    let policy = SecurityPolicy::from_config(&cfg, tmp.path(), tmp.path());
+    assert!(
+        policy
+            .trusted_roots
+            .iter()
+            .all(|r| std::path::Path::new(&r.path).is_absolute()),
+        "non-absolute roots kept: {:?}",
+        policy.trusted_roots
+    );
+}

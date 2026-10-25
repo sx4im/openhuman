@@ -109,7 +109,7 @@ impl Respond for CallTools {
             tool_call_completion("tenant_probe", r#"{"deny":true}"#)
         } else if common::last_user_message(&body).contains("unsafe fixture request") {
             let mut completion = tool_call_completion("shell", "{}");
-            completion["choices"][0]["message"]["tool_calls"] = json!(["shell", "delegate", "http_request", "run_workflow"].iter().enumerate().map(|(i, name)| json!({"id":format!("unsafe_{i}"),"type":"function","function":{"name":name,"arguments":"{}"}})).collect::<Vec<_>>());
+            completion["choices"][0]["message"]["tool_calls"] = json!(["shell", "spawn_subagent", "http_request", "run_workflow"].iter().enumerate().map(|(i, name)| json!({"id":format!("unsafe_{i}"),"type":"function","function":{"name":name,"arguments":"{}"}})).collect::<Vec<_>>());
             completion
         } else if has_tool_results
             || !tool_names(request)
@@ -214,7 +214,7 @@ async fn scenario() {
                     "tenant_probe",
                     "hidden",
                     "shell",
-                    "delegate",
+                    "spawn_subagent",
                     "curl",
                     "install_workflow_from_url",
                     "http_request",
@@ -236,7 +236,7 @@ async fn scenario() {
             "tenant_probe".into(),
             "memory".into(),
             "shell".into(),
-            "delegate".into(),
+            "spawn_subagent".into(),
             "curl".into(),
             "install_workflow_from_url".into(),
             "http_request".into(),
@@ -412,7 +412,7 @@ async fn scenario() {
     for name in [
         "hidden",
         "shell",
-        "delegate",
+        "spawn_subagent",
         "curl",
         "http_request",
         "run_workflow",

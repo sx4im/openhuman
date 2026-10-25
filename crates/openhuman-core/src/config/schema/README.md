@@ -17,21 +17,21 @@ is mounted as a submodule of [`load/dirs.rs`](./load/dirs.rs) via `#[path]`.
 
 | `config.toml` section | File | Struct |
 | --- | --- | --- |
-| `[agent]`, `[orchestrator]`, `[teams.*]`, `[agents.*]` | [`agent.rs`](./agent.rs) | `AgentConfig`, `OrchestratorModelConfig`, `TeamModelConfig`, `DelegateAgentConfig` |
+| `[agent]`, `[orchestrator]`, `[teams.*]` | [`agent.rs`](./agent.rs) | `AgentConfig`, `OrchestratorModelConfig`, `TeamModelConfig` |
 | `[autonomy]` | [`autonomy.rs`](./autonomy.rs) | `AutonomyConfig`: feeds `security::SecurityPolicy` |
 | `[[capability_providers]]` | [`capability_providers.rs`](./capability_providers.rs) | `CapabilityProviderConfig` |
 | `[channels_config]`, `[sandbox]` | [`channels.rs`](./channels.rs) | `ChannelsConfig` and per-provider configs re-exported from `tinychannels_bus`; `SandboxConfig`, `ResourceLimitsConfig`, `AuditConfig`, and `SecurityConfig` (only `DaemonConfig` embeds the last one) |
 | `[claude_agent_sdk]` | [`claude_agent_sdk.rs`](./claude_agent_sdk.rs) | `ClaudeAgentSdkConfig` |
 | `[[cloud_providers]]`, `primary_cloud`, `*_provider` slugs | [`cloud_providers.rs`](./cloud_providers.rs) | `CloudProviderCreds`, `AuthStyle` |
-| `[context]` | [`context.rs`](./context.rs) | `ContextConfig` |
+| `[context]` | TinyAgents `ContextConfig` re-exported by [`context.rs`](./context.rs); OpenHuman environment overlays remain in `load/env_overlay/context.rs` | `ContextConfig` |
 | `[cost]` | [`identity_cost.rs`](./identity_cost.rs) | `CostConfig`, `ModelPricing` |
 | `[dashboard]` | [`dashboard.rs`](./dashboard.rs) | `DashboardConfig`, `DiagramViewerConfig`, `EventStreamConfig`, `ModelHealthConfig` |
-| `[dictation]` | [`dictation.rs`](./dictation.rs) | `DictationConfig`, `DictationActivationMode` |
 | `[ephemeral_route]` | [`ephemeral_route.rs`](./ephemeral_route.rs) | `EphemeralRoute` |
 | `[cron]` | [`cron.rs`](./cron.rs) | `CronConfig` |
 | `[hooks]` | [`hooks.rs`](./hooks.rs) | `HooksConfig` |
 | `[hosting]` | [`hosting.rs`](./hosting.rs) | `HostingConfig` |
 | `[learning]` | `learning.rs` | `LearningConfig`, `ReflectionSource` |
+| `[inbound_debounce]` (+ `by_channel.<name>`) | [`inbound_debounce.rs`](./inbound_debounce.rs) | `InboundDebounceConfig`, `InboundDebounceOverride`: per-conversation batching of inbound channel messages before a turn |
 | `[local_ai]` | [`local_ai.rs`](./local_ai.rs) | `LocalAiConfig`, `LocalAiUsage` |
 | `[modules]` | [`modules.rs`](./modules.rs) | `ModulesConfig`, `ModuleOverride`: controls only whether compiled-in modules load. The loadable *set* is fixed by `crate::modules::registry` |
 | `[observability]` | [`observability.rs`](./observability.rs) | `ObservabilityConfig`, `AgentTracingConfig` |
@@ -46,9 +46,9 @@ is mounted as a submodule of [`load/dirs.rs`](./load/dirs.rs) via `#[path]`.
 | `[tokenjuice]` | [`tokenjuice.rs`](./tokenjuice.rs) | `TokenjuiceConfig` |
 | tool-related sections (see below) | `tools/` | (multiple structs) |
 | `[update]` | [`update.rs`](./update.rs) | `UpdateConfig`, `UpdateRestartStrategy` |
-| `[voice_server]` | [`voice_server.rs`](./voice_server.rs) | `VoiceServerConfig`, `SttEngine`, `VoiceActivationMode` |
+| `[voice_server]` | [`voice_server.rs`](./voice_server.rs) | `VoiceServerConfig`, `SttEngine` |
 | `[[voice_providers]]`, `stt_provider` / `tts_provider` | [`voice_providers.rs`](./voice_providers.rs) | `VoiceProviderCreds`, `BuiltinVoiceProvider`, `BUILTIN_VOICE_PROVIDERS` |
-| top-level `Config` and its scalar keys | `types.rs` (+ `types/config.rs`, `types/model_ids.rs`) | `Config`, `ModelRegistryEntry`, `MODEL_*` / `DEFAULT_MODEL` constants |
+| top-level `Config` and its scalar keys | `types.rs` (+ `types/config.rs`, `types/model_ids.rs`) | `Config`, `ModelRegistryEntry`, provider-neutral workload roles |
 | built-in defaults | [`defaults.rs`](./defaults.rs) | `impl Default for Config` and per-field `default_*` fns |
 
 [`tools/mod.rs`](./tools/mod.rs) groups the tool-facing sections: `browser.rs` (`BrowserConfig`,
@@ -66,6 +66,11 @@ format and are migrated on load ([`tools/search_migrate.rs`](./tools/search_migr
 `load/migrate.rs::migrate_search_settings`); Parallel keeps its key as a
 direct-only provider, and a keyless managed-Parallel selection is dropped. Seltz and SearXNG keep their options in their own sections, but only
 the `providers` map decides whether they are on.
+
+The parser drops the retired top-level `[agents]` delegate table before typed
+decoding, so existing config files with stale `[agents.*]` entries continue to
+load. Agent definitions now come from the agent registry and live sub-agent
+tools.
 
 Most sections have a matching `*_tests.rs` (some further split into several
 `*_tests.rs` siblings, e.g. [`types_model_pin_tests.rs`](./types_model_pin_tests.rs)); this is the repo's
@@ -110,7 +115,7 @@ sandbox policy contract described under Workspace/identity helpers below.
    (`migrate_legacy_inference_url`, `migrate_cloud_provider_slugs`).
 4. Apply environment-variable overrides through `Config::apply_env_overrides_from`
    in [`load/env_overlay.rs`](./load/env_overlay.rs), split into submodules under [`load/env_overlay/`](./load/env_overlay/)
-   (`dictation_context.rs`, `learning_memory.rs`, `observability.rs`,
+   (`context.rs`, `learning_memory.rs`, `observability.rs`,
    `proxy.rs`, `runtime.rs`, `search.rs`);
    [`load/env.rs`](./load/env.rs) is only the `EnvLookup` seam that lets tests supply a fake
    environment.

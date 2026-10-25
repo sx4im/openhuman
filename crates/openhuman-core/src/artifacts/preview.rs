@@ -50,7 +50,7 @@ pub async fn read_body(config: &Config, id: &str) -> Result<ArtifactBody, String
     let files = super::files::FileRoots::from_config(config);
     let mut roots =
         super::tiny_store::file_roots(&config.workspace_dir, &files, Some(&config.action_dir));
-    let versioned = super::tiny_store::artifacts_service(
+    let versioned = super::tiny_store::artifacts_service_current(
         &config.workspace_dir,
         files.clone(),
         Some(&config.action_dir),
@@ -59,7 +59,7 @@ pub async fn read_body(config: &Config, id: &str) -> Result<ArtifactBody, String
     .get(id)
     .await
     .map_err(|e| e.to_string())?;
-    let record = match versioned {
+    let mut record = match versioned {
         Some(record) => record,
         // An artifact made before versioning has only its legacy record: show
         // the file that record vouches for.
@@ -68,13 +68,26 @@ pub async fn read_body(config: &Config, id: &str) -> Result<ArtifactBody, String
             if let Some(folder) = record
                 .latest()
                 .and_then(|v| v.file.as_ref())
-                .and_then(|f| Path::new(&f.path).parent())
+                .and_then(|f| Path::new(&f.key).parent())
             {
                 roots.push(folder.to_path_buf());
             }
             record
         }
     };
+    if let Some(file) = record.versions.last_mut().and_then(|v| v.file.as_mut()) {
+        // Version bytes live in the acting tenant's blob store. The legacy
+        // card bridge materializes the current version into its guarded,
+        // user-visible file path; preview reads that same path.
+        if let Ok(path) = super::files::resolve_ready_file(&config.workspace_dir, &files, id).await
+        {
+            file.key = path.display().to_string();
+        } else {
+            file.key = super::tiny_store::stored_file_path(&config.workspace_dir, file)
+                .display()
+                .to_string();
+        }
+    }
     let converter = DocumentConverter::for_config(config);
     Ok(body_of(
         &record,
@@ -108,7 +121,7 @@ async fn legacy_record(
     version.file = Some(tiny_artifacts::FileRef {
         size_bytes: meta.size_bytes,
         media_type: None,
-        path,
+        key: path,
     });
     let mut record = ArtifactRecord::pending(id, meta.title, ArtifactKind::File, at);
     record.versions.push(version);
@@ -188,7 +201,7 @@ pub(crate) async fn body_of(
     }
     let path = latest
         .and_then(|v| v.file.as_ref())
-        .map_or(stored, |f| f.path.clone());
+        .map_or(stored, |f| f.key.clone());
     preview.body = path.clone();
     // Inside the trusted folders, an existing regular file: anything else is
     // shown by its path only.

@@ -2,8 +2,11 @@
 
 mod agent;
 mod agent_paths;
+pub(crate) use agent_paths::canonical_prefix;
+mod cloud_providers;
 mod loader;
 mod model;
+mod primary_cloud;
 mod privacy;
 mod sandbox;
 mod search;
@@ -80,8 +83,8 @@ pub use agent_paths::{
 
 pub use loader::{
     agent_server_status, client_config_json, core_rpc_url_from_env, get_config_snapshot,
-    get_dashboard_settings, get_data_paths, get_data_paths_for_user, get_runtime_flags,
-    load_and_get_client_config_snapshot, load_and_get_config_snapshot,
+    get_dashboard_settings, get_data_paths, get_data_paths_for_user, get_data_paths_to_clear,
+    get_runtime_flags, load_and_get_client_config_snapshot, load_and_get_config_snapshot,
     load_config_for_workspace_with_timeout, load_config_in, load_config_with_timeout,
     load_current_or_init, reload_config_from_paths, reload_config_snapshot_with_timeout,
     reset_local_data, set_browser_allow_all, snapshot_config_json, RuntimeFlagsOut,
@@ -114,6 +117,9 @@ pub use model::{
     RuntimeSettingsPatch,
 };
 
+pub use cloud_providers::{build_cloud_provider_creds, CloudProviderUpdate};
+pub(crate) use primary_cloud::{legacy_inference_slug, resolve_primary_cloud_provider_string};
+
 pub use privacy::{
     apply_privacy_settings, get_privacy_mode, load_and_apply_privacy_settings, PrivacySettingsPatch,
 };
@@ -133,13 +139,11 @@ pub use search::{
     search_settings_json, SearchProviderPatch, SearchSettingsPatch,
 };
 pub use ui::{
-    apply_analytics_settings, apply_browser_settings, apply_user_timezone, get_dictation_settings,
-    get_onboarding_completed, get_voice_server_settings, load_and_apply_analytics_settings,
-    load_and_apply_browser_settings, load_and_apply_dictation_settings,
-    load_and_apply_user_timezone, load_and_apply_voice_server_settings, set_onboarding_completed,
-    user_timezone_json, workspace_onboarding_flag_exists, workspace_onboarding_flag_resolve,
+    apply_analytics_settings, apply_browser_settings, apply_user_timezone,
+    get_onboarding_completed, load_and_apply_analytics_settings, load_and_apply_browser_settings,
+    load_and_apply_user_timezone, set_onboarding_completed, user_timezone_json,
+    workspace_onboarding_flag_exists, workspace_onboarding_flag_resolve,
     workspace_onboarding_flag_set, AnalyticsSettingsPatch, BrowserSettingsPatch,
-    DictationSettingsPatch, VoiceServerSettingsPatch,
 };
 
 #[cfg(test)]

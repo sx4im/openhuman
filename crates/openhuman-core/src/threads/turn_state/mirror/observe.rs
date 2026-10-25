@@ -150,7 +150,7 @@ impl ObserveProgress for TurnStateMirror {
                 self.state.phase = Some(TurnPhase::Subagent);
                 self.state.active_subagent = Some(agent_id.clone());
                 // Derive the real invoking tool's name from the parent row
-                // (`spawn_parallel_agents`, `spawn_async_subagent`,
+                // (`spawn_subagent`,
                 // `continue_subagent`, a synthesized `delegate_*`, …) instead
                 // of hardcoding `spawn_subagent`, which was wrong for every
                 // other delegation path. Falls back to the historical
@@ -468,6 +468,12 @@ impl ObserveProgress for TurnStateMirror {
                 // A running tool's status line is live-only (`tool_progress`
                 // on the socket); the snapshot already shows the call as
                 // running, so a flush per beat would buy nothing.
+                false
+            }
+            AgentProgress::ContextCompacting => {
+                // Live-only (`context_compacting` on the socket): the snapshot's
+                // phases come from tinyagents' `TurnPhase`, which has none for
+                // it, and the next `IterationStarted` sets the phase anyway.
                 false
             }
         }

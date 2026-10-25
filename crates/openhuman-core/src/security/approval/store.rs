@@ -46,6 +46,7 @@ pub use store_flow_trust::{
     record_flow_preauthorization,
 };
 
+#[cfg(feature = "legacy-import")]
 pub use super::store_import::PRE_MIGRATION_SESSION_ID;
 
 /// Insert a pending approval row. `session_id` is the per-launch UUID

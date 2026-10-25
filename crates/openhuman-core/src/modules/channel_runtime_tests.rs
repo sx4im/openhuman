@@ -122,7 +122,7 @@ impl TransportFixture {
         let tinychannels_bus::ChannelBackendRequest::ProgressiveTransport(request) = request else {
             return Err(tinybus::Error::failed("unexpected fixture capability"));
         };
-        let value = if let ProgressiveTransportRequest::Send { message, .. } = request {
+        let value = if let ProgressiveTransportRequest::Send { message, .. } = *request {
             assert!(message["idempotencyKey"].as_str().is_some());
             assert_eq!(message["text"].as_str(), Some(self.expected_text.as_str()));
             self.sends.fetch_add(1, Ordering::SeqCst);
@@ -138,9 +138,8 @@ impl TransportFixture {
     }
 }
 
-/// Run only against a separately built, byte-verified release artifact.
+/// Run against the byte-verified TinyChannels artifact staged by the test runner.
 #[tokio::test]
-#[ignore = "requires OPENHUMAN_CHANNELS_TEST_ARTIFACT pointing to the verified compiled module"]
 async fn released_runtime_scopes_callbacks_and_replays_one_final_send() {
     use tinychannels_bus::module_progressive::{ProgressiveCommand, ProgressiveResult};
     let artifact =

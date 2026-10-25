@@ -9,9 +9,8 @@ async fn byte_policy_projects_a_parent_readable_artifact_before_the_result_cap()
 
     let scratch = tempfile::tempdir().expect("artifact workspace");
     let parent_action_dir = scratch.path().join("parent-action");
-    let worktree_action_dir = scratch.path().join("worker-checkout");
     let workspace_dir = scratch.path().join("workspace");
-    for path in [&parent_action_dir, &worktree_action_dir, &workspace_dir] {
+    for path in [&parent_action_dir, &workspace_dir] {
         std::fs::create_dir_all(path).expect("create artifact root");
     }
     let trusted_action_dir = parent_action_dir
@@ -32,7 +31,6 @@ async fn byte_policy_projects_a_parent_readable_artifact_before_the_result_cap()
         .with_core(Some(Arc::clone(&scoped)));
     let options = SubagentRunOptions {
         run_context,
-        worktree_action_dir: Some(worktree_action_dir.clone()),
         ..SubagentRunOptions::default()
     };
     let mut definition = crate::agent::harness::test_support::test_main_def();
@@ -82,10 +80,14 @@ async fn byte_policy_projects_a_parent_readable_artifact_before_the_result_cap()
     );
     assert_ne!(outcome.output, original);
     assert!(outcome.artifact_paths.contains(&"authored.txt".to_owned()));
+    let output_prefix = format!("{}/", tinyagents_harness::artifacts::OUTPUTS_DIR);
     let stored_path = outcome
         .artifact_paths
         .iter()
-        .find(|path| path.starts_with("outputs/"))
+        .find(|path| {
+            path.strip_prefix(&output_prefix)
+                .is_some_and(|name| !name.is_empty())
+        })
         .expect("host projection records its artifact path");
     let parent_copy = parent_action_dir.join(stored_path);
     assert!(
@@ -96,9 +98,5 @@ async fn byte_policy_projects_a_parent_readable_artifact_before_the_result_cap()
         std::fs::read_to_string(parent_copy).expect("read parent artifact"),
         original,
         "the byte-policy store writes the complete pre-cap result"
-    );
-    assert!(
-        !worktree_action_dir.join(stored_path).exists(),
-        "a worktree worker returns an artifact readable from its parent's root"
     );
 }

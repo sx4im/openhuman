@@ -1,5 +1,4 @@
 use super::*;
-use crate::config::DelegateAgentConfig;
 use crate::tools::ops::default_tools;
 
 #[test]
@@ -23,7 +22,6 @@ fn all_tools_includes_browser_when_enabled() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
@@ -60,7 +58,6 @@ fn computer_component_off_unregisters_desktop_and_browser_tools() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
@@ -105,63 +102,6 @@ fn default_tools_all_have_schemas() {
 }
 
 #[test]
-fn all_tools_includes_delegate_when_agents_configured() {
-    let tmp = TempDir::new().unwrap();
-    let security = Arc::new(SecurityPolicy::default());
-
-    let browser = BrowserConfig::default();
-    let http = crate::config::HttpRequestConfig::default();
-    let cfg = test_config(&tmp);
-
-    let mut agents = HashMap::new();
-    agents.insert(
-        "researcher".to_string(),
-        DelegateAgentConfig {
-            model: "llama3".to_string(),
-            system_prompt: None,
-            temperature: None,
-            max_depth: 3,
-        },
-    );
-
-    let tools = all_tools(
-        Arc::new(Config::default()),
-        &security,
-        AuditLogger::disabled(),
-        &browser,
-        &http,
-        tmp.path(),
-        &agents,
-        &cfg,
-    );
-    let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-    assert!(names.contains(&"delegate"));
-}
-
-#[test]
-fn all_tools_excludes_delegate_when_no_agents() {
-    let tmp = TempDir::new().unwrap();
-    let security = Arc::new(SecurityPolicy::default());
-
-    let browser = BrowserConfig::default();
-    let http = crate::config::HttpRequestConfig::default();
-    let cfg = test_config(&tmp);
-
-    let tools = all_tools(
-        Arc::new(Config::default()),
-        &security,
-        AuditLogger::disabled(),
-        &browser,
-        &http,
-        tmp.path(),
-        &HashMap::new(),
-        &cfg,
-    );
-    let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-    assert!(!names.contains(&"delegate"));
-}
-
-#[test]
 fn all_tools_registers_no_hosted_integration_families_without_a_tool_source() {
     let tmp = TempDir::new().unwrap();
     let security = Arc::new(SecurityPolicy::default());
@@ -182,7 +122,6 @@ fn all_tools_registers_no_hosted_integration_families_without_a_tool_source() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names = tool_names(&tools);
@@ -221,10 +160,10 @@ fn all_tools_registers_no_hosted_integration_families_without_a_tool_source() {
 }
 
 #[test]
-fn all_tools_registers_brave_engine_and_lsp_when_enabled() {
+fn all_tools_registers_brave_engine_when_enabled() {
     // Search registers one tool per capability role from the TinySearch
     // catalog; a usable BYOK Brave key yields the `search` role tool
-    // alongside lsp.
+    // alongside the builtin tool set.
     let tmp = TempDir::new().unwrap();
     let security = Arc::new(SecurityPolicy::default());
     let browser = BrowserConfig::default();
@@ -236,11 +175,6 @@ fn all_tools_registers_brave_engine_and_lsp_when_enabled() {
     );
     cfg.search.brave.api_key = Some("test-brave-key".into());
 
-    let _env_guard = crate::config::TEST_ENV_LOCK.blocking_lock();
-    unsafe {
-        std::env::set_var(crate::tools::implementations::LSP_ENABLED_ENV, "1");
-    }
-
     let tools = all_tools(
         Arc::new(cfg.clone()),
         &security,
@@ -248,7 +182,6 @@ fn all_tools_registers_brave_engine_and_lsp_when_enabled() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names = tool_names(&tools);
@@ -257,13 +190,8 @@ fn all_tools_registers_brave_engine_and_lsp_when_enabled() {
         &[
             #[cfg(feature = "modules")]
             "web_search_tool",
-            "lsp",
         ],
     );
-
-    unsafe {
-        std::env::remove_var(crate::tools::implementations::LSP_ENABLED_ENV);
-    }
 }
 
 #[test]
@@ -286,7 +214,6 @@ fn all_tools_registers_querit_as_the_search_role_when_enabled() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names = tool_names(&tools);
@@ -320,7 +247,6 @@ fn all_tools_omits_search_surface_when_search_is_disabled() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names = tool_names(&tools);

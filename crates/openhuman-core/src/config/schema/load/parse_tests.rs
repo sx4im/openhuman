@@ -64,6 +64,28 @@ fn legacy_configuration_with_retired_sections_still_parses() {
 }
 
 #[test]
+fn stale_configured_agents_are_dropped_before_typed_decode() {
+    let legacy = config_from_toml_str(
+        r#"
+default_model = "preserved-model"
+
+[agents.research]
+model = "old/configured-model"
+system_prompt = "retired"
+"#,
+    )
+    .expect("legacy config with configured agents still loads");
+
+    assert_eq!(legacy.default_model.as_deref(), Some("preserved-model"));
+    let saved = toml::to_string(&legacy).expect("config serializes");
+    assert!(!saved.contains("[agents"), "stale table survived: {saved}");
+
+    let reloaded = config_from_toml_str(&saved).expect("migrated config reloads");
+    assert_eq!(reloaded.default_model.as_deref(), Some("preserved-model"));
+    assert_eq!(toml::to_string(&reloaded).unwrap(), saved);
+}
+
+#[test]
 fn a_syntax_error_reports_the_toml_location() {
     let err = config_from_toml_str("default_model = \n[broken").unwrap_err();
     assert!(err.to_string().contains("line"), "{err}");
@@ -162,4 +184,121 @@ default_model = "claude-sonnet-4"
         Some("claude-sonnet-4")
     );
     assert_eq!(std::fs::read_to_string(config_path).unwrap(), once);
+}
+
+#[tokio::test]
+async fn legacy_dictation_and_voice_settings_load_and_save_only_the_stt_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::write(
+        &config_path,
+        r#"
+[dictation]
+enabled = true
+hotkey = "ctrl+shift+d"
+activation_mode = "toggle"
+llm_refinement = false
+streaming = false
+streaming_interval_ms = 700
+
+[voice_server]
+auto_start = true
+hotkey = "ctrl+shift+v"
+activation_mode = "tap"
+stt_engine = "elevenlabs"
+skip_cleanup = true
+min_duration_secs = 0.8
+silence_threshold = 0.02
+custom_dictionary = ["OpenHuman"]
+"#,
+    )
+    .unwrap();
+
+    let config = Config::load_from_config_path(&config_path, &workspace)
+        .await
+        .unwrap();
+    assert_eq!(
+        config.voice_server.stt_engine,
+        crate::config::schema::SttEngine::Elevenlabs
+    );
+    config.save().await.unwrap();
+
+    let saved: toml::Value =
+        toml::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+    let voice_server = saved["voice_server"].as_table().unwrap();
+    assert_eq!(
+        voice_server.len(),
+        1,
+        "only the active engine setting should remain"
+    );
+    assert_eq!(voice_server["stt_engine"].as_str(), Some("elevenlabs"));
+    assert!(
+        saved.get("dictation").is_none(),
+        "retired dictation data must be dropped on save"
+    );
+}
+
+/// TinyMemes left OpenHuman: a config written while it was here still carries
+/// `[components] memes` and a `[memes]` section. Both must load as ignored
+/// keys (never a parse failure or a fallback to defaults) and be dropped on
+/// the next save.
+#[tokio::test]
+async fn retired_memes_settings_load_as_ignored_keys_and_are_dropped_on_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let workspace = dir.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    std::fs::write(
+        &config_path,
+        r#"
+default_model = "memes-retired-model"
+
+[components]
+memes = false
+search = false
+
+[memes]
+timeout_ms = 5000
+meme_cooldown = 7
+"#,
+    )
+    .unwrap();
+
+    let config = Config::load_from_config_path(&config_path, &workspace)
+        .await
+        .unwrap();
+    assert_eq!(config.default_model.as_deref(), Some("memes-retired-model"));
+    assert!(
+        !config.components.search,
+        "known component keys still apply"
+    );
+    assert!(
+        config.components.flows,
+        "unnamed components keep their default"
+    );
+    let diagnostics = config.load_diagnostics();
+    assert_eq!(
+        diagnostics.fallback,
+        super::super::diagnostics::ConfigLoadFallback::None
+    );
+    // An unknown section is reported once, as the section itself.
+    for key in ["components.memes", "memes"] {
+        assert!(
+            diagnostics.unknown_keys.iter().any(|k| k == key),
+            "{key} should be reported as ignored: {:?}",
+            diagnostics.unknown_keys
+        );
+    }
+
+    config.save().await.unwrap();
+    let saved: toml::Value =
+        toml::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+    assert!(saved.get("memes").is_none(), "[memes] is dropped on save");
+    assert!(
+        saved["components"].get("memes").is_none(),
+        "components.memes is dropped on save"
+    );
+    assert_eq!(saved["components"]["search"].as_bool(), Some(false));
 }

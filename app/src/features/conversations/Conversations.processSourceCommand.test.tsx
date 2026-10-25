@@ -427,6 +427,26 @@ describe('composer model routing', () => {
     mockChatSend.mockReset().mockResolvedValue(undefined);
   });
 
+  it('a late client-config read does not restore a model the user already cleared', async () => {
+    const config = deferred<unknown>();
+    vi.mocked(callCoreRpc).mockImplementation((({ method }: { method: string }) => {
+      if (method === 'openhuman.inference_get_client_config') return config.promise;
+      if (method === 'openhuman.inference_resolve_model') return Promise.resolve({ model: 'm' });
+      return Promise.resolve({});
+    }) as never);
+    await renderChat('text');
+    await selectPickerModel();
+    await clearPickerModel();
+
+    await act(async () => config.resolve({ result: { default_model: 'stale-default' } }));
+
+    const hints = vi
+      .mocked(callCoreRpc)
+      .mock.calls.filter(([req]) => req.method === 'openhuman.inference_resolve_model')
+      .map(([req]) => (req.params as { hint: string }).hint);
+    expect(hints).not.toContain('stale-default');
+  });
+
   it('waits for a successful model clear before sending a normal default turn', async () => {
     const clear = deferred<unknown>();
     mockModelSettingsWrites({ 'huggingface:org/model': Promise.resolve({}), '': clear.promise });

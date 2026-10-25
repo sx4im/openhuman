@@ -30,7 +30,7 @@ use crate::core::runtime::DispatchCtx;
 /// one after another; both routinely exceeded 30 s in production and came back
 /// as a bus timeout although the module was still working. 90 s stays under
 /// the harness's own default tool deadline
-/// ([`tinytools_std::timeout::DEFAULT_TIMEOUT_SECS`], 120 s), so the module's
+/// ([`tinyagents_harness_tools::exec::timeout::DEFAULT_TIMEOUT_SECS`], 120 s), so the module's
 /// answer, not the harness kill, decides the result. This is the floor; a
 /// larger configured tool budget extends it (see [`execute_tool_timeout_for`]).
 pub(super) const EXECUTE_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);

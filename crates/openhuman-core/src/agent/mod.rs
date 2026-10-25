@@ -64,6 +64,5 @@ pub mod tools;
 pub mod turn_env;
 #[allow(unused_imports)]
 pub use session_host::{
-    HostOnlyToolPolicy, HostTools, HostTurnTools, OpenHumanSessionHost, SessionHostBuilder,
-    TurnContext, TurnOverrides,
+    HostTools, HostTurnTools, OpenHumanSessionHost, SessionHostBuilder, TurnContext, TurnOverrides,
 };

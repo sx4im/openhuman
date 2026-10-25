@@ -1,5 +1,49 @@
 use super::*;
 
+use crate::config::SttEngine;
+
+#[tokio::test]
+async fn legacy_always_on_voice_fields_are_ignored_and_dropped_on_save() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"[voice_server]
+stt_engine = "openai"
+always_on_enabled = true
+wake_word = "Hey Tiny"
+vad_onset_threshold = 0.01
+vad_hangover_ms = 800
+vad_min_speech_ms = 300
+vad_max_utterance_secs = 30.0
+"#,
+    )
+    .unwrap();
+
+    let config = load_or_init_for_workspace(tmp.path()).await;
+    assert_eq!(config.voice_server.stt_engine, SttEngine::Openai);
+    config.save().await.unwrap();
+
+    let saved = std::fs::read_to_string(config_path).unwrap();
+    assert!(
+        saved.contains("stt_engine = \"openai\""),
+        "retained voice setting was not loaded and saved:\n{saved}"
+    );
+    for retired in [
+        "always_on_enabled",
+        "wake_word",
+        "vad_onset_threshold",
+        "vad_hangover_ms",
+        "vad_min_speech_ms",
+        "vad_max_utterance_secs",
+    ] {
+        assert!(
+            !saved.contains(retired),
+            "retired voice setting {retired} survived config save:\n{saved}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn load_or_init_recovers_from_non_utf8_using_valid_backup() {
     let tmp = tempfile::tempdir().unwrap();
@@ -60,8 +104,8 @@ async fn load_or_init_non_utf8_falls_back_to_defaults_when_backup_also_non_utf8(
 
     assert_eq!(
         config.default_model.as_deref(),
-        Some(crate::config::schema::DEFAULT_MODEL),
-        "must fall back to defaults when both config and backup have non-UTF-8 content"
+        None,
+        "bare core fallback keeps default_model absent when no provider is installed"
     );
 
     // The primary should be renamed.
@@ -203,7 +247,7 @@ backend = "sqlite"
     let off = crate::memory::engine::resolve(&config)
         .engine()
         .unwrap_err();
-    assert_eq!(off.code(), crate::memory::error::MEMORY_OFF);
+    assert_eq!(off.code(), "MEMORY_OFF");
     assert!(off.to_string().contains("legacy memory backend"));
     config.save().await.unwrap();
 
@@ -224,7 +268,7 @@ backend = "sqlite"
     let off = crate::memory::engine::resolve(&reloaded)
         .engine()
         .unwrap_err();
-    assert_eq!(off.code(), crate::memory::error::MEMORY_OFF);
+    assert_eq!(off.code(), "MEMORY_OFF");
     assert!(off.to_string().contains("legacy memory backend"));
 }
 

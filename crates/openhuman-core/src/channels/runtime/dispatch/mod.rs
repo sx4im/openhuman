@@ -2,6 +2,8 @@
 //!
 //! Sub-modules:
 //! * [`helpers`]   — small stateless helpers (context block, ACK reaction, typing, workers).
+//! * [`inbound_batch`] — admitted messages as debounce items and the merge of
+//!   one batch into the message its turn runs on.
 //! * [`host_agent`] — channels bound to a host-registered agent
 //!   (`agent.channel_agents`): routing, the refusal for a missing agent, the
 //!   turn runner and the external-channel posture.
@@ -12,13 +14,16 @@
 
 mod helpers;
 pub(crate) mod host_agent;
+mod inbound_batch;
 mod processor;
 mod routing;
 
 pub(crate) use processor::{
-    process_channel_message, process_channel_runtime_message, run_message_dispatch_loop,
-    RuntimeChannelMessage,
+    process_channel_runtime_message, run_message_dispatch_loop, RuntimeChannelMessage,
 };
+
+#[cfg(test)]
+pub(crate) use processor::process_channel_message;
 
 // `channel_has_approval_surface` stays pub(crate) on processor; re-export so
 // the inline test module can reach it via `super::channel_has_approval_surface`.
@@ -34,9 +39,6 @@ use helpers::select_acknowledgment_reaction;
 
 #[cfg(test)]
 use routing::{build_visible_tool_set, AgentScoping};
-
-#[cfg(any(test, debug_assertions))]
-use tinychannels_bus as traits;
 
 #[cfg(any(test, debug_assertions))]
 #[path = "mod_test_support_tests.rs"]

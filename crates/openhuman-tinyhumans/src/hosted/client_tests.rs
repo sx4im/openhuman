@@ -164,6 +164,7 @@ async fn session_client_sends_bearer_and_product_identity() {
         let _identity = crate::backend::product::product_identity_test_lock();
         crate::backend::product::reset_product_identity_for_test();
         HostedClient::with_credential(&server.uri(), BackendCredential::Session("jwt.a.b".into()))
+            .expect("loopback endpoint")
     };
     assert_eq!(client.kind(), CredentialKind::Session);
     let value = client
@@ -187,7 +188,8 @@ async fn api_key_client_sends_x_api_key_and_maps_401() {
         .await;
 
     let client =
-        HostedClient::with_credential(&server.uri(), BackendCredential::ApiKey("th_key".into()));
+        HostedClient::with_credential(&server.uri(), BackendCredential::ApiKey("th_key".into()))
+            .expect("loopback endpoint");
     let err = client
         .finish_value(
             "GET /teams/me/usage",
@@ -195,4 +197,18 @@ async fn api_key_client_sends_x_api_key_and_maps_401() {
         )
         .unwrap_err();
     assert!(is_api_key_rejected_message(&err), "{err}");
+}
+
+#[test]
+fn with_credential_refuses_endpoints_the_credential_may_not_reach() {
+    let api_key = || BackendCredential::ApiKey("th_key".into());
+    let session = || BackendCredential::Session("jwt.a.b".into());
+    // An API key belongs to TinyHumans: managed hosts or loopback only.
+    assert!(HostedClient::with_credential("https://not-tinyhumans.example", api_key()).is_err());
+    assert!(HostedClient::with_credential("https://api.tinyhumans.ai", api_key()).is_ok());
+    assert!(HostedClient::with_credential("http://127.0.0.1:7788", api_key()).is_ok());
+    // Any credential: HTTPS, or plain HTTP only to loopback.
+    assert!(HostedClient::with_credential("http://192.168.1.5:8080", session()).is_err());
+    assert!(HostedClient::with_credential("https://backend.example", session()).is_ok());
+    assert!(HostedClient::with_credential("http://localhost:7788", session()).is_ok());
 }

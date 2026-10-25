@@ -132,8 +132,7 @@ impl OpenHumanSessionHost {
             &self.visible_tool_names,
             &self.tool_policy_session,
         );
-        self.visible_tool_specs = Arc::new(super::super::super::builder::dedup_visible_tool_specs(
-            visible_specs,
-        ));
+        self.visible_tool_specs =
+            Arc::new(tinyagents_runtime::dedup_visible_tool_specs(visible_specs));
     }
 }

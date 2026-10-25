@@ -227,7 +227,9 @@ impl ComposioExecuteTool {
             ToolDecision::Allow | ToolDecision::PassthroughCheckScope { .. } => {}
             ToolDecision::BlockedByScope { scope } => {
                 let toolkit = toolkit_from_slug(&tool).unwrap_or_default();
-                let pref = load_user_scope_pref(ctx, self.config.as_ref(), &toolkit).await;
+                let pref = load_user_scope_pref(ctx, self.config.as_ref(), &toolkit)
+                    .await
+                    .ok();
                 let msg = scope_error_message(&tool, scope, pref);
                 tracing::info!(
                     tool = %tool,

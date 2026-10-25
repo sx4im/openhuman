@@ -19,11 +19,11 @@ copying its implementation into a host, or accepting weaker isolation.
 | tinymcp | none in normal/build host dependencies | tinymcp-bus | core MCP registry, supervisor, CLI stdio/HTTP server | Merged host adapters use the released v0.16.1 module (contract 1.23; configured-client receipt machine and client cache are `tinymcp_bus::client_lifecycle`, host keeps only the bus-calling driver; identifier validation, the registry-detail JSON shape and the not-connected explanation are `tinymcp_bus` helpers, so the host's `registry/helpers.rs` is gone; bus members the host never calls are kept for other hosts and documented in `tinymcp_bus::names`) for registry, supervisor, client and server protocol operations, with approved host callbacks kept in OpenHuman. The 62-member artifact and local focused, lifecycle, registry, native and build gates pass; frozen recorded tool declarations are restored independently of the current catalog |
 | tinychannels | tinychannels, tinychannels-runtime, tinychannels-module (test-only) | tinychannels-bus | core channels, TinyHumans host, CLI REPL | Contract 16 (operation 1.17) is pure; scoped providers, inbound/identity/outbound preparation, remote commands, runtime limits, typing and progressive delivery execute through confidential module calls. Host-owned policy, credentials, persistence and callbacks remain in OpenHuman. Both host implementation exceptions are removed; the 254-test focused suite and released-artifact runtime fixture pass |
 | tinyhosts | none | tinyhosts-bus | core hosting tools | Released Execute/Providers contract consumed through the module (v0.4.0: tool-to-operation mapping, argument shaping, outcome matching and summaries live in `tinyhosts-bus::tools`); workspace authorization, credentials and approval policy remain in OpenHuman |
-| tinymemes | none | tinymemes-bus | core `tinymemes` reply remix | Released Remix contract (v1.1) consumed through the module, which owns the reading, rating, rewrite, slang and meme indexes, the remixed-id ring (behind its `IndexStore` port), the `TINYMEMES_*` env overrides, the LLM-as-Jev fallback and the background slang and meme research. The host serves the Complete, Evaluate, Search, LoadIndex, SaveIndex, Deliver and End callbacks (OpenHuman inference, managed Jev, web search, documents on the storage port), each carrying the remix's correlation id so remixes for different workspaces run concurrently, and keeps the A/B arm, flag and delivered-history policy. `tinymemes-bus` is synchronous and I/O-free (no tinybus or tinystoragedrivers-bus); the typed clients are in `tinymemes-client`, which the host does not link |
+| tinyeventqueues | none | tinyeventqueues-bus | core `inbound` domain (`inbound-queues` gate) | Released EventQueues contract (v0.2) consumed through the module, which owns ingress and completion tombstones, the gate, coalescing, salience and habituation, lanes and the digest, cadences and ingestion budgets, dispatch with retry and dead letters, and its own pass timer, all on the host's storage (its `teq.*` collections and the queues of `queues.json` through the storage bus `Queues` object). The host serves the `Deliver` and `ClassifySalience` callbacks (triage under the remote-trigger origin) and keeps the `[inbound]` configuration, the routing of Composio triggers and agent webhooks, and the direct-path fallback. `tinyeventqueues-bus` is synchronous and I/O-free by default; its optional `storage` feature declares the schema |
 | tinywallet | none in normal/build host dependencies | tinywallet-bus | core wallet/web3/x402 | Complete: v0.20.0 contract 1.14 adds mnemonic word-count validation to module-owned mnemonic derivation, native transactions, Web3 quotes/execution, ERC-20 encoding, and x402 payment parsing/budgets/ledger. OpenHuman retains encrypted-key custody, authenticated transport, explicit approval, and lifecycle orchestration |
 | tinybox | tinybox-core (test-only) | tinybox-bus | core sandbox and security, desktop gateways | Host cutover uses TinyBox v0.1.28 (contract 1.18); the host calls members only through `tinybox_bus::names` constants and uses `tinybox_bus::CommandClass` directly (no host copy or re-export). It covers for sandbox/resource lifecycle, collected and supervised execution, jailed and native shell execution (unsandboxed, cron and the `shell` tool run through `StartNativeShellExec`; core has no shell selection or spawn of its own), standalone Docker policy validation (`ValidateDockerPolicy`), Docker control, local grants (`ResolveLocalGrants`; the host re-applies `is_always_forbidden` to the reply), file transfer and port forwarding. Host authorization and the security floor remain in OpenHuman |
-| tinycomputer | none | tinycomputer-bus | core voice, paste/focus and permission checks | Permission, focus, paste and Globe listener operations use the module; native thread and target rules remain covered |
-| tinyvoice | None | tinyvoice-bus | core voice capture/hotkeys | Module-owned devices, recording and continuous capture, bounded audio reads/batches, explicit lease cleanup; computer module permission decisions |
+| tinycomputer | none | tinycomputer-bus | core desktop control and permission checks | Desktop observation, interaction and Jev-driven goals execute in the module; OpenHuman retains consent and target policy and reads or requests native accessibility permissions through the bus |
+| tinyvoice | None | tinyvoice-bus | core voice transcript screening | Module-owned audio capabilities remain available through the published contract; OpenHuman currently uses it only for transcript hallucination screening |
 | tinyruntime | tinyruntime-pyserver | tinyruntime-bus | core Python worker, optional TinyJuice ML | Excluded from this migration: TinyRuntime is being removed separately |
 | tinydocs / tinymemory | none | tinydocs-bus | core memory converter and file sources | Bus DocumentConverter replaces OfficeConverter, including XLSX and existing PDF/DOCX/PPTX format coverage; ingestion metadata remains host-owned; `[components].documents = false` refuses `ensure_loaded("tinydocs")` and the `documents` tool group, makes the converter answer `COMPONENT_DISABLED:documents`, and degrades attachment ingest to a note |
 | tinysearch | none observed | tinysearch-bus (v0.5.0, contract 2.2) | core module search proxy; error classification (`errors::Category`), role helpers and route/presentation config types live in tinysearch-bus; render text/markdown and provider labels live in `tinysearch_bus::{render,labels}`, core keeps the UI-metadata projection (`search/render.rs`) | Preserve existing bus adapter; enforce contract and host dependency graphs |
@@ -131,14 +131,13 @@ TinyHosts’ bounded directory preparation currently returns up to 4 MiB of sour
 Existing larger Launch/Deploy requests keep their transport budget. Streaming or
 module-owned prepared artifacts remain required for larger host directory inputs.
 
-TinyComputer’s reliable Globe reads retain one bounded snapshot until acknowledgment.
-Native overflow, malformed events and unexpected EOF mark continuity loss. Hosts
-must await its terminal shutdown before unloading. TinyVoice owns native Linux and
-Windows hotkey listeners and accepts sequenced generic facts for macOS. Its reads
-retain the previous batch across continuity loss, allowing a valid acknowledgment
-to retrieve the inactive reset snapshot. Shared activation types live in the bus
-contract and are re-exported by the implementation. OpenHuman still needs the
-Computer-to-Voice adapter and compatible released artifacts before switching.
+At this migration stage, TinyComputer’s reliable Globe reads retained one bounded
+snapshot until acknowledgment. Native overflow, malformed events and unexpected
+EOF marked continuity loss. TinyVoice then owned native Linux and Windows
+listeners and accepted sequenced generic facts for macOS. Its reads retained the
+previous batch across continuity loss. The later desktop voice cut removed this
+host integration; the optional TinyVoice contract remains available to other
+consumers.
 
 TinyDocs PR 35 moves PNG/JPEG header interpretation into the module and adds
 bounded typed image inspection. Its parser regressions and rebuilt artifact
@@ -294,8 +293,9 @@ exceptions, with 26 temporary exceptions and one pending contract. The flows
 profile measures 325 packages and 303 names; the all-feature profile measures
 513 packages and 471 names, nine fewer of each than the preceding cutover.
 Both profiles still contain the two native builds `libsqlite3-sys` and `ring`.
-These counts do not measure binary size or build time. TinyVoice capture and
-non-macOS hotkeys remain a separate host migration.
+These counts do not measure binary size or build time. At this migration stage,
+TinyVoice capture and non-macOS hotkeys remained a separate host migration; the
+later desktop voice cut removed those host integrations.
 
 Linux packaging explicitly stages `libxdo.so.3` and `libasound.so.2` for loaded
 modules in both AppImage layouts, checking the target ELF architecture before
@@ -330,16 +330,17 @@ recording summaries and cancellation that waits for native finish cleanup. The
 host holds opaque reservations, reads WAV output in
 256 KiB slices, polls at most two continuous chunks per request, and releases
 leases on cancellation, sign-out and shutdown. Failed cleanup stays registered
-for retry. Microphone authorization remains a TinyComputer call; the host does
-not link TinyVoice or CPAL. The existing hotkey adapter remains module-backed.
+for retry. Microphone authorization remained a TinyComputer call; the host did
+not link TinyVoice or CPAL. This is an earlier implementation snapshot; the
+later desktop voice cut removed this adapter from OpenHuman.
 
-TinyVoice v0.3.0 (contract 1.10) owns wake-word sequencing (`SequenceUtterance`),
-the pre-transcription recording gates (`GateRecording`) and the hotkey recording
-state machine (`SessionOpen` / `SessionAdvance` / `SessionStatus` /
-`SessionClose`). The always-on adapter and `voice/server` call them by contract
-constant; the host keeps only native recording setup, transcription, text
-delivery and the Globe composition, and reports each fact to the session and
-performs the one action it answers with (openhuman#7587).
+TinyVoice v0.3.0 (contract 1.10) added wake-word sequencing
+(`SequenceUtterance`), pre-transcription recording gates (`GateRecording`) and
+the hotkey recording state machine (`SessionOpen` / `SessionAdvance` /
+`SessionStatus` / `SessionClose`). This records the earlier host integration
+stage (openhuman#7587). OpenHuman now calls TinyVoice only for transcript
+hallucination screening; the published optional contract remains unchanged for
+other consumers.
 
 This cut removes the `tinyvoice` and `cpal` host exceptions, leaving nine
 implementation exceptions for Channels, MCP, Box and Wallet. The resolved
@@ -506,8 +507,10 @@ Tool names, descriptions, parameter schemas, permissions and the
 `agent_prompt::resolve_completion_model` are upstream; the dedup exactly-once
 settle contract was already `tinyflows::nodes::control_flow::dedup_settle`, so
 only the per-flow lock and the run-finished subscriber remain in
-`flows/bus/dedup_commit.rs`. `observability.rs` and `langfuse_export.rs` call
-`tinyflows::observe::{step_status_str, to_exporter_observations}`.
+`flows/bus/dedup_commit.rs`. `observability.rs` calls
+`tinyflows::observe::step_status_str`; `flows/ops/execution.rs` converts the
+engine observation journal for the generic exporter in
+`agent/progress_tracing/flow_export.rs`.
 
 Stays host: `search_tool_catalog`, `get_tool_contract`,
 `get_tool_output_sample`, `list_connectable_toolkits` and
@@ -536,8 +539,8 @@ Behaviour notes: a job's policy is read from the job document (an unreadable job
 the flows code stays compiled in. On the next core start it narrows
 `DomainSet::flows` (no flow trigger or run-digest subscribers, no boot
 reconcile), turns the `workflows` tool group off, and answers every `flows.*`
-RPC with `COMPONENT_DISABLED:flows`. `about_app` reports the `flows` and
-`workflow_runs` capability domains as disabled. TinyFlows is a plain library
+RPC with `COMPONENT_DISABLED:flows`. `about_app` reports the `flows` capability
+domain as disabled. TinyFlows is a plain library
 gitlink with no registry record, so `modules.list` has no row for it.
 
 Relation to `cron.enabled`: independent switches. With `flows = false` the
@@ -548,6 +551,6 @@ schedule rows included, regardless of `flows`.
 
 ### TinyFlows schedule bus cutover (#7397)
 
-Supersedes the section above for who runs the scheduler. The `tinyflows` module (registry record `records_flows.rs`, contract `tinyflows_bus::schedule` v3) owns the scheduler runtime, claims, retry timing, completion, the cron job and run store (`CronDocuments`) and the schedule maths (`NextRun`, `ValidateSchedule`, `RunsCloserThan`, `NormalizeExpression`, `ParseHumanDelay`, `ValidateDelivery`, `DefaultDelivery`, `CheckOriginRequirements`, `CheckPatch`, `TruncateCronOutput`). Core links only `tinyflows-bus` (serde and chrono): `cargo tree -p openhuman -e normal -i tinyflows-schedule` is empty, and `tinyflows-drivers` is optional behind `flows` for the catalog alone.
+Supersedes the section above for who runs the scheduler. The `tinyflows` module (registry record `records_flows.rs`, contract `tinyflows_bus::schedule` v6) owns the scheduler runtime, claims, retry timing, completion, the cron job and run store (`CronDocuments`) and the schedule maths (`NextRun`, `ValidateSchedule`, `RunsCloserThan`, `NormalizeExpression`, `ParseHumanDelay`, `ValidateDelivery`, `DefaultDelivery`, `CheckOriginRequirements`, `CheckPatch`, `TruncateCronOutput`). Core links only `tinyflows-bus` (serde and chrono): `cargo tree -p openhuman -e normal -i tinyflows-schedule` is empty, and `tinyflows-drivers` is optional behind `flows` for the catalog alone.
 
-The host keeps four adapters in `crates/openhuman-core/src/cron/`: `client.rs` (typed calls and `ScheduleStore` requests), `documents_port.rs` (the scope's document store served to the module), `bus_host.rs` (the `ScheduleHost` callbacks `Execute`, `Failed`, `Deliver`, `ScheduleTrigger`, bound per scope) and `handlers.rs` (the job-kind registry that replaced the hard-coded shell/agent/flow split and absorbed the system-job handlers). Deleted: `claims.rs`, `scheduler/host.rs`, `scheduler/run_record.rs` and the `tinyflows_schedule` re-export facade. Temporary exception: `tinyflows-bus` carries `chrono` (record timestamps), recorded in `scripts/ci/module-boundaries.json`.
+The host keeps four adapters in `crates/openhuman-core/src/cron/`: `client.rs` (typed calls and `ScheduleStore` requests), `documents_port.rs` (the scope's document store served to the module), `bus_host.rs` (the `ScheduleHost` callbacks `Execute`, `Failed`, `Send`, `Deliver`, `ScheduleTrigger`, bound per scheduler or manual invocation) and `handlers.rs` (the job-kind registry that replaced the hard-coded shell/agent/flow split and absorbed the system-job handlers). Manual invocation owners retain their callback and bound context until the v6 module worker reaches terminal state and its handle is acknowledged. The host forwards the document metadata and migration contract without implementing the schedule schema. Deleted: `claims.rs`, `scheduler/host.rs`, `scheduler/run_record.rs` and the `tinyflows_schedule` re-export facade. Temporary exception: `tinyflows-bus` carries `chrono` (record timestamps), recorded in `scripts/ci/module-boundaries.json`.

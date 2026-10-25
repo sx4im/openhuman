@@ -1,7 +1,7 @@
 //! The parent agent's streamed answer text, as `text_delta` socket events.
 //!
-//! Kept out of the bridge loop so a held stream (`hold_text_stream`, set for
-//! threads whose final reply is post-processed) is a one-line guard there.
+//! Kept out of the bridge loop so the loop's `TextDelta` arm stays a single
+//! call.
 
 use crate::web_chat::WebChannelEvent;
 

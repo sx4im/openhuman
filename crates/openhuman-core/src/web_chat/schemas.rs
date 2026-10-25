@@ -182,9 +182,6 @@ fn handle_chat(ctx: DispatchCtx, params: Map<String, Value>) -> ControllerFuture
                     // Attribution is stamped later by run_chat_task once the
                     // target agent is resolved.
                     agent_id: None,
-                    // Decided by run_chat_task once the thread's TinyMemes
-                    // arm is known.
-                    hold_text_stream: false,
                 },
             )
             .await?,

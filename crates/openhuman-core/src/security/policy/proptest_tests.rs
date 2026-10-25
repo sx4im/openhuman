@@ -6,8 +6,8 @@
 //! the hand-enumerated cases in `policy_tests.rs`.
 
 use super::types::SecurityPolicy;
+use crate::security::policy::CommandClass;
 use proptest::prelude::*;
-use tinybox_bus::CommandClass;
 
 proptest! {
     #![proptest_config(ProptestConfig {
