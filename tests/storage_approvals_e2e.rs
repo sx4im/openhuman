@@ -27,6 +27,13 @@ fn pending(id: &str) -> PendingApproval {
 #[test]
 fn a_configured_backend_holds_the_approvals_instead_of_approval_db() {
     let case = Case::open();
+    if std::env::var("OPENHUMAN_TEST_STORAGE_BACKEND")
+        .ok()
+        .as_deref()
+        == Some("memory")
+    {
+        assert_eq!(case.url, "memory");
+    }
     let workspace = tempfile::tempdir().unwrap();
     let config = Config {
         workspace_dir: workspace.path().to_path_buf(),

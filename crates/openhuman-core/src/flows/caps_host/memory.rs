@@ -42,11 +42,11 @@ use crate::flows::{
 };
 use crate::memory::types::{FetchParams, RecallParams};
 use crate::security::approval::{redact_args, summarize_action, GateOutcome};
+use crate::security::policy::CommandClass;
 #[cfg(test)]
 use crate::security::turn_origin;
 use crate::security::turn_origin::{AgentTurnOrigin, TrustedAutomationSource};
 use crate::security::SecurityPolicy;
-use tinybox_bus::CommandClass;
 use tinymemory_api::wrap_untrusted_for_agent;
 use tinymemory_api::Error;
 use tinymemory_api::{Hit, LearningKind, MemoryMeta, MetaFilter, SourceKind};

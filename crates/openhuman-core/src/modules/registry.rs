@@ -45,8 +45,6 @@ mod records_eventqueues;
 mod records_extra;
 mod records_flows;
 mod records_mcp_connectors;
-#[cfg(feature = "tinymemes")]
-mod records_memes;
 mod records_memory_juice;
 mod records_search;
 mod records_voice;
@@ -66,16 +64,14 @@ use records_extra::TINYCHANNELS;
 use records_extra::TINYHOSTS;
 use records_flows::TINYFLOWS;
 use records_mcp_connectors::{TINYCONNECTORS, TINYMCP};
-#[cfg(feature = "tinymemes")]
-use records_memes::TINYMEMES;
 use records_memory_juice::TINYJUICE;
 use records_search::TINYSEARCH;
 #[cfg(feature = "voice")]
 use records_voice::TINYVOICE;
 
 /// Every module this build can load. The records whose contract crate is an
-/// optional dependency (`documents`, `web3`, `voice`, `hosting`, `tinymemes`, `inbound-queues`) exist
-/// only when that gate is on; a product-feature build carries all fourteen.
+/// optional dependency (`documents`, `web3`, `voice`, `hosting`, `inbound-queues`) exist
+/// only when that gate is on; a product-feature build carries all thirteen.
 pub const ALL: &[ModuleRecord] = &[
     TINYCOMPUTER,
     TINYSEARCH,
@@ -94,8 +90,6 @@ pub const ALL: &[ModuleRecord] = &[
     TINYFLOWS,
     #[cfg(feature = "hosting")]
     TINYHOSTS,
-    #[cfg(feature = "tinymemes")]
-    TINYMEMES,
     #[cfg(feature = "inbound-queues")]
     TINYEVENTQUEUES,
 ];
@@ -136,7 +130,6 @@ pub const COMPONENT_OF: &[(&str, &str)] = &[
     ("tinychannels", "channels"),
     ("tinyflows", "tinyflows"),
     ("tinyhosts", "hosting"),
-    ("tinymemes", "memes"),
     ("tinyeventqueues", "eventqueues"),
 ];
 

@@ -32,7 +32,7 @@ use serde_json::Value;
 use socketioxide::extract::{AckSender, Data, SocketRef, TryData};
 use socketioxide::SocketIo;
 
-use crate::core_host::web_chat::{GuardrailPayload, WebChannelEvent};
+use crate::core_host::web_chat::{GuardrailPayload, ScopedWebEvent};
 
 /// Shell-originated companion lifecycle events that still need to reach
 /// Companion clients that receive lifecycle state through Socket.IO.
@@ -64,6 +64,23 @@ fn subscribe_companion_state_changed() -> tokio::sync::broadcast::Receiver<Value
 /// events (read-only) but cannot trigger executable work.
 #[derive(Clone, Copy, Debug)]
 struct AuthedConnection;
+
+/// Tenant captured from the server-side context when the socket connects.
+/// The per-process bearer authenticates the connection but does not encode a
+/// SaaS profile, so never accept tenant selection from a later event payload.
+#[derive(Clone, Debug)]
+struct SocketTenant(crate::core_host::agent::plan_review::SocketReviewScope);
+
+/// Bind replay tenancy from the HTTP request extensions retained by
+/// Socket.IO. Its async connect callback is spawned independently of the
+/// Axum request task, so task-local ambient context is not a reliable carrier.
+fn socket_tenant_from_request_extensions(
+    extensions: &axum::http::Extensions,
+) -> Option<SocketTenant> {
+    let dispatch = extensions.get::<crate::core_host::core::runtime::DispatchCtx>()?;
+    let scope = crate::core_host::agent::plan_review::socket_scope_for_dispatch(dispatch)?;
+    Some(SocketTenant(scope))
+}
 
 /// Connection-time payload the client passes via Socket.IO's `auth` field.
 ///
@@ -216,6 +233,7 @@ struct ChatCancelPayload {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ThreadSubscribePayload {
     thread_id: String,
 }
@@ -279,6 +297,14 @@ pub fn attach_socketio() -> (socketioxide::layer::SocketIoLayer, SocketIo) {
                 return;
             }
             socket.extensions.insert(AuthedConnection);
+            let Some(tenant) = socket_tenant_from_request_extensions(
+                &socket.req_parts().extensions,
+            ) else {
+                log::warn!("[socketio] rejecting socket without a tenant scope in SaaS mode");
+                let _ = socket.clone().disconnect();
+                return;
+            };
+            socket.extensions.insert(tenant);
 
             log::info!("[socketio] client connected id={client_id} (authenticated)");
             // Join a room named after the client ID for targeted event delivery.
@@ -287,8 +313,8 @@ pub fn attach_socketio() -> (socketioxide::layer::SocketIoLayer, SocketIo) {
             // receives broadcast-style events that aren't tied to a
             // specific chat thread. Today this covers proactive messages
             // (welcome agent, morning briefing, cron-driven announcements)
-            // which `channels::proactive::ProactiveMessageSubscriber`
-            // emits with `client_id = "system"` — see `emit_web_channel_event`.
+            // which `web_chat::proactive::WebProactiveSubscriber` emits with
+            // `client_id = "system"` — see `emit_web_channel_event`.
             // If this join fails the welcome message silently disappears,
             // so we log both success and failure for diagnosability.
             let _ = join_room_logged(&socket, "system", &client_id);
@@ -1041,8 +1067,8 @@ fn join_room_logged(socket: &SocketRef, room: &str, client_id: &str) -> bool {
     }
 }
 
-fn emit_web_channel_event(io: &SocketIo, event: WebChannelEvent) {
-    let name = event.event.clone();
+fn emit_web_channel_event(io: &SocketIo, event: ScopedWebEvent) {
+    let name = event.event_name();
     // Deliver to the initiating client's own room AND the per-thread room. The
     // thread room lets a socket that reconnected with a new client_id (after
     // re-subscribing via `thread:subscribe`) keep receiving an in-flight turn's
@@ -1057,9 +1083,10 @@ fn emit_web_channel_event(io: &SocketIo, event: WebChannelEvent) {
     // `client_id` room, then to the thread room EXCEPT the `client_id` room —
     // each socket is reached exactly once regardless of room overlap.
     // "system" broadcasts and events without a thread_id keep single-room delivery.
-    let primary = event.client_id.clone();
-    let thread_room = (event.client_id != "system" && !event.thread_id.is_empty())
-        .then(|| format!("thread:{}", event.thread_id));
+    let context = event.context();
+    let primary = context.client_id.clone();
+    let thread_room = (context.client_id != "system" && !context.thread_id.is_empty())
+        .then(|| format!("thread:{}", context.thread_id));
     if let Ok(payload) = serde_json::to_value(event) {
         log::debug!(
             "[socketio] send event={} primary={} thread_room={:?} thread_id={} request_id={}",
@@ -1076,8 +1103,8 @@ fn emit_web_channel_event(io: &SocketIo, event: WebChannelEvent) {
                 .unwrap_or_default()
         );
         // Primary: the client_id room.
-        let _ = io.to(primary.clone()).emit(&name, &payload);
-        if let Some(alias) = event_alias(&name) {
+        let _ = io.to(primary.clone()).emit(name, &payload);
+        if let Some(alias) = event_alias(name) {
             let _ = io.to(primary.clone()).emit(alias, &payload);
         }
         // Thread room minus the client_id room (dedup — see note above).
@@ -1085,8 +1112,8 @@ fn emit_web_channel_event(io: &SocketIo, event: WebChannelEvent) {
             let _ = io
                 .to(tr.clone())
                 .except(primary.clone())
-                .emit(&name, &payload);
-            if let Some(alias) = event_alias(&name) {
+                .emit(name, &payload);
+            if let Some(alias) = event_alias(name) {
                 let _ = io
                     .to(tr.clone())
                     .except(primary.clone())
@@ -1167,7 +1194,7 @@ fn replay_parked_approval(socket: &SocketRef, thread_id: &str) {
         // Replay is a fresh emit to a newly-joined socket, not a resend of the
         // original event, so stamp `ts` with "now" (same clock as
         // `publish_web_channel_event`) rather than leaving it unset.
-        event.ts = Some(crate::core_host::web_chat::unix_epoch_ms());
+        stamp_replay_timestamp(&mut event);
         let Ok(payload) = serde_json::to_value(&event) else {
             continue;
         };
@@ -1185,11 +1212,11 @@ fn replay_parked_approval(socket: &SocketRef, thread_id: &str) {
 /// plan review is a live, in-memory park (no SQLite row), but it reaches the
 /// UI the same fire-and-forget way, so the same reconciliation applies.
 fn replay_parked_plan_review(socket: &SocketRef, thread_id: &str) {
-    let Ok(tenant) = crate::core_host::core::runtime::DispatchCtx::ambient().tenant() else {
+    let Some(tenant) = socket.extensions.get::<SocketTenant>() else {
         return;
     };
-    let Some(row) = crate::core_host::agent::plan_review::gate::global()
-        .parked_review_for_thread(&tenant, thread_id)
+    let Some(row) =
+        crate::core_host::agent::plan_review::parked_review_for_socket(&tenant.0, thread_id)
     else {
         return;
     };
@@ -1201,9 +1228,9 @@ fn replay_parked_plan_review(socket: &SocketRef, thread_id: &str) {
         thread_id,
         &client_id,
         row.tool_call_id.as_deref(),
-        row.expires_at.as_deref(),
+        Some(row.expires_at.as_str()),
     );
-    event.ts = Some(crate::core_host::web_chat::unix_epoch_ms());
+    stamp_replay_timestamp(&mut event);
     let Ok(payload) = serde_json::to_value(&event) else {
         return;
     };
@@ -1219,6 +1246,10 @@ fn emit_with_aliases(socket: &SocketRef, name: &str, payload: &serde_json::Value
     if let Some(alias) = event_alias(name) {
         let _ = socket.emit(alias, payload);
     }
+}
+
+fn stamp_replay_timestamp(event: &mut crate::core_host::web_chat::WebChannelEvent) {
+    event.context_mut().ts = Some(crate::core_host::web_chat::unix_epoch_ms());
 }
 
 // Every test here names a gated fn (`channel_connection_update_payload`,

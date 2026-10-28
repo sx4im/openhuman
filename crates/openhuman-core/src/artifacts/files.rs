@@ -167,7 +167,7 @@ pub(crate) async fn reserve_file(
             Err(e) => {
                 return Err(format!(
                     "[artifacts] failed to reserve {candidate:?} for id={id}: {e}"
-                ))
+                ));
             }
         }
     }
@@ -188,12 +188,12 @@ pub(crate) async fn resolve_file(
     let Some(file) = meta.file.as_deref() else {
         let root = artifacts_root(workspace_dir).await?;
         let resolved = root.join(&meta.path);
-        if has_parent_component(Path::new(&meta.path)) || !resolved.starts_with(&root) {
-            return Err(format!(
-                "[artifacts] meta.path {:?} escapes artifacts root for id={}",
+        check_within(&root, &resolved).map_err(|reason| {
+            format!(
+                "[artifacts] meta.path {:?} escapes artifacts root for id={}: {reason}",
                 meta.path, meta.id
-            ));
-        }
+            )
+        })?;
         return Ok(resolved);
     };
     let file = PathBuf::from(file);
@@ -221,8 +221,9 @@ fn has_parent_component(path: &Path) -> bool {
     path.components().any(|c| matches!(c, Component::ParentDir))
 }
 
-/// The escape guard for a recorded `file` against its `file_root`.
-fn check_within(root: &Path, file: &Path) -> Result<(), &'static str> {
+/// The escape guard for a recorded `file` against its `file_root` (or a
+/// legacy record's bytes against the artifacts root).
+pub(super) fn check_within(root: &Path, file: &Path) -> Result<(), &'static str> {
     if !root.is_absolute() || !file.is_absolute() {
         return Err("path is not absolute");
     }

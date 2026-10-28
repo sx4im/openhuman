@@ -8,8 +8,8 @@
 use super::{EngineError, Result};
 use serde_json::Value;
 
+use crate::security::policy::CommandClass;
 use crate::security::{GateDecision, SecurityPolicy};
-use tinybox_bus::CommandClass;
 use tinytools::status::POLICY_BLOCKED_MARKER;
 
 /// Hard autonomy-tier gate for an *acting* flow node (Phase 2).

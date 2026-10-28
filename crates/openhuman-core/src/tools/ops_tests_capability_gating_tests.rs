@@ -77,14 +77,7 @@ fn tool_group_classifies_gate_and_harness_families() {
     }
     assert_eq!(tool_group("learning_list_facets"), DomainGroup::Agent);
     assert_eq!(tool_group("spawn_subagent"), DomainGroup::Agent);
-    for name in [
-        "ask_user_clarification",
-        "wait",
-        "wait_loop",
-        "delegate",
-        "todo",
-        "spawn_parallel_agents",
-    ] {
+    for name in ["ask_user_clarification", "wait", "wait_loop", "todo"] {
         assert_eq!(tool_group(name), DomainGroup::Agent);
     }
     assert_eq!(tool_group("config_snapshot"), DomainGroup::Config);
@@ -300,7 +293,6 @@ fn memory_tool_is_registered_once_memory_is_on() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names = tool_names(&tools);
@@ -337,7 +329,6 @@ fn memory_tool_is_absent_when_the_memory_component_is_off() {
         &browser,
         &http,
         tmp.path(),
-        &HashMap::new(),
         &cfg,
     );
     let names = tool_names(&tools);

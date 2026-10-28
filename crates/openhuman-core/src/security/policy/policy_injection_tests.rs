@@ -1,5 +1,5 @@
 use super::*;
-use tinybox_bus::CommandClass;
+use crate::security::policy::CommandClass;
 
 #[test]
 fn command_injection_background_chain_blocked() {

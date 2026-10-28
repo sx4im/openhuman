@@ -41,7 +41,9 @@ pub async fn load_declared_modules(config: &Config) {
     // win over a download, and `ensure_loaded` below then finds it already
     // serving rather than fetching a second copy.
     for outcome in
-        super::search_path::load_enabled(runtime.host(), &ops::disabled_lib_stems(config))
+        super::search_path::load_enabled(runtime.host(), &ops::disabled_lib_stems(config), |id| {
+            ops::module_config(config, id)
+        })
     {
         match outcome {
             Ok(info) => log::info!(
@@ -100,6 +102,9 @@ fn warm_inbound_queues(config: &Config) {
     // Loading a module is process-wide; the host's own context carries it.
     crate::core::runtime::DispatchCtx::host_default().spawn(async move {
         log::debug!("[modules] inbound event queues warm-up starting");
+        // Pinned turns a previous process left running are run again; the
+        // queues acknowledged them, so nothing else would.
+        crate::inbound::pinned::resume_at_boot(&config);
         if let Err(reason) = ops::ensure_loaded(&config, super::event_queues::MODULE_ID).await {
             log::warn!("[modules] inbound event queues did not load at boot: {reason}");
         }

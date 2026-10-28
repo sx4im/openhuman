@@ -195,6 +195,22 @@ fn a_workspace_inside_a_credential_store_is_refused() {
 }
 
 #[test]
+fn a_workspace_not_yet_created_inside_a_credential_store_is_refused() {
+    let home = home_with(&[".aws/"]);
+
+    // The workspace folder doesn't exist yet; it still lands inside `~/.aws`.
+    let err = credential_denials(
+        crate::security::policy::home_credential_stores(home.path()),
+        &home.path().join(".aws/new-project"),
+        &[],
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("`.aws`"), "{err}");
+}
+
+#[test]
 fn a_writable_grant_inside_a_credential_store_is_refused() {
     let home = home_with(&[".kube/"]);
     let root = tempfile::tempdir().unwrap();
@@ -368,6 +384,7 @@ async fn disabled_tinybox_module_never_falls_back_to_host_execution() -> anyhow:
         Duration::from_secs(5),
         false,
         None,
+        None,
     )
     .await;
 
@@ -411,12 +428,12 @@ impl Drop for LiveModule {
 
 #[cfg(all(feature = "modules", target_os = "linux"))]
 #[tokio::test]
-#[ignore = "requires the verified TinyBox v0.1.28 archive and a supported Linux jail"]
+#[ignore = "requires the verified pinned TinyBox archive and a supported Linux jail"]
 async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyhow::Result<()> {
     let _environment_lock = crate::config::TEST_ENV_LOCK.lock().await;
     const KEY: &str = "OPENHUMAN_BUNDLED_MODULES";
     let artifact_root = std::env::var_os(KEY).map(PathBuf::from).ok_or_else(|| {
-        anyhow::anyhow!("set OPENHUMAN_BUNDLED_MODULES to the downloaded v0.1.28 release assets")
+        anyhow::anyhow!("set OPENHUMAN_BUNDLED_MODULES to the downloaded pinned release assets")
     })?;
     let _environment_restore = BundledModulesRestore(std::env::var_os(KEY));
     let record = crate::modules::registry::find("tinybox")
@@ -481,8 +498,10 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
         Duration::from_secs(10),
         false,
         None,
+        None,
     )
     .await?;
+    let output = finished(output);
     assert!(output.success());
     assert_eq!(output.stdout, "tinybox-jailed-ok");
     assert_eq!(output.stderr, "safe-error");
@@ -497,8 +516,10 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
         Duration::from_secs(10),
         false,
         None,
+        None,
     )
     .await?;
+    let output = finished(output);
     assert!(output.success());
     assert_eq!(
         output.stdout.len(),
@@ -550,4 +571,16 @@ async fn released_tinybox_runs_a_native_jail_through_the_pinned_loader() -> anyh
     .await?;
     assert!(output.timed_out, "cron timeout is acknowledged by TinyBox");
     Ok(())
+}
+
+/// The result of a jailed run that was not asked to yield.
+fn finished(
+    outcome: super::super::shell_exec::ShellRunOutcome,
+) -> super::super::types::SandboxExecResult {
+    match outcome {
+        super::super::shell_exec::ShellRunOutcome::Finished(result) => result,
+        super::super::shell_exec::ShellRunOutcome::Running(_) => {
+            panic!("a run without a yield point came back while running")
+        }
+    }
 }

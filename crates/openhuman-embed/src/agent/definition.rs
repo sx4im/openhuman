@@ -81,6 +81,7 @@ pub struct AgentDefinitionSpec {
     system_prompt: Option<String>,
     /// The prompt is the whole system prompt, with nothing composed around it.
     bare_prompt: bool,
+    refresh_prompt_on_resume: Option<bool>,
     tools: Option<ToolScopeSpec>,
     disallowed_tools: Vec<String>,
     tool_rules: Option<tinytools::ToolRules>,
@@ -145,6 +146,9 @@ impl AgentDefinitionSpec {
             self.system_prompt = lower.system_prompt;
             self.bare_prompt = lower.bare_prompt;
         }
+        self.refresh_prompt_on_resume = self
+            .refresh_prompt_on_resume
+            .or(lower.refresh_prompt_on_resume);
         self.tools = self.tools.or(lower.tools);
         self.disallowed_tools.extend(lower.disallowed_tools);
         // Tool rules must retain both layers' restrictions; core also enforces config rules.
@@ -188,6 +192,27 @@ impl AgentDefinitionSpec {
     pub fn bare_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
         self.bare_prompt = true;
+        self
+    }
+
+    /// Give a resumed thread the prompt this agent renders now, not the one
+    /// recorded when the thread began.
+    ///
+    /// Off by default: a resumed thread replays its recorded system prompt
+    /// verbatim, which keeps the provider's prefix cache warm across a
+    /// restart, so prompt edits reach only new threads. On, the prompt is
+    /// rendered again on every resumed turn, and a thread whose recorded
+    /// prompt differs continues under the current one with its conversation
+    /// intact; the session seals the transcript generation it was on and
+    /// carries the conversation into the next, and that turn's user message
+    /// opens with a one-time note that the instructions changed. Each change
+    /// costs one uncached prompt; an unchanged prompt costs nothing and
+    /// writes nothing.
+    /// With [`bare_prompt`](Self::bare_prompt) the prompt changes only when
+    /// the host's text does; a composed prompt also changes with the live
+    /// state it renders (connected integrations, skills, AGENTS.md).
+    pub fn refresh_prompt_on_resume(mut self, refresh: bool) -> Self {
+        self.refresh_prompt_on_resume = Some(refresh);
         self
     }
 
@@ -290,6 +315,9 @@ impl AgentDefinitionSpec {
             }
             None => {}
         }
+        if let Some(refresh) = self.refresh_prompt_on_resume {
+            def.extensions.refresh_prompt_on_resume = refresh;
+        }
         if custom_base {
             if let Some(requested) = &self.tools {
                 let narrows = match (requested, &def.tools) {
@@ -353,13 +381,14 @@ impl AgentDefinitionSpec {
             def.temperature = t;
         }
         log::debug!(
-            "[embed][agent] definition id={id} prompt={} tools={:?} sandbox={:?} max_iterations={}",
+            "[embed][agent] definition id={id} prompt={} refresh_prompt_on_resume={} tools={:?} sandbox={:?} max_iterations={}",
             match &def.system_prompt {
                 PromptSource::Inline(_) => "inline",
                 PromptSource::File { .. } => "file",
                 PromptSource::Dynamic(_) => "dynamic",
                 PromptSource::Verbatim(_) => "verbatim",
             },
+            def.extensions.refresh_prompt_on_resume,
             def.tools,
             def.sandbox_mode,
             def.max_iterations

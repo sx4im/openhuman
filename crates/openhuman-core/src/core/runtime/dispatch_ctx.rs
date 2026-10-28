@@ -24,19 +24,34 @@ use super::CoreContext;
 #[derive(Clone, Default)]
 pub struct DispatchCtx {
     core: Option<Arc<CoreContext>>,
+    headless_agent_chat: bool,
 }
 
 impl DispatchCtx {
     /// Dispatch under `core`: the tenant's context for a SaaS request, an
     /// agent's derived context for an embedded call, the host's own otherwise.
     pub fn new(core: Arc<CoreContext>) -> Self {
-        Self { core: Some(core) }
+        Self {
+            core: Some(core),
+            headless_agent_chat: false,
+        }
+    }
+
+    /// Binds the resolved core while preserving call-local dispatch metadata.
+    /// Used when a registered handler's context is scoped for execution after
+    /// the transport has already attached flags to the call.
+    pub(crate) fn with_resolved_core(mut self, core: Arc<CoreContext>) -> Self {
+        self.core = Some(core);
+        self
     }
 
     /// Dispatch with no context. Only for tests and pre-boot callers; every
     /// reader of the context treats this as "nothing configured here".
     pub fn unbound() -> Self {
-        Self { core: None }
+        Self {
+            core: None,
+            headless_agent_chat: false,
+        }
     }
 
     /// Dispatch under the process default context (the first one built), or
@@ -45,6 +60,7 @@ impl DispatchCtx {
     pub fn process_default() -> Self {
         Self {
             core: CoreContext::default_context(),
+            headless_agent_chat: false,
         }
     }
 
@@ -62,7 +78,10 @@ impl DispatchCtx {
         } else {
             CoreContext::current()
         };
-        Self { core }
+        Self {
+            core,
+            headless_agent_chat: false,
+        }
     }
 
     /// The context for work that arrives with none of its own and no tenant on
@@ -133,7 +152,20 @@ impl DispatchCtx {
     pub fn ambient_turn() -> Self {
         Self {
             core: CoreContext::scoped_for_turn(),
+            headless_agent_chat: false,
         }
+    }
+
+    /// Marks this compiled one-shot call as a headless agent-chat entry point.
+    /// The marker is carried by this dispatch only; ordinary controller and
+    /// in-process chat calls remain asynchronous.
+    pub(crate) fn with_headless_agent_chat(mut self) -> Self {
+        self.headless_agent_chat = true;
+        self
+    }
+
+    pub(crate) fn is_headless_agent_chat(&self) -> bool {
+        self.headless_agent_chat
     }
 
     /// The `[components]` switches of the context this call runs under. No

@@ -54,6 +54,7 @@ async fn a_resumed_thread_keeps_recorded_juice_specs_and_executors_when_repl_is_
     current_config.tokenjuice.router_enabled = false;
     current_config.tokenjuice.ccr_enabled = false;
     current_config.tokenjuice.repl_handle_enabled = false;
+    crate::agent::session_host::test_support::install_managed_model_fixture(&current_config);
     assert!(repl_tools_for(&current_config).is_empty());
     let mut host = crate::agent::OpenHumanSessionHost::from_config_for_agent(
         &crate::core::runtime::DispatchCtx::ambient(),
@@ -167,6 +168,7 @@ async fn resumed_juice_snapshot_does_not_add_live_repl_declarations() {
         ..Default::default()
     };
     std::fs::create_dir_all(&config.workspace_dir).expect("workspace");
+    crate::agent::session_host::test_support::install_managed_model_fixture(&config);
     config.context.compaction_enabled = true;
     config.tokenjuice.router_enabled = true;
     config.tokenjuice.ccr_enabled = true;
@@ -264,6 +266,7 @@ async fn juice_off_turn_loads_no_module_and_passes_tool_output_through() {
         ..Default::default()
     };
     std::fs::create_dir_all(&config.workspace_dir).expect("workspace");
+    crate::agent::session_host::test_support::install_managed_model_fixture(&config);
     config.context.compaction_enabled = true;
     config.tokenjuice.router_enabled = true;
     assert!(config.components.set("juice", false));

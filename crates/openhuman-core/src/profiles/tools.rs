@@ -106,7 +106,6 @@ pub const HARD_DENIED: &[&str] = &[
     "uninstall_workflow",
     "create_skill",
     "git_operations",
-    "delegate",
     "curl",
     "pushover",
 ];

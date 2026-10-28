@@ -12,7 +12,7 @@ pub(super) fn wrap(
     ctx: &crate::core::runtime::DispatchCtx,
     inner: Arc<dyn ChatModel<()>>,
     config: Arc<Config>,
-    profile: ModelProfile,
+    profile: Option<ModelProfile>,
 ) -> Arc<dyn ChatModel<()>> {
     let host = Arc::new(AttachmentModel {
         config: config.clone(),
@@ -49,11 +49,16 @@ pub(super) fn wrap(
         |_, request| Ok(super::super::take_request_scope(&mut request.metadata)),
         host.clone(),
         extractor,
-    )
-    .with_profile(profile)
-    .with_fallback_renderer(host.clone())
-    .with_fallback_cache(host.clone())
-    .with_history_fallback(host.clone());
+    );
+    let model = if let Some(profile) = profile {
+        model.with_profile(profile)
+    } else {
+        model
+    };
+    let model = model
+        .with_fallback_renderer(host.clone())
+        .with_fallback_cache(host.clone())
+        .with_history_fallback(host.clone());
     Arc::new(model)
 }
 
@@ -100,15 +105,19 @@ impl MediaSourceResolver<AttachmentAccessScope> for AttachmentModel {
         max_bytes: usize,
         metadata: &MediaSourceMetadata,
     ) -> Result<ResolvedMedia, String> {
-        if (metadata.kind == MediaSourceKind::Url
-            && !source.starts_with("data:")
-            && !source.starts_with("http://")
-            && !source.starts_with("https://"))
-            || (metadata.kind == MediaSourceKind::Untyped
+        // Staged native attachments are opaque host references that
+        // `resolve_block` authorizes against the thread, not URLs to fetch.
+        let staged = source.starts_with("openhuman-staged://");
+        if !staged
+            && ((metadata.kind == MediaSourceKind::Url
                 && !source.starts_with("data:")
-                && source.contains("://")
                 && !source.starts_with("http://")
                 && !source.starts_with("https://"))
+                || (metadata.kind == MediaSourceKind::Untyped
+                    && !source.starts_with("data:")
+                    && source.contains("://")
+                    && !source.starts_with("http://")
+                    && !source.starts_with("https://")))
         {
             return Err("unsupported media URL scheme".into());
         }
@@ -160,7 +169,14 @@ impl MediaSourceResolver<AttachmentAccessScope> for AttachmentModel {
             }
         };
         let Some((resolved_modality, path, mut mime, bytes, recovered)) = self
-            .resolve_block(&block, scope)
+            .resolve_block(
+                &block, scope,
+                // The generic resolver port carries no message index, so staged
+                // attachments committed to this thread stay readable for
+                // history replay; `read_authorized_native_attachment` still
+                // requires the record to be bound to the thread.
+                true,
+            )
             .await
             .map_err(|error| error.to_string())?
         else {

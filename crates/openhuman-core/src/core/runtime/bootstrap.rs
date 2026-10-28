@@ -67,7 +67,7 @@ pub(crate) async fn bootstrap_core_runtime(
         if guard_disabled {
             log::debug!("[file_state] guard disabled via OPENHUMAN_FILE_STATE_GUARD");
         }
-        tinytools_std::file_state::init_global(!guard_disabled);
+        tinyagents_harness_tools::fs::file_state::init_global(!guard_disabled);
     } else {
         log::debug!("[boot] agent file-state coordinator SKIPPED — Agent domain disabled");
     }
@@ -128,7 +128,7 @@ pub(crate) async fn bootstrap_core_runtime(
     }
 
     // --- Run-ledger recovery -------------------------------------------
-    // Detached sub-agent runs (`spawn_async_subagent`) from a previous process
+    // Detached sub-agent runs (`spawn_subagent`) from a previous process
     // are gone with that process. Any `agent_runs` row still marked `running`
     // at boot is orphaned — its driver died without firing a terminal event, so
     // the finalizer never settled it. Stamp such rows `interrupted` so they stop

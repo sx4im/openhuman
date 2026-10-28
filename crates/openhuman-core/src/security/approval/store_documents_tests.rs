@@ -1,13 +1,14 @@
 use super::*;
+use crate::storage::{test_support::memory_backend, Scope, StorageBackend};
 use chrono::{Duration, Timelike};
-use tinystoragedrivers::{MemoryStorage, Scope, StorageBackend};
 
-fn docs_in(storage: &MemoryStorage, scope: &str) -> Docs {
+fn docs_in(storage: &dyn StorageBackend, scope: &str) -> Docs {
     Docs::new(&storage.for_scope(&Scope::new(scope).unwrap()).unwrap())
 }
 
 fn docs() -> Docs {
-    docs_in(&MemoryStorage::new(), "local")
+    let storage = memory_backend();
+    docs_in(storage.as_ref(), "local")
 }
 
 fn pending(id: &str, created_secs_ago: i64, expires_in: Option<i64>) -> PendingApproval {
@@ -70,8 +71,8 @@ fn a_request_is_decided_exactly_once() {
 
 #[test]
 fn concurrent_deciders_never_both_win() {
-    let storage = MemoryStorage::new();
-    let store = docs_in(&storage, "local");
+    let storage = memory_backend();
+    let store = docs_in(storage.as_ref(), "local");
     store
         .insert_pending(&pending("race", 0, None), "s")
         .unwrap();
@@ -263,9 +264,9 @@ fn flow_trust_grants_list_and_revoke() {
 
 #[test]
 fn scopes_keep_users_apart() {
-    let storage = MemoryStorage::new();
-    let alice = docs_in(&storage, "alice");
-    let bob = docs_in(&storage, "bob");
+    let storage = memory_backend();
+    let alice = docs_in(storage.as_ref(), "alice");
+    let bob = docs_in(storage.as_ref(), "bob");
     alice.insert_pending(&pending("r", 0, None), "s").unwrap();
     alice.insert_flow_trust("flow-1", "shell").unwrap();
     assert!(bob.list_pending().unwrap().is_empty());

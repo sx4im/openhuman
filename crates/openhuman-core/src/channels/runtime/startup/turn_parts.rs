@@ -26,7 +26,6 @@ use tinytools::Tool;
 pub(crate) struct ChannelTurnParts {
     pub(crate) model: String,
     pub(crate) provider_name: String,
-    pub(crate) provider_runtime_options: provider::ProviderRuntimeOptions,
     pub(crate) tools_registry: Arc<Vec<Box<dyn Tool>>>,
     pub(crate) system_prompt: ChannelSystemPrompt,
     pub(crate) skills: Vec<Workflow>,
@@ -80,12 +79,6 @@ fn default_tool_descs(config: &Config) -> Vec<(&'static str, &'static str)> {
         "pushover",
         "Send a Pushover notification to your device. Requires PUSHOVER_TOKEN and PUSHOVER_USER_KEY in .env file.",
     ));
-    if !config.agents.is_empty() {
-        tool_descs.push((
-            "delegate",
-            "Delegate a subtask to a specialized agent. Use when: a task benefits from a different model (e.g. fast summarization, deep reasoning, code generation). The sub-agent runs a single prompt and returns its response.",
-        ));
-    }
     tool_descs
 }
 
@@ -98,12 +91,6 @@ pub(crate) fn build_channel_turn_parts(
     security: &Arc<SecurityPolicy>,
     descs: PromptToolDescs,
 ) -> Result<ChannelTurnParts> {
-    let provider_runtime_options = provider::ProviderRuntimeOptions {
-        auth_profile_override: None,
-        openhuman_dir: config.config_path.parent().map(std::path::PathBuf::from),
-        secrets_encrypt: config.secrets.encrypt,
-        reasoning_enabled: config.runtime.reasoning_enabled,
-    };
     let (model, provider_name) = match resolve_chat_workload(config) {
         ChatWorkloadResolution::Cloud => {
             let (_chat, model) = provider::create_chat_model_with_model_id_in(
@@ -112,7 +99,7 @@ pub(crate) fn build_channel_turn_parts(
                 config,
                 config.default_temperature,
             )?;
-            (model, provider::INFERENCE_BACKEND_ID.to_string())
+            (model, provider::factory::INFERENCE_BACKEND_ID.to_string())
         }
         ChatWorkloadResolution::Workload {
             provider_string,
@@ -161,7 +148,6 @@ pub(crate) fn build_channel_turn_parts(
             &config.browser,
             &config.http_request,
             &config.action_dir,
-            &config.agents,
             config,
             None,
         )
@@ -223,7 +209,6 @@ pub(crate) fn build_channel_turn_parts(
     Ok(ChannelTurnParts {
         model,
         provider_name,
-        provider_runtime_options,
         tools_registry,
         system_prompt,
         skills,
@@ -236,12 +221,14 @@ pub(crate) fn runtime_context(
     dispatch: &DispatchCtx,
     config: &Config,
     parts: ChannelTurnParts,
-    channels_by_name: Arc<HashMap<String, Arc<dyn crate::channels::Channel>>>,
+    channels_by_name: Arc<HashMap<String, Arc<crate::channels::runtime::ChannelHandle>>>,
+    module_objects: Arc<HashMap<String, tinybus::module::ModuleObjectClient>>,
     message_timeout_secs: u64,
 ) -> ChannelRuntimeContext {
     ChannelRuntimeContext {
         relay_thread: None,
         channels_by_name,
+        module_objects,
         turn_model_source: None,
         default_provider: Arc::new(parts.provider_name),
         tools_registry: parts.tools_registry,
@@ -249,13 +236,11 @@ pub(crate) fn runtime_context(
         model: Arc::new(parts.model),
         temperature: config.default_temperature,
         max_tool_iterations: config.agent.max_tool_iterations,
-        conversation_histories: Arc::new(Mutex::new(HashMap::new())),
         turn_model_source_cache: Arc::new(Mutex::new(HashMap::new())),
         route_overrides: Arc::new(Mutex::new(HashMap::new())),
         api_url: config.api_url.clone(),
         inference_url: config.inference_url.clone(),
         reliability: Arc::new(config.reliability.clone()),
-        provider_runtime_options: parts.provider_runtime_options,
         workspace_dir: Arc::new(config.workspace_dir.clone()),
         message_timeout_secs,
         multimodal: config.multimodal.clone(),

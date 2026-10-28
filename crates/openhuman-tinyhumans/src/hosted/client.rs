@@ -69,18 +69,28 @@ impl HostedClient {
         })?;
         require_transport()?;
         let base_url = backend_origin(&effective_backend_api_url(&config.api_url))?;
-        Ok(Self::with_credential(&base_url, credential))
+        Self::with_credential(&base_url, credential)
     }
 
     /// Build the client against `base_url` for an already-resolved credential.
-    pub fn with_credential(base_url: &str, credential: BackendCredential) -> Self {
+    ///
+    /// Refuses, without network I/O, an endpoint the credential may not be
+    /// sent to: an API key only to the managed hosts or loopback, and any
+    /// credential only over HTTPS or loopback HTTP — the guard `BackendClient`
+    /// and `IntegrationsHttp` already apply.
+    pub fn with_credential(base_url: &str, credential: BackendCredential) -> Result<Self, String> {
+        crate::client::endpoint::validate_credential_endpoint(
+            base_url,
+            matches!(credential, BackendCredential::ApiKey(_)),
+        )
+        .map_err(|err| err.to_string())?;
         let sdk = TinyHumansClient::new(base_url)
             .with_http_client(http_client())
             // The product identity (`x-sdk-name`) also rides the SDK's own
             // default headers, exactly as the SDK transport does, so it holds
             // even for a client this crate did not build.
             .with_default_headers(crate::backend::product::product_identity_headers());
-        match credential {
+        Ok(match credential {
             BackendCredential::Session(secret) => Self {
                 sdk: sdk.with_token(Some(secret.trim().to_string())),
                 kind: CredentialKind::Session,
@@ -89,7 +99,7 @@ impl HostedClient {
                 sdk: sdk.with_api_key(Some(secret.trim().to_string())),
                 kind: CredentialKind::ApiKey,
             },
-        }
+        })
     }
 
     /// The typed SDK client.

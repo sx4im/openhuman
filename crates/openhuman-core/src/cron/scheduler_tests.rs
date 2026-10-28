@@ -24,6 +24,9 @@ async fn test_config(tmp: &TempDir) -> Config {
     tokio::fs::create_dir_all(&config.workspace_dir)
         .await
         .unwrap();
+    crate::storage::local::use_persistent_default_for_test(&config.workspace_dir);
+    crate::security::credentials::api_key::store_api_key(&config, "cron-scheduler-test-key")
+        .expect("store the managed inference fixture credential");
     config
 }
 
@@ -86,14 +89,18 @@ async fn cron_alerts(config: &Config) -> usize {
 /// #4169); only a terminal `Empty`/`Closed` — the matching event genuinely was
 /// not published — panics.
 fn next_user_error(
-    rx: &mut tokio::sync::broadcast::Receiver<crate::web_chat::WebChannelEvent>,
+    rx: &mut tokio::sync::broadcast::Receiver<crate::web_chat::ScopedWebEvent>,
     kind: &str,
-) -> crate::web_chat::WebChannelEvent {
+) -> crate::web_chat::ScopedWebEvent {
     use tokio::sync::broadcast::error::TryRecvError;
     loop {
         match rx.try_recv() {
-            Ok(ev) if ev.event == "user_error" && ev.error_type.as_deref() == Some(kind) => {
-                break ev
+            Ok(ev)
+                if matches!(ev.wire_event(), crate::web_chat::WebChannelEvent::UserError {
+                    error_type: Some(error_type), ..
+                } if error_type == kind) =>
+            {
+                break ev;
             }
             Ok(_) => continue,
             // Receiver fell behind a concurrent flood — the dropped slots can't
@@ -105,6 +112,7 @@ fn next_user_error(
     }
 }
 
+#[cfg(feature = "channels")]
 #[path = "scheduler_announce_delivery_tests.rs"]
 mod announce_delivery_tests;
 #[path = "scheduler_classifier_and_delivery_tests.rs"]
@@ -115,6 +123,8 @@ mod dispatch_tests;
 mod frequency_tests;
 #[path = "scheduler_halt_and_persist_tests.rs"]
 mod halt_and_persist_tests;
+#[path = "scheduler_headless_descendants_tests.rs"]
+mod headless_descendants_tests;
 #[path = "scheduler_host_agent_tests.rs"]
 mod host_agent_tests;
 #[path = "scheduler_transcript_isolation_tests.rs"]

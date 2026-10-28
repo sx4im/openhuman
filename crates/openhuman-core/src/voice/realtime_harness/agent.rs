@@ -9,8 +9,8 @@ use log::{info, warn};
 use serde_json::Value;
 
 use crate::agent::session_host::OpenHumanSessionHost;
-use crate::progress::AgentProgress;
 use crate::security::turn_origin::{with_origin, AgentTurnOrigin};
+use tinyagents_harness::progress::AgentProgress;
 
 use super::chat_delivery::{VOICE_CHAT_CLIENT_ID, VOICE_CHAT_THREAD_ID};
 use super::prompt::messages_to_history_pairs;
@@ -159,6 +159,7 @@ async fn run_single_with_timeout(
             reply_target: correlation_id.to_string(),
             message_id: format!("voice-{correlation_id}"),
             history_key: None,
+            channel_session: None,
         },
         scoped_run,
     );

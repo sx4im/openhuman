@@ -111,26 +111,6 @@
   },
   {
     "rule": "file-mutation",
-    "path": "crates/openhuman-core/src/artifacts/tiny_store.rs",
-    "line": 146,
-    "text": "tokio::fs::copy(source, owned).await?",
-    "occurrence": 1,
-    "classification": "external-export",
-    "reason": "Materializes versioned artifact bytes in the user-visible artifact file; the versioned record and native blob storage remain separate from this local deliverable.",
-    "issue": "https://github.com/tinyhumansai/openhuman/issues/7425"
-  },
-  {
-    "rule": "file-mutation",
-    "path": "crates/openhuman-core/src/artifacts/tiny_store.rs",
-    "line": 180,
-    "text": "tokio::fs::copy(&source, &dest).await?",
-    "occurrence": 1,
-    "classification": "external-export",
-    "reason": "Materializes versioned artifact bytes in the user-visible artifact file; the versioned record and native blob storage remain separate from this local deliverable.",
-    "issue": "https://github.com/tinyhumansai/openhuman/issues/7425"
-  },
-  {
-    "rule": "file-mutation",
     "path": "crates/openhuman-core/src/attachments/legacy.rs",
     "line": 156,
     "text": "let linked = tokio::fs::hard_link(&temp, &path).await;",
@@ -448,16 +428,6 @@
     "classification": "classic",
     "reason": "Owner-only atomic encrypted-secret/bootstrap file helper; native SecretStore and machine master-key policy have separate admission.",
     "issue": "https://github.com/tinyhumansai/openhuman/issues/7421"
-  },
-  {
-    "rule": "file-mutation",
-    "path": "crates/openhuman-core/src/tinymemes/docs.rs",
-    "line": 81,
-    "text": "match std::fs::rename(&path, &migrated) {",
-    "occurrence": 1,
-    "classification": "classic",
-    "reason": "Retires the legacy JSON document by renaming it only after the native document-port write succeeds; the native document remains authoritative after adoption.",
-    "issue": "https://github.com/tinyhumansai/openhuman/issues/7431"
   },
   {
     "rule": "file-mutation",

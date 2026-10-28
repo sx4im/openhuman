@@ -15,8 +15,9 @@ use std::time::Duration;
 use common::{offline_config, runtime, scripted_provider, stub_backend, tool_call_completion};
 use openhuman_embed::{
     Access, AgentDefinitionSpec, AgentSpec, AgentTurnOrigin, CronDelivery, CronReply,
-    HostTurnTools, InMemorySessionStores, JobOrigin, Runtime, ServiceSet, ToolScopeSpec, Workspace,
+    HostTurnTools, JobOrigin, Runtime, ServiceSet, ToolScopeSpec, Workspace,
 };
+use tinyagents_session::port::InMemorySessionStores;
 
 #[derive(Default)]
 struct Recorder(Mutex<Vec<CronReply>>);

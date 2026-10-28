@@ -14,6 +14,7 @@ fn external_channel_origin(
         reply_target: "chat".into(),
         message_id: message_id.into(),
         history_key: None,
+        channel_session: None,
     }
 }
 
@@ -55,6 +56,7 @@ fn logged_channel_is_none_for_non_channel_origins_none_and_cron_replays() {
 
 #[tokio::test]
 async fn session_pre_and_post_turn_use_the_external_channel_origin_not_event_labels() {
+    crate::agent::session_host::test_support::install_model_fixture();
     use crate::memory::test_fixtures::stored;
     use tinyagents_runtime::{
         CommitReceipt, ResumeMode, SessionTurnOutcome, TranscriptTurnOptions,
@@ -102,7 +104,7 @@ async fn session_pre_and_post_turn_use_the_external_channel_origin_not_event_lab
             },
             transcript: None,
         };
-        prelude.memory_post_turn(&receipt);
+        prelude.memory_post_turn(&receipt, None);
 
         tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
@@ -144,6 +146,7 @@ async fn session_pre_and_post_turn_use_the_external_channel_origin_not_event_lab
     };
     config.memory.conversations.enabled = true;
     std::fs::create_dir_all(&config.workspace_dir).expect("workspace");
+    crate::agent::session_host::test_support::install_managed_model_fixture(&config);
     let engine = Arc::new(tinymemory_api::conformance::ReferenceEngine::new());
     crate::memory::engine::install_test_engine(&config.workspace_dir, engine.clone());
 

@@ -1,11 +1,11 @@
 use super::super::tier::{escalated_origin_for_nested_harness, escalated_origin_for_prompt};
 use super::*;
 use crate::config::HttpRequestConfig;
+use crate::security::policy::CommandClass;
 use crate::security::GateDecision;
 use serde_json::json;
 use std::sync::Arc;
 use tinyagents_harness::tool::response_fields_from_schema;
-use tinybox_bus::CommandClass;
 use tinytools::status::POLICY_BLOCKED_MARKER;
 
 /// The tier gate an `http_request` (Network-class) node calls: BLOCKED under
@@ -375,42 +375,59 @@ fn nested_harness_does_not_escalate_without_an_origin() {
 /// provider to exercise).
 #[tokio::test]
 async fn agent_node_runtime_resolves_to_the_definitions_effective_iteration_cap() {
+    crate::agent::session_host::test_support::install_model_fixture();
     let tmp = tempfile::TempDir::new().unwrap();
     let config = agent_test_config(&tmp);
     assert_eq!(config.agent.max_tool_iterations, 10);
 
-    crate::agent_registry::host_definition::AgentDefinitionRegistry::init_global(
-        &config.workspace_dir,
-    )
-    .expect("agent registry init");
-    let def = crate::agent_registry::host_definition::AgentDefinitionRegistry::global()
-        .expect("registry initialised")
-        .get("planner")
-        .expect("planner definition registered")
-        .clone();
-    let expected = def.effective_max_iterations();
-    assert_eq!(expected, 50);
+    use crate::core::runtime::{ContextOverlay, CoreContext, DomainSet};
+    let definitions = std::sync::Arc::new(
+        crate::agent_registry::host_definition::AgentDefinitionRegistry::load(
+            &config.workspace_dir,
+        )
+        .expect("agent registry init"),
+    );
+    let core = CoreContext::for_test(DomainSet::full(), Some(config.workspace_dir.clone()));
+    let context = core.derive_with(
+        ContextOverlay::new(
+            config.clone(),
+            DomainSet::full(),
+            crate::tools::toolpacks::ToolGroups::none(),
+        )
+        .definitions(std::sync::Arc::clone(&definitions)),
+    );
 
-    let agent = crate::agent::OpenHumanSessionHost::from_config_for_agent(
-        &crate::core::runtime::DispatchCtx::unbound(),
-        &config,
-        "planner",
-    )
-    .expect("build planner agent");
-    assert_eq!(agent.agent_config().max_tool_iterations, expected);
+    CoreContext::scope(context, async {
+        let agent_ref = "task_manager_agent";
+        let def = definitions
+            .get(agent_ref)
+            .expect("task manager definition registered")
+            .clone();
+        let expected = def.effective_max_iterations();
+        assert_eq!(expected, 50);
 
-    let runner = OpenHumanAgentRunner {
-        config: Arc::new(config),
-        ctx: crate::core::runtime::DispatchCtx::unbound(),
-        approval: Default::default(),
-        progress: None,
-    };
-    let prepared = runner
-        .prepare_agent_run(json!({"prompt":"work"}), None, None, 50)
-        .await
-        .expect("module prepares agent timeout");
-    assert_eq!(prepared.base_timeout_secs, 240);
-    assert_eq!(prepared.timeout_secs, 600);
+        let agent = crate::agent::OpenHumanSessionHost::from_config_for_agent(
+            &crate::core::runtime::DispatchCtx::unbound(),
+            &config,
+            agent_ref,
+        )
+        .expect("build planner agent");
+        assert_eq!(agent.agent_config().max_tool_iterations, expected);
+
+        let runner = OpenHumanAgentRunner {
+            config: Arc::new(config),
+            ctx: crate::core::runtime::DispatchCtx::unbound(),
+            approval: Default::default(),
+            progress: None,
+        };
+        let prepared = runner
+            .prepare_agent_run(json!({"prompt":"work"}), None, None, 50)
+            .await
+            .expect("module prepares agent timeout");
+        assert_eq!(prepared.base_timeout_secs, 240);
+        assert_eq!(prepared.timeout_secs, 600);
+    })
+    .await;
 }
 
 // ── response_fields_from_schema ─────────────────────────────────────────

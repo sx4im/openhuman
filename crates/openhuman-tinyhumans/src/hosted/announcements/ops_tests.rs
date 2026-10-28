@@ -22,7 +22,8 @@ fn only_a_404_status_counts_as_not_found() {
 
 async fn latest_via(server: &MockServer) -> Result<Option<Value>, String> {
     let client =
-        HostedClient::with_credential(&server.uri(), BackendCredential::Session("jwt".into()));
+        HostedClient::with_credential(&server.uri(), BackendCredential::Session("jwt".into()))
+            .expect("loopback endpoint");
     let result = client
         .sdk()
         .announcements()

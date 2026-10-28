@@ -65,6 +65,12 @@ pub fn start(config: &crate::config::Config) {
 #[cfg(feature = "mcp")]
 pub(crate) mod module_client;
 
+#[cfg(all(test, feature = "mcp"))]
+#[path = "test_module_port.rs"]
+mod test_module_port;
+#[cfg(all(test, feature = "mcp"))]
+pub(crate) use test_module_port::install as install_test_module_port;
+
 mod host_cleanup;
 
 /// Brings this domain up — the build without it, where there is nothing to do.
@@ -201,6 +207,21 @@ pub fn all_registered_controllers() -> Vec<crate::core::all::RegisteredControlle
     #[cfg(feature = "mcp")]
     controllers.extend(ui::all_mcp_ui_registered_controllers());
     controllers
+}
+
+/// Built-in runtime entries, binding registry_get to its shared parser while
+/// preserving the legacy catalogue above for existing callers.
+pub(crate) fn all_controller_entries() -> Vec<crate::core::all::ControllerEntry> {
+    all_registered_controllers()
+        .into_iter()
+        .map(|controller| {
+            #[cfg(feature = "mcp")]
+            if controller.schema.method_name() == "mcp_clients.registry_get" {
+                return registry::registry_get_controller_entry();
+            }
+            crate::core::all::ControllerEntry::legacy(controller)
+        })
+        .collect()
 }
 
 pub mod audit;

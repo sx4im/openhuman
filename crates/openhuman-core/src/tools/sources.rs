@@ -14,13 +14,12 @@
 //!
 //! The registry is generic: it knows nothing about what a source builds.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
 use tinytools::Tool;
 
-use crate::config::{BrowserConfig, Config, DelegateAgentConfig, HttpRequestConfig};
+use crate::config::{BrowserConfig, Config, HttpRequestConfig};
 use crate::core::slots::HookSlot;
 use crate::modules::tinybox::host_runtime::RuntimeAdapter;
 use crate::security::{AuditLogger, SecurityPolicy};
@@ -39,7 +38,6 @@ pub struct ToolSourceCtx<'a> {
     pub http_config: &'a HttpRequestConfig,
     /// The agent's permitted read/write root.
     pub action_dir: &'a Path,
-    pub agents: &'a HashMap<String, DelegateAgentConfig>,
     pub approval_workspace_root: Option<&'a Path>,
 }
 
@@ -49,7 +47,8 @@ pub type ToolSourceFactory =
 
 /// Anchor point: right after the search tools, before hosting.
 pub const ANCHOR_AFTER_SEARCH: &str = "after_search";
-/// Anchor point: right after the delegation tool, before the Composio tools.
+/// Stable insertion point for registered hosted tools after the former
+/// configured-delegate catalogue slot and before Composio.
 pub const ANCHOR_AFTER_DELEGATE: &str = "after_delegate";
 /// Every anchor `all_tools_with_runtime` splices sources into.
 pub const ANCHORS: [&str; 2] = [ANCHOR_AFTER_SEARCH, ANCHOR_AFTER_DELEGATE];

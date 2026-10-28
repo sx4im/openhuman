@@ -47,6 +47,7 @@ fn registry() -> Vec<Arc<Vec<Box<dyn Tool>>>> {
     vec![Arc::new(vec![
         tool("read_file", PermissionLevel::ReadOnly, false),
         tool("write_file", PermissionLevel::Write, false),
+        tool("spawn_subagent", PermissionLevel::Execute, false),
         tool(SHELL_TOOL, PermissionLevel::Execute, false),
     ])]
 }
@@ -69,7 +70,7 @@ fn req(tool_name: &str, args: serde_json::Value) -> ToolCallRequest {
 #[cfg(feature = "modules")]
 fn shell_context(
     args: &serde_json::Value,
-    class: tinybox_bus::CommandClass,
+    class: crate::security::policy::CommandClass,
     hidden_execution: bool,
     literal_words: &[&str],
 ) -> serde_json::Value {
@@ -80,11 +81,11 @@ fn shell_context(
 fn shell_context_for_args(
     request_arguments: &serde_json::Value,
     effective_arguments: &serde_json::Value,
-    class: tinybox_bus::CommandClass,
+    class: crate::security::policy::CommandClass,
     hidden_execution: bool,
     literal_words: &[&str],
 ) -> serde_json::Value {
-    use crate::modules::tinybox::contract::{CommandAnalysis, CommandSegment};
+    use crate::security::policy::{CommandAnalysis, CommandSegment};
 
     let analysis = CommandAnalysis {
         segments: vec![CommandSegment {
@@ -118,7 +119,7 @@ fn shell_context_for_args(
 
 #[cfg(feature = "modules")]
 fn shell_analysis(
-    class: tinybox_bus::CommandClass,
+    class: crate::security::policy::CommandClass,
     hidden_execution: bool,
     literal_words: &[&str],
 ) -> serde_json::Value {
@@ -179,6 +180,75 @@ async fn a_read_only_tool_is_allowed_in_every_tier() {
     }
 }
 
+async fn cron_decision(gate: OpenHumanSecurityGate, tool_name: &str) -> GateDecision {
+    let core =
+        crate::core::runtime::CoreContext::for_test(crate::core::runtime::DomainSet::full(), None);
+    let origin = crate::security::turn_origin::AgentTurnOrigin::TrustedAutomation {
+        job_id: "cron-security-test".into(),
+        source: crate::security::turn_origin::TrustedAutomationSource::Cron,
+    };
+    crate::core::runtime::CoreContext::scope_with_turn_origin(
+        core,
+        Some(origin),
+        gate.authorize_tool(&req(tool_name, json!({}))),
+    )
+    .await
+    .expect("authorization")
+}
+
+#[tokio::test]
+async fn cron_headless_settlement_allows_only_spawn_control() {
+    let ordinary = cron_decision(gate(AutonomyLevel::Full), "spawn_subagent").await;
+    assert!(!ordinary.is_allowed(), "ordinary Cron remains read-only");
+
+    let opted_in = cron_decision(
+        gate(AutonomyLevel::Full).with_headless_descendant_settlement(true),
+        "spawn_subagent",
+    )
+    .await;
+    assert_eq!(opted_in, GateDecision::Allow);
+
+    let read_only = cron_decision(
+        OpenHumanSecurityGate::new(policy(AutonomyLevel::ReadOnly), registry())
+            .with_headless_descendant_settlement(true),
+        "spawn_subagent",
+    )
+    .await;
+    assert!(
+        !read_only.is_allowed(),
+        "headless settlement must not override the agent's autonomy tier"
+    );
+
+    let write = cron_decision(
+        gate(AutonomyLevel::Full).with_headless_descendant_settlement(true),
+        "write_file",
+    )
+    .await;
+    assert!(!write.is_allowed(), "child action tools remain read-only");
+
+    let shell = cron_decision(
+        gate(AutonomyLevel::Full).with_headless_descendant_settlement(true),
+        SHELL_TOOL,
+    )
+    .await;
+    assert!(!shell.is_allowed(), "shell stays denied for opted-in Cron");
+}
+
+#[tokio::test]
+async fn cron_headless_settlement_does_not_allow_effectful_spawn_aliases() {
+    let effectful = Arc::new(vec![tool("spawn_subagent", PermissionLevel::Execute, true)]);
+    let decision = cron_decision(
+        OpenHumanSecurityGate::new(policy(AutonomyLevel::Full), vec![effectful])
+            .with_headless_descendant_settlement(true),
+        "spawn_subagent",
+    )
+    .await;
+    assert!(
+        !decision.is_allowed(),
+        "external-effect classification wins"
+    );
+}
+
 #[tokio::test]
 async fn read_only_autonomy_denies_an_acting_tool() {
     let decision = gate(AutonomyLevel::ReadOnly)
@@ -227,7 +297,7 @@ async fn a_read_class_shell_command_runs_without_a_prompt() {
             &req(SHELL_TOOL, args.clone()),
             Some(&shell_context(
                 &args,
-                tinybox_bus::CommandClass::Read,
+                crate::security::policy::CommandClass::Read,
                 false,
                 &["ls", "-la"],
             )),
@@ -256,7 +326,7 @@ async fn shell_authorization_denies_when_module_facts_are_missing() {
 async fn shell_authorization_rejects_facts_bound_to_different_arguments() {
     let gate = gate(AutonomyLevel::Full);
     let args = json!({"command": "ls -la"});
-    let analysis = crate::modules::tinybox::contract::CommandAnalysis {
+    let analysis = crate::security::policy::CommandAnalysis {
         segments: vec![],
         hidden_execution: false,
         redirection: false,
@@ -292,7 +362,7 @@ fn shell_policy_uses_the_effective_arguments_bound_by_the_harness() {
     let context = shell_context_for_args(
         &request_arguments,
         &effective_arguments,
-        tinybox_bus::CommandClass::Write,
+        crate::security::policy::CommandClass::Write,
         false,
         &["touch", "output"],
     );
@@ -320,7 +390,7 @@ async fn a_read_class_shell_command_still_runs_in_read_only_mode() {
             &req(SHELL_TOOL, args.clone()),
             Some(&shell_context(
                 &args,
-                tinybox_bus::CommandClass::Read,
+                crate::security::policy::CommandClass::Read,
                 false,
                 &["ls", "-la"],
             )),
@@ -339,7 +409,7 @@ async fn a_write_shell_command_is_blocked_outright_in_read_only() {
             &req(SHELL_TOOL, args.clone()),
             Some(&shell_context(
                 &args,
-                tinybox_bus::CommandClass::Write,
+                crate::security::policy::CommandClass::Write,
                 false,
                 &["rm", "-rf", "/tmp/x"],
             )),
@@ -364,7 +434,7 @@ async fn hidden_execution_is_blocked_below_the_full_tier() {
             &req(SHELL_TOOL, args.clone()),
             Some(&shell_context(
                 &args,
-                tinybox_bus::CommandClass::Write,
+                crate::security::policy::CommandClass::Write,
                 true,
                 &["echo"],
             )),
@@ -386,7 +456,11 @@ fn the_declared_category_can_only_raise_the_command_class() {
         OpenHumanSecurityGate::shell_decision(
             &full,
             &json!({ "command": "touch f" }),
-            &shell_analysis(tinybox_bus::CommandClass::Write, false, &["touch", "f"],),
+            &shell_analysis(
+                crate::security::policy::CommandClass::Write,
+                false,
+                &["touch", "f"],
+            ),
         ),
         Ok(PolicyGateDecision::Allow)
     );
@@ -395,7 +469,11 @@ fn the_declared_category_can_only_raise_the_command_class() {
         OpenHumanSecurityGate::shell_decision(
             &full,
             &json!({ "command": "touch f", "category": "destructive" }),
-            &shell_analysis(tinybox_bus::CommandClass::Write, false, &["touch", "f"],)
+            &shell_analysis(
+                crate::security::policy::CommandClass::Write,
+                false,
+                &["touch", "f"],
+            )
         ),
         Ok(PolicyGateDecision::Prompt)
     );
@@ -406,7 +484,7 @@ fn the_declared_category_can_only_raise_the_command_class() {
             &full,
             &json!({ "command": "curl https://example.invalid", "category": "read" }),
             &shell_analysis(
-                tinybox_bus::CommandClass::Network,
+                crate::security::policy::CommandClass::Network,
                 false,
                 &["curl", "https://example.invalid"],
             )
@@ -423,7 +501,7 @@ fn a_missing_command_argument_classifies_as_read_rather_than_panicking() {
         OpenHumanSecurityGate::shell_decision(
             &supervised,
             &json!({}),
-            &shell_analysis(tinybox_bus::CommandClass::Read, false, &[],),
+            &shell_analysis(crate::security::policy::CommandClass::Read, false, &[],),
         ),
         Ok(PolicyGateDecision::Allow)
     );

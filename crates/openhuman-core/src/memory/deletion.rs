@@ -100,6 +100,33 @@ pub fn pending(workspace_dir: &Path) -> Vec<PendingDeletion> {
     queue(workspace_dir).pending()
 }
 
+/// Opens the workspace queue before entering a storage callback, where
+/// synchronous storage calls would re-enter the storage bridge.
+pub(crate) fn open_state(
+    workspace_dir: &Path,
+) -> anyhow::Result<crate::storage::state_kv::StateKv> {
+    super::state_store::open_workspace_quarantining::<Vec<PendingDeletion>>(workspace_dir, STATE)
+}
+
+/// Queues one deletion from an async storage callback without re-entering the
+/// synchronous storage bridge.
+pub(crate) async fn enqueue_with_state(
+    state: &crate::storage::state_kv::StateKv,
+    deletion: PendingDeletion,
+) -> anyhow::Result<()> {
+    state
+        .update_async(STATE, move |all: &mut Vec<PendingDeletion>| {
+            if all.contains(&deletion) {
+                ((), false)
+            } else {
+                all.push(deletion.clone());
+                ((), true)
+            }
+        })
+        .await?;
+    Ok(())
+}
+
 /// Runs queued deletions against the engine.
 struct Executor<'a> {
     config: &'a Config,

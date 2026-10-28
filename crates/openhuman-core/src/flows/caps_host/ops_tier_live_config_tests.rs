@@ -1,9 +1,9 @@
 use super::super::tier::tier_policy_from_config;
 use super::*;
+use crate::security::policy::CommandClass;
 use crate::security::GateDecision;
 use serde_json::json;
 use std::sync::Arc;
-use tinybox_bus::CommandClass;
 
 fn live_tier_context(config: &Config) -> crate::core::runtime::DispatchCtx {
     let parent = crate::core::runtime::CoreContext::for_test(

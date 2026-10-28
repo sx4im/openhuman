@@ -227,7 +227,10 @@ fn unknown_qualified_models_keep_the_existing_route() {
 fn selected_managed_route_constructs_with_the_picker_model() {
     // Wait out any test that has a mock chat model installed process-wide.
     let _serial = crate::inference::provider::factory::test_provider_override::exclusive();
+    crate::agent::session_host::test_support::install_model_fixture();
     let config = Config::default();
+    crate::security::credentials::api_key::store_api_key(&config, "test-session-fixture-key")
+        .expect("store managed routing test credential");
     let selection = "openrouter/author/picked-model:free";
     let effective = effective_session_config(&config, Some(selection), None);
     let (_, resolved_model) =
@@ -324,6 +327,7 @@ fn temperature_override_is_turn_local_and_changes_the_cache_fingerprint() {
 /// sends no model override and the provider binding stays managed.
 #[test]
 fn persisted_managed_model_changes_invalidate_the_session_fingerprint() {
+    crate::agent::session_host::test_support::install_model_fixture();
     let mut config = Config::default();
     config.chat_provider = Some("openhuman".to_string());
     config.default_model = Some("openrouter/author/first-model:free".to_string());
@@ -384,6 +388,8 @@ fn explicit_picker_model_keeps_its_fingerprint_when_saved_default_changes() {
 
 fn configured_huggingface_route() -> Config {
     let mut config = Config::default();
+    crate::security::credentials::api_key::store_api_key(&config, "test-session-fixture-key")
+        .expect("store routing test credential");
     config.chat_provider = Some("openai:gpt-4o".to_string());
     config
         .cloud_providers
@@ -453,4 +459,29 @@ fn persisted_mixed_case_cloud_default_uses_configured_slug_after_restart() {
         original,
         "restoring a persisted picker default must remain turn-local"
     );
+}
+
+#[tokio::test]
+async fn a_non_ascii_thread_id_builds_a_session_agent_without_panicking() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = super::session_checkout_tests::test_config(&tmp);
+    // 11 ASCII bytes, then a 3-byte char: byte 12 falls inside '日'.
+    let thread_id = "abcdefghijk日本";
+    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::build_session_agent(
+            &crate::core::runtime::DispatchCtx::ambient(),
+            &config,
+            "client-1",
+            thread_id,
+            "orchestrator",
+            None,
+            None,
+        )
+        .map(|_| ())
+    }))
+    .expect("build_session_agent panicked on a non-ASCII thread id");
+    // The label truncation only runs once the agent builds.
+    if let Err(error) = built {
+        panic!("session agent must build: {error:#}");
+    }
 }

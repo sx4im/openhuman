@@ -8,6 +8,7 @@ use tempfile::TempDir;
 
 fn workspace() -> (TempDir, Config) {
     let dir = TempDir::new().unwrap();
+    crate::storage::local::use_persistent_default_for_test(dir.path());
     let config = Config {
         workspace_dir: dir.path().to_path_buf(),
         ..Config::default()

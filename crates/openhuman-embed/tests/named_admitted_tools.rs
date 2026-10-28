@@ -15,9 +15,10 @@ use common::{
     chat_requests, offline_config, runtime, stub_backend, tool_call_completion, tool_names,
 };
 use openhuman_embed::{
-    AgentDefinitionSpec, AgentSpec, DomainSet, GroupMode, HostTurnTools, InMemorySessionStores,
-    Runtime, ToolGroups, ToolScopeSpec, Workspace,
+    AgentDefinitionSpec, AgentSpec, DomainSet, GroupMode, HostTurnTools, Runtime, ToolGroups,
+    ToolScopeSpec, Workspace,
 };
+use tinyagents_session::port::InMemorySessionStores;
 
 #[test]
 fn a_named_scope_admits_the_clock_and_scheduler_but_never_the_shell() {

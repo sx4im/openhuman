@@ -132,7 +132,7 @@ pub(super) fn handle_skills_read_run_log(
         // RPC response sane; the FE re-issues with the returned offset
         // to page through larger logs.
         let max_bytes = payload.max_bytes.unwrap_or(64 * 1024).min(256 * 1024) as usize;
-        match run_log::read_run_log_slice(&path, offset, max_bytes) {
+        match run_log::read_run_log_slice(&workspace, &path, offset, max_bytes) {
             Ok(slice) => to_json(Outcome::new(slice, Vec::new())),
             Err(e) => Err(format!("skills_read_run_log: read failed: {e}")),
         }

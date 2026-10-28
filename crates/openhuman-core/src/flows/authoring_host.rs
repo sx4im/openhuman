@@ -122,8 +122,8 @@ impl ApprovalCallbacks {
         self.0
             .in_context(async move {
                 use crate::flows::caps_host::classify_composio_action_for_tier;
+                use crate::security::policy::CommandClass;
                 use crate::security::{GateDecision, SecurityPolicy};
-                use tinybox_bus::CommandClass;
                 use tinyflows_bus::catalog::{ManifestCandidate, ManifestClass};
 
                 let security = SecurityPolicy::from_config(

@@ -40,7 +40,11 @@ pub(crate) fn ensure_authorized(headers: &HeaderMap, auth: &HostedDirAuth) -> Re
     let Some((username, password)) = rendered.split_once(':') else {
         return Err(unauthorized_response());
     };
-    if username == expected_user && password == expected_pass {
+    // Constant-time, and both halves always compared, so the response time
+    // reveals neither how much of a credential matched nor which half failed.
+    let user_ok = crate::core_host::core::auth::bearer_matches(username, expected_user);
+    let pass_ok = crate::core_host::core::auth::bearer_matches(password, expected_pass);
+    if user_ok & pass_ok {
         Ok(())
     } else {
         Err(unauthorized_response())

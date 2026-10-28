@@ -107,12 +107,17 @@ fn write_core_token_file(path: &Path, token: &str) -> std::io::Result<()> {
 
     #[cfg(unix)]
     {
+        use std::os::unix::fs::PermissionsExt as _;
+        // `mode` applies only when the file is created, so tighten an existing
+        // file too; refuse to follow a symlink planted at the token path.
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
             .open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         file.write_all(token.as_bytes())?;
     }
 

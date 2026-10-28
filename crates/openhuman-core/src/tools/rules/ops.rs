@@ -106,7 +106,8 @@ pub fn rule_context(
 /// workers. A parent without rules (an entry point that built its context
 /// from scratch) contributes the operator's `[tool_rules]` directly.
 /// The context keeps the parent's `channel` and `origin`; `agent` becomes the
-/// child's id. `None` when nothing restricts the child.
+/// child's id. `None` when nothing restricts the child: no rule layer and no
+/// inherited permission ceiling.
 #[must_use]
 pub fn child_rule_policy(
     parent: Option<&ToolRulePolicy>,
@@ -133,7 +134,10 @@ pub fn child_rule_policy(
     if let Some(layer) = agent_rule_layer(def) {
         set.push(layer);
     }
-    if set.is_permissive() {
+    // The parent's permission ceiling restricts the child even when no rule
+    // layer does.
+    let permission_ceiling = parent.and_then(|parent| parent.permission_ceiling);
+    if set.is_permissive() && permission_ceiling.is_none() {
         return None;
     }
     let context = parent
@@ -149,6 +153,7 @@ pub fn child_rule_policy(
     Some(Arc::new(ToolRulePolicy {
         rules: Arc::new(set),
         context,
+        permission_ceiling,
     }))
 }
 
@@ -184,5 +189,9 @@ impl crate::agent::tinyagents::host::OpenHumanRunContext {
 /// The harness policy for one turn: `rules` evaluated in `context`.
 #[must_use]
 pub fn turn_rule_policy(rules: Arc<ToolRuleSet>, context: RuleContext) -> ToolRulePolicy {
-    ToolRulePolicy { rules, context }
+    ToolRulePolicy {
+        rules,
+        context,
+        permission_ceiling: None,
+    }
 }

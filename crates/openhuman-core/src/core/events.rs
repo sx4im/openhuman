@@ -243,7 +243,7 @@ pub enum DomainEvent {
     /// A BYO (bring-your-own-key) chat provider rejected the configured API
     /// key with `401` / `403` — the third-party key is invalid or revoked.
     ///
-    /// Published by `inference::provider::ops::http_error::
+    /// Published by `inference::provider::http_error::
     /// log_byo_provider_auth_failure` (once per failure episode, via the
     /// `auth_error_registry` latch — the underlying 401 repeats per retry).
     /// The same rejection demotes the raw error from Sentry (it's
@@ -338,14 +338,14 @@ pub enum DomainEvent {
         /// `workspace_dir` does not match their own workspace binding.
         workspace_dir: std::path::PathBuf,
     },
-    /// A reaction event was received from a channel transport.
+    /// Retired legacy reaction callback payload, retained as an Events 1.x wire tombstone.
     ChannelReactionReceived {
         channel: String,
         sender: String,
         target_message_id: String,
         emoji: String,
     },
-    /// A reaction update was sent to a channel transport.
+    /// Retired legacy reaction callback payload, retained as an Events 1.x wire tombstone.
     ChannelReactionSent {
         channel: String,
         target_message_id: String,
@@ -372,10 +372,7 @@ pub enum DomainEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tenant: Option<crate::core::runtime::Tenant>,
     },
-
-    /// A proactive message (morning briefing, welcome, cron output, etc.)
-    /// needs to be delivered to the user. The channels module routes it to
-    /// the user's active channel.
+    /// A proactive message requested for user delivery.
     ProactiveMessageRequested {
         /// Identifies the source (e.g. `"cron:morning_briefing"`, `"cron:welcome"`).
         source: String,
@@ -383,6 +380,9 @@ pub enum DomainEvent {
         message: String,
         /// Optional job name for display/threading purposes.
         job_name: Option<String>,
+        /// The originating tenant; event subscribers execute outside the publisher task.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tenant: Option<crate::core::runtime::Tenant>,
     },
     /// A host-owned system cron job came due (a `flow`-type row whose command
     /// is `system:<job>`, see `cron::system_jobs`). The owning domain runs it.
@@ -648,9 +648,9 @@ pub enum DomainEvent {
 
     // ── Plan review (interactive plan-mode gate) ────────────────────────
     /// An interactive turn parked on a thread-scoped plan the user must
-    /// review before execution. Published by
-    /// [`crate::plan_review::gate::PlanReviewGate::request_review`]
-    /// and bridged to the web channel as a `plan_review_request` socket event.
+    /// review before execution. Published by the OpenHuman notifier for
+    /// TinyAgents' plan-review store and bridged to the web channel as a
+    /// `plan_review_request` socket event.
     PlanReviewRequested {
         /// Unique id correlating the decision back to the parked turn.
         request_id: String,
@@ -998,6 +998,30 @@ pub enum DomainEvent {
         /// Already scrubbed; safe to log.
         detail: String,
     },
+    /// A pinned source's batch ran on its agent and the agent's final text is
+    /// stored. Carries no text: a subscriber is woken by this and reads the
+    /// result over `inbound.results` (keyed by `turn_id`).
+    InboundTurnCompleted {
+        /// The configured source (`x:mentions`).
+        source: String,
+        /// The key the batch was debounced by.
+        key: String,
+        /// The queues' turn id, the result's key.
+        turn_id: String,
+        /// The source's ids of the events the batch carried.
+        event_ids: Vec<String>,
+        /// The pinned agent that ran.
+        agent_id: String,
+    },
+    /// A pinned source's batch failed for good (its last attempt failed, or
+    /// it failed after its delivery was acknowledged); stored as `failed`.
+    InboundTurnFailed {
+        source: String,
+        key: String,
+        turn_id: String,
+        /// Already scrubbed; safe to log.
+        detail: String,
+    },
 
     // ── Device pairing ──────────────────────────────────────────────────
     /// A mobile device completed the X25519 handshake and is now paired.
@@ -1313,8 +1337,8 @@ pub enum DomainEvent {
         thread_id: String,
         goal_id: String,
         status: String,
-        /// Full goal snapshot (owned by `tinyagents-graph`'s goal shape, so
-        /// kept as a raw `Value` rather than a typed field here). `None`
+        /// Full goal snapshot (kept as a raw `Value` rather than a typed
+        /// field to keep this event independent of the harness tool type). `None`
         /// until the publish site is updated to pass it through.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         goal: Option<serde_json::Value>,
@@ -1325,7 +1349,7 @@ pub enum DomainEvent {
     /// or reordered). Drives the desktop todo drawer.
     ThreadTodosChanged {
         thread_id: String,
-        /// Full todo-list snapshot, owned by `tinyagents-graph`'s todo shape.
+        /// Full todo-list snapshot, kept independent of the harness tool type.
         todos: serde_json::Value,
     },
     // ── Plan mode ───────────────────────────────────────────────────────
@@ -1435,7 +1459,9 @@ impl DomainEvent {
 
             Self::InboundEventDropped { .. }
             | Self::InboundDeferred { .. }
-            | Self::InboundDeadLettered { .. } => "inbound",
+            | Self::InboundDeadLettered { .. }
+            | Self::InboundTurnCompleted { .. }
+            | Self::InboundTurnFailed { .. } => "inbound",
 
             Self::DevicePaired { .. }
             | Self::DeviceRevoked { .. }
@@ -1541,81 +1567,6 @@ impl DomainEvent {
         }
     }
 
-    /// A one-line summary for the developer Event Log, for the variants whose
-    /// name and [`Self::agent_hint`] are not enough to act on.
-    ///
-    /// The Event Log envelope (`GET /events/domain`) carries the domain, the
-    /// variant name, the agent hint and a timestamp — no payload. A variant
-    /// whose whole point is a failure *reason* would otherwise reach the UI
-    /// with the reason discarded: a transport that broke and one that timed
-    /// out are the same row (#5931). This is the opt-in escape hatch. A
-    /// variant with something a reader needs returns a short rendering of it;
-    /// every other variant returns `None` and its row is unchanged.
-    ///
-    /// What comes back is shown verbatim to anyone who can open the Event Log
-    /// and lands in the log's NDJSON download, so it carries no payload
-    /// content, no credentials and no un-redacted endpoint — the MCP arms
-    /// pass through strings `tinymcp` has already rendered and
-    /// endpoint-redacted — and no `workspace_dir`, which is on the event for
-    /// subscribers to filter on, not for a shared panel to print.
-    #[must_use]
-    pub fn log_detail(&self) -> Option<String> {
-        /// Long enough for a rendered transport error, short enough that one
-        /// row cannot push the rest of the log off the screen. Counted in
-        /// `char`s, so a multi-byte error cannot be split mid-character.
-        const MAX_DETAIL_CHARS: usize = 160;
-
-        let clip = |text: &str| clip_to_chars(text, MAX_DETAIL_CHARS);
-
-        match self {
-            Self::McpServerProbeTimedOut {
-                probe_timeout_secs,
-                consecutive_timeouts,
-                teardown_after,
-                ..
-            } => Some(format!(
-                "no answer in {probe_timeout_secs}s; timeout {consecutive_timeouts} of \
-                 {teardown_after} before teardown"
-            )),
-            Self::McpServerTransportDropped {
-                outcome,
-                detail,
-                elapsed_ms,
-                ..
-            } => {
-                let mut summary = format!("session ended: {outcome}");
-                if let Some(elapsed_ms) = elapsed_ms {
-                    summary.push_str(&format!(" after {elapsed_ms}ms"));
-                }
-                if let Some(detail) = detail {
-                    summary.push_str(" — ");
-                    summary.push_str(&clip(detail));
-                }
-                Some(summary)
-            }
-            Self::McpServerReconnected {
-                tool_count,
-                after_failures,
-                ..
-            } => Some(format!(
-                "connected with {tool_count} tools after {after_failures} failed attempt(s)"
-            )),
-            Self::McpServerReconnectFailed {
-                error,
-                failures,
-                retry_in_secs,
-                ..
-            } => Some(format!(
-                "attempt {failures} failed, retrying in {retry_in_secs}s — {}",
-                clip(error)
-            )),
-            Self::McpServerParked { error, .. } => {
-                Some(format!("parked, not retrying — {}", clip(error)))
-            }
-            _ => None,
-        }
-    }
-
     /// The workspace this event belongs to, for the variants bound to one.
     ///
     /// One process serves more than one workspace over its life, so a
@@ -1681,6 +1632,7 @@ impl DomainEvent {
     }
 }
 
+mod log_detail;
 mod variant_names;
 
 #[cfg(test)]

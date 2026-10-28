@@ -54,6 +54,25 @@ pub enum CommandRiskLevel {
     High,
 }
 
+/// OpenHuman's fail-closed classification for an acting command.
+///
+/// This is host policy vocabulary. Module contracts report structural facts;
+/// they do not classify commands or decide which autonomy tier may run them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandClass {
+    /// No side effects are expected.
+    Read,
+    /// Changes local or remote state.
+    Write,
+    /// Performs a network operation.
+    Network,
+    /// Installs or updates software.
+    Install,
+    /// Performs a destructive or privilege-sensitive operation.
+    Destructive,
+}
+
 /// What the harness should do with an acting tool call of a given
 /// [`CommandClass`] under the session's [`AutonomyLevel`]. Computed by
 /// [`SecurityPolicy::gate_decision`]; the harness translates `Prompt` into an

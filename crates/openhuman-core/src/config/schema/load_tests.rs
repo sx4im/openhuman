@@ -114,6 +114,8 @@ mod env_overlay_context_tests;
 mod env_overlay_tests;
 #[path = "load_migration_tests.rs"]
 mod migration_tests;
+#[path = "load_parse_log_tests.rs"]
+mod parse_log_tests;
 #[path = "load_profile_layout_parity_tests.rs"]
 mod profile_layout_parity_tests;
 

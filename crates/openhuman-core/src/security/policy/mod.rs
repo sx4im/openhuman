@@ -2,11 +2,17 @@
 //! for the invariants this module enforces (workspace-internal path
 //! protection, fail-closed command classification, always-forbidden paths).
 
+mod command_analysis;
 mod command_checks;
+mod command_vocabulary;
 mod enforcement;
 mod path_checks;
 
 mod types;
+
+pub(crate) use command_analysis::CommandAnalysis;
+#[cfg(test)]
+pub(crate) use command_analysis::CommandSegment;
 
 pub use enforcement::validate_path_within_root;
 pub use enforcement::{ensure_openhuman_scratch_dir, openhuman_scratch_dir};
@@ -17,8 +23,8 @@ pub(crate) use path_checks::{
     ALWAYS_FORBIDDEN_PREFIXES, SENSITIVE_COMPONENTS, SENSITIVE_FILES, SENSITIVE_PAIRS,
 };
 pub use types::{
-    tool_result_artifacts_dir, ActionTracker, AutonomyLevel, CommandRiskLevel, GateDecision,
-    SecurityPolicy, ToolOperation, TrustedAccess, TrustedRoot,
+    tool_result_artifacts_dir, ActionTracker, AutonomyLevel, CommandClass, CommandRiskLevel,
+    GateDecision, SecurityPolicy, ToolOperation, TrustedAccess, TrustedRoot,
 };
 
 #[cfg(test)]

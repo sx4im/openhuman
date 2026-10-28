@@ -188,6 +188,7 @@ async fn external_channel_cannot_rehydrate_a_local_image() {
         reply_target: "chat".into(),
         message_id: "message".into(),
         history_key: None,
+        channel_session: None,
     };
     let mut context = crate::agent::tinyagents::host::OpenHumanRunContext::new();
     context.origin = Some(origin);
@@ -321,7 +322,7 @@ fn endpoint_discovery_denial_overrides_offline_vision_facts() {
         auth_style: AuthStyle::None,
         ..Default::default()
     }];
-    let request = crate::inference::provider::factory::model_limits_request(
+    let request = crate::inference::context_window::model_limits_request(
         "chat",
         "attachment-probe:gpt-4o",
         "gpt-4o",

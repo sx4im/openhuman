@@ -96,7 +96,7 @@ fn walk(value: &Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(walk_object(map)),
         Value::Array(items) => Value::Array(items.iter().map(walk).collect()),
-        Value::String(s) => Value::String(scrub_paths(s)),
+        Value::String(s) => Value::String(tinyredact::redact_home_paths(s)),
         other => other.clone(),
     }
 }
@@ -129,79 +129,6 @@ fn redact_value(value: &Value) -> Value {
         Value::Bool(_) => Value::String("<redacted: bool>".to_string()),
         Value::Null => Value::Null,
     }
-}
-
-/// Strip absolute home paths so the action summary cannot leak the
-/// user's username on multi-tenant log shipping.
-///
-/// Handles both Unix (`/Users/<name>/…`, `/home/<name>/…`) and
-/// Windows (`C:\Users\<name>\…`) shapes — `MAIN_SEPARATOR` alone
-/// would miss the Windows case in a Unix-built artifact looking at
-/// log payloads that originated on Windows, or vice versa.
-fn scrub_paths(input: &str) -> String {
-    // Fast-path bailout: if `input` contains neither "users" nor "home" it holds
-    // no home prefix for `match_home_prefix` to find, so skip the walk. This
-    // guard MUST be case-insensitive to match the matcher below, which folds case
-    // via `eq_ignore_ascii_case`. A case-sensitive check let non-canonical
-    // casings like `c:\users\alice` or `/HOME/alice` short-circuit here and get
-    // returned verbatim, leaking the OS username into the durable approval audit
-    // row instead of redacting it to `<HOME>`. Scan the bytes in place with a
-    // sliding window rather than allocating a full lowercase copy — tool args can
-    // be large (source/file contents), and the common case bails without a match.
-    let bytes = input.as_bytes();
-    let has_users = bytes.windows(5).any(|w| w.eq_ignore_ascii_case(b"users"));
-    let has_home = bytes.windows(4).any(|w| w.eq_ignore_ascii_case(b"home"));
-    if !has_users && !has_home {
-        return input.to_string();
-    }
-    let mut out = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < input.len() {
-        if let Some(prefix_len) = match_home_prefix(&input[i..]) {
-            out.push_str("<HOME>");
-            i += prefix_len;
-            // Skip past the username segment up to the next path
-            // separator (or end of input).
-            let rest = &input[i..];
-            match rest.find(['/', '\\']) {
-                Some(end) => i += end,
-                None => i = input.len(),
-            }
-        } else {
-            // Push one char and advance — char-safe so we don't
-            // split a multi-byte UTF-8 codepoint.
-            let ch = input[i..].chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-    out
-}
-
-/// Detects the start of an absolute home path at the front of `s`.
-/// Returns the byte length of the marker (so `s[len..]` is the
-/// username's first character) when matched, `None` otherwise.
-fn match_home_prefix(s: &str) -> Option<usize> {
-    let bytes = s.as_bytes();
-    let starts_with_ci = |needle: &str| -> bool {
-        bytes.len() >= needle.len() && bytes[..needle.len()].eq_ignore_ascii_case(needle.as_bytes())
-    };
-    if starts_with_ci("/Users/") {
-        return Some(7);
-    }
-    if starts_with_ci("/home/") {
-        return Some(6);
-    }
-    // Windows — accept any drive letter + `:\Users\`
-    if bytes.len() >= 9
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'\\'
-        && bytes[3..9].eq_ignore_ascii_case(b"Users\\")
-    {
-        return Some(9);
-    }
-    None
 }
 
 /// Build a short human-readable summary of an approval-bound tool

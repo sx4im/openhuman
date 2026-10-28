@@ -10,12 +10,14 @@ fn test_config(tmp: &TempDir) -> Config {
         config_path: tmp.path().join("config.toml"),
         ..Config::default()
     };
+    config.default_model = Some("test/session-fixture".to_string());
     // These suites are about the approval gate and the tier, which only bind
     // with the policy on; the shipped config default is off. Without this the
     // manifest tests pass vacuously — a disabled policy answers `Allow` for
     // every class, so nothing is ever `blocked`.
     config.autonomy.enabled = true;
     std::fs::create_dir_all(&config.workspace_dir).unwrap();
+    crate::agent::session_host::test_support::install_managed_model_fixture(&config);
     config
 }
 

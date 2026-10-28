@@ -31,12 +31,13 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::storage::documents::compare_and_swap;
 use crate::storage::local;
-use crate::storage::{block_on, DocumentStore, DocumentStoreExt, ScopedStorage, StorageError};
-use tinystoragedrivers::{
-    CollectionSpec, ErrorKind, Filter, Key, Precondition, Query, Sort, Versioned,
-};
+use crate::storage::schema_support::fresh_key;
+use crate::storage::{block_on, DocumentStore, DocumentStoreExt, Storage, StorageError};
+use tinystoragedrivers::{CollectionSpec, ErrorKind, Filter, Precondition, Query, Sort, Versioned};
 
-use super::storage_schema::{legacy_collections, specs};
+#[cfg(feature = "legacy-import")]
+use super::storage_schema::legacy_collections;
+use super::storage_schema::specs;
 pub(super) use super::storage_schema::{trust_id, APPROVALS, FLOW_TRUST};
 
 use super::types::{
@@ -74,6 +75,7 @@ pub(super) fn for_agent(config: &Config, agent: &str) -> Result<Docs> {
 }
 
 /// The legacy `approval.db`, as the storage importer reads it.
+#[cfg(feature = "legacy-import")]
 pub(crate) fn import_source() -> crate::storage::import::Source {
     crate::storage::import::Source {
         domain: "approval",
@@ -166,7 +168,7 @@ fn audit_error(error: Option<&str>) -> Option<String> {
 }
 
 impl Docs {
-    pub(super) fn new(scoped: &ScopedStorage) -> Self {
+    pub(super) fn new(scoped: &Storage) -> Self {
         Self {
             docs: Arc::clone(scoped.documents()),
         }
@@ -239,7 +241,7 @@ impl Docs {
             "decided_ms": now,
             "decision": decision.as_str(),
         });
-        let id = Key::ulid().as_str().to_owned();
+        let id = fresh_key();
         self.run(|docs| async move {
             docs.put(APPROVALS, &id, doc, Precondition::Absent)
                 .await

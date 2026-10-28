@@ -7,8 +7,7 @@ use super::dirs::{
 };
 use super::env::{EnvLookup, NoEnv, ProcessEnv, ProcessEnvWithoutWorkspace};
 use super::migrate::{
-    migrate_cloud_provider_slugs, migrate_components, migrate_legacy_inference_url,
-    migrate_legacy_memory_backend, migrate_search_settings,
+    apply_loaded_config_migrations, migrate_components, migrate_legacy_memory_backend,
 };
 use super::secrets::{
     decrypt_config_secrets, decrypt_config_secrets_strict, encrypt_config_secrets,
@@ -354,13 +353,23 @@ impl Config {
         config.workspace_dir = workspace_dir;
         config.action_dir = resolve_action_dir(&config.action_dir_override);
         config.recovered_from_corruption = config_was_corrupted;
-        migrate_legacy_inference_url(&mut config);
         let migration_raw = migration_source(&config_path, &raw).await;
-        migrate_legacy_memory_backend(&mut config, &migration_raw);
-        migrate_components(&mut config, &migration_raw);
-        migrate_cloud_provider_slugs(&mut config);
-        migrate_search_settings(&mut config);
+        apply_loaded_config_migrations(&mut config, &migration_raw);
         config.apply_env_overrides_from(env);
+        // Hand callers the same plaintext secrets the first load does. All or
+        // nothing: callers reload, edit and save, so a field that cannot be
+        // opened must stay sealed rather than be cleared and saved as `None`.
+        if let Some(openhuman_dir) = config.config_path.parent().map(Path::to_path_buf) {
+            let mut opened = config.clone();
+            match decrypt_config_secrets_strict(&mut opened, &openhuman_dir) {
+                Ok(()) => config = opened,
+                Err(error) => tracing::warn!(
+                    path = %config.config_path.display(),
+                    %error,
+                    "[config] snapshot reload keeps secrets sealed"
+                ),
+            }
+        }
 
         if config_was_corrupted {
             tracing::warn!(

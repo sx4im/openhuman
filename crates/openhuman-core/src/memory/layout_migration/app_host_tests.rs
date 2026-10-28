@@ -5,13 +5,37 @@ use tinymemory_api::MemoryEngine;
 
 use super::*;
 use crate::memory::engine::install_test_engine_for_root;
+#[cfg(feature = "storage-sqlite")]
 use crate::memory::layout_migration::ops::scan;
+#[cfg(feature = "storage-sqlite")]
 use crate::memory::layout_migration::test_host::{count, fact};
-use tinymemory_tools::layout_migration::{
-    FsLegacyClaim, LayoutHost, LegacyClaim, Outcome, Trigger,
-};
+use tinymemory_tools::layout_migration::{FsLegacyClaim, LayoutHost, LegacyClaim};
+#[cfg(feature = "storage-sqlite")]
+use tinymemory_tools::layout_migration::{Outcome, Trigger};
 
 const ACCOUNT: &str = "0123456789abcdef01234567";
+
+#[test]
+fn memory_bind_errors_keep_their_engine_categories_at_the_migration_boundary() {
+    assert_eq!(
+        memory_error_to_engine(crate::memory::MemoryError::Off("memory is disabled".into())),
+        tinymemory_api::Error::Off("memory is disabled".into())
+    );
+    assert_eq!(
+        memory_error_to_engine(crate::memory::MemoryError::Unavailable("offline".into())),
+        tinymemory_api::Error::Unavailable("offline".into())
+    );
+    assert_eq!(
+        memory_error_to_engine(crate::memory::MemoryError::ConfigConflict(
+            crate::core::StructuredRpcError {
+                message: "configuration changed".into(),
+                data: None,
+                expected_user_state: true,
+            }
+        )),
+        tinymemory_api::Error::Conflict("configuration changed".into())
+    );
+}
 
 /// A config that lives where a signed-in account's does.
 fn signed_in(tmp: &tempfile::TempDir) -> Config {
@@ -20,6 +44,7 @@ fn signed_in(tmp: &tempfile::TempDir) -> Config {
     config
 }
 
+#[cfg(feature = "storage-sqlite")] // reads migration state; see `ops.rs`
 #[tokio::test]
 async fn signed_out_there_is_nothing_to_move() {
     let tmp = tempfile::tempdir().unwrap();
@@ -31,6 +56,7 @@ async fn signed_out_there_is_nothing_to_move() {
     assert!(!scan(&AppHost::new(config.clone())).await.unwrap().needed);
 }
 
+#[cfg(feature = "storage-sqlite")] // reads migration state; see `ops.rs`
 #[tokio::test]
 async fn binds_the_legacy_tree_and_the_users_own() {
     let tmp = tempfile::tempdir().unwrap();
@@ -131,6 +157,7 @@ async fn the_switch_writes_the_migrated_persons_own_config_fresh() {
 /// The host hands the module its claim: a self-hosted tree is not moved until
 /// the user consents, and the account that did not claim it has nothing to
 /// move. Fails if the adapter stops passing the claim on.
+#[cfg(feature = "storage-sqlite")] // reads migration state; see `ops.rs`
 #[tokio::test]
 async fn a_shared_tree_reaches_the_module_as_a_claim() {
     let tmp = tempfile::tempdir().unwrap();
@@ -195,6 +222,14 @@ fn errors_keep_their_wire_codes_across_the_module_boundary() {
     let credit_error = Error::InsufficientCredits("hosted refusal without a code marker".into());
     let back = from_module(to_module(credit_error));
     assert!(matches!(back, Error::InsufficientCredits(_)));
+    assert!(back.is_account_wide());
+
+    let plan_error = crate::memory::MemoryError::PlanRequired(
+        "[MEMORY_PLAN_REQUIRED] memory API memory/scopes (HTTP 403)".into(),
+    );
+    let module_error = to_module(memory_error_to_engine(plan_error));
+    let back = crate::memory::MemoryError::from(from_module(module_error));
+    assert_eq!(back.code(), crate::memory::error::PLAN_REQUIRED);
     assert!(back.is_account_wide());
 }
 

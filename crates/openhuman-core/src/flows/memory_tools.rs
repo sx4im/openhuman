@@ -22,8 +22,8 @@
 //! [`FlowMemoryRecallTool`] only ever reads with a flow tag filter
 //! (`flow:<id>` or `flows`), so it never reaches the user's own memory.
 
-use crate::tools::schema_cache::static_schema;
 use std::sync::Arc;
+use tinyagents_harness_tools::static_schema;
 
 use async_trait::async_trait;
 use serde_json::json;

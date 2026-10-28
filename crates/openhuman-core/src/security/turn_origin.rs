@@ -56,12 +56,16 @@ pub enum AgentTurnOrigin {
         sender_name: Option<String>,
         reply_target: String,
         message_id: String,
-        /// The channel runtime's conversation-history key for this chat, set only by
-        /// the channel processor (the one place that owns `conversation_histories`).
+        /// The channel runtime's legacy conversation key for this chat, set only by
+        /// the channel processor. It is attribution data, not durable session authority.
         /// `None` for ExternalChannel-labelled turns that are not a channel
         /// conversation (MCP server callers, triage, voice), so scheduling can tell a
         /// real chat from those.
         history_key: Option<String>,
+        /// Trusted host-derived channel session identity captured from the
+        /// prepared inbound envelope. Absent on non-conversation channel
+        /// origins; legacy history keys remain attribution only.
+        channel_session: Option<tinyflows_bus::schedule::ChannelSessionIdentity>,
     },
     /// Internal automation the user explicitly authorized (cron job the
     /// user created, internal background job on local data). `source`
@@ -275,7 +279,7 @@ pub async fn with_inherited_origin<F: std::future::Future>(
 /// scoped **right now** into a future that will run on another task.
 ///
 /// A `tokio::task_local` does not cross `tokio::spawn`: a detached sub-agent
-/// (`spawn_async_subagent`, the orchestration `spawn_agent` task) starts on a
+/// (`spawn_subagent`, the orchestration `spawn_agent` task) starts on a
 /// fresh task where [`current`] is `None`, so every external-effect tool it
 /// calls reaches the approval gate as [`AgentTurnOrigin::Unknown`] and is
 /// refused — even though the parent turn that delegated the work was properly
@@ -289,7 +293,7 @@ pub async fn with_inherited_origin<F: std::future::Future>(
 /// when the returned future is first polled:
 ///
 /// ```ignore
-/// tokio::spawn(turn_origin::propagate(async move { run_subagent(..).await }));
+/// tokio::spawn(turn_origin::propagate(async move { prepared_host.run(&parent, input).await }));
 /// ```
 ///
 /// Fail-closed is preserved: with no ambient origin nothing is scoped, so the

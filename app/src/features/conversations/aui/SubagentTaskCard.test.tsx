@@ -84,6 +84,43 @@ describe('SubagentTaskCard', () => {
     );
   });
 
+  it('keeps completed output and ignores legacy worktree fields', () => {
+    const legacyActivity: SubagentActivity & {
+      worktreePath: string;
+      changedFiles: string[];
+      isDirty: boolean;
+    } = {
+      ...activity,
+      status: 'success',
+      output: 'Research is complete.',
+      worktreePath: '/repo/.claude/worktrees/worker',
+      changedFiles: ['notes.md'],
+      isDirty: true,
+    };
+    render(
+      <SubagentTaskCard
+        type="tool-call"
+        toolName="task"
+        toolCallId="sub-1"
+        args={{} as never}
+        argsText="{}"
+        result={{ status: 'complete', activity: legacyActivity } as never}
+        status={{ type: 'complete' }}
+        addResult={() => {}}
+        resume={() => {}}
+        respondToApproval={async () => {}}
+      />
+    );
+
+    expect(screen.getByTestId('assistant-ui-subagent-call')).toHaveAttribute(
+      'data-status',
+      'success'
+    );
+    expect(screen.getByText('Research is complete.')).toBeInTheDocument();
+    expect(screen.queryByTestId('worktree-actions')).toBeNull();
+    expect(screen.queryByText(/worker/)).toBeNull();
+  });
+
   it('renders the awaiting-user reply box and lets the answer through the composer path', async () => {
     render(
       <SubagentTaskCard
