@@ -129,6 +129,47 @@ async fn tool_result_artifacts_are_readable_by_absolute_path_under_workspace_onl
         .is_err());
 }
 
+/// A workspace-relative tool-result path must resolve against the workspace,
+/// not only against the action dir: the model is handed the absolute pointer
+/// but shortens it to `artifacts/tool-results/...`, and the file lives under
+/// the workspace, not the action dir. A failed read then trips the
+/// repeated-failure circuit breaker and stops the turn. (#8643)
+// Fails closed only while security is enforced: a build without the
+// security module has security disabled (`crate::security::switch`).
+#[cfg(feature = "security-module")]
+#[tokio::test]
+async fn tool_result_artifacts_are_readable_by_workspace_relative_path() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = tmp.path().join("workspace");
+    let action = tmp.path().join("project");
+    let artifacts = super::tool_result_artifacts_dir(&workspace).join("s1/shell");
+    fs::create_dir_all(&artifacts).unwrap();
+    fs::create_dir_all(&action).unwrap();
+    fs::write(artifacts.join("call.txt"), "output").unwrap();
+    let record = workspace.join("artifacts/abc");
+    fs::create_dir_all(&record).unwrap();
+    fs::write(record.join("meta.json"), "{}").unwrap();
+
+    let cfg = crate::config::AutonomyConfig {
+        enabled: true,
+        workspace_only: true,
+        ..crate::config::AutonomyConfig::default()
+    };
+    let policy = SecurityPolicy::from_config(&cfg, &workspace, &action);
+
+    let resolved = policy
+        .validate_path("artifacts/tool-results/s1/shell/call.txt")
+        .await
+        .expect("a workspace-relative tool-result path must resolve");
+    assert_eq!(resolved, artifacts.join("call.txt"));
+    // The fallback is that directory only: a relative path into the reserved
+    // part of the artifact store stays closed.
+    assert!(policy
+        .validate_path("artifacts/abc/meta.json")
+        .await
+        .is_err());
+}
+
 /// A relative action dir is still the agent's working root (tool paths are
 /// resolved against it), so it is granted as its absolute form; a relative
 /// trusted root itself grants nothing.

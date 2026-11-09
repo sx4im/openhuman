@@ -68,8 +68,37 @@ impl SecurityPolicy {
             if self.authorize_ready_media_artifact_path(&resolved).await {
                 return self.validate_native_path(path, false).await;
             }
+        } else if !Path::new(&expanded).is_absolute() {
+            // A relative path to an offloaded tool result
+            // (`artifacts/tool-results/...`) does not live under the action
+            // dir, so the candidate above never resolves. The store hands the
+            // model the absolute pointer, but the model shortens it to the
+            // workspace-relative form; resolve that against the workspace and
+            // let the native check below enforce the read-only grant. The
+            // containment check keeps the fallback inside the tool-results
+            // dir (a symlink escaping it is refused), and anything outside
+            // that dir falls through to the ordinary resolution failure.
+            if let Some(artifact) = self.resolve_workspace_tool_result_path(&expanded).await {
+                return self
+                    .validate_native_path(&artifact.to_string_lossy(), false)
+                    .await;
+            }
         }
         self.validate_native_path(path, false).await
+    }
+
+    /// Resolve a relative path against the workspace, but only when the
+    /// resolved file sits inside the tool-results artifact dir. Returns
+    /// `None` when the path does not exist there or escapes that dir.
+    async fn resolve_workspace_tool_result_path(&self, relative: &str) -> Option<PathBuf> {
+        let base =
+            tokio::fs::canonicalize(super::types::tool_result_artifacts_dir(&self.workspace_dir))
+                .await
+                .ok()?;
+        let candidate = tokio::fs::canonicalize(self.workspace_dir.join(relative))
+            .await
+            .ok()?;
+        candidate.starts_with(&base).then_some(candidate)
     }
 
     /// Resolve a prospective destination parent through TinySecurity's
