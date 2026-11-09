@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::types::SecurityPolicy;
+use super::types::{SecurityPolicy, ARTIFACTS_DIR, ARTIFACT_TOOL_RESULTS_DIR};
 use tinytools::status::POLICY_BLOCKED_MARKER;
 
 impl SecurityPolicy {
@@ -68,8 +68,46 @@ impl SecurityPolicy {
             if self.authorize_ready_media_artifact_path(&resolved).await {
                 return self.validate_native_path(path, false).await;
             }
+        } else if !Path::new(&expanded).is_absolute() {
+            // A relative path that is missing under the action directory may
+            // still name an offloaded tool result by its workspace-relative
+            // spelling (#8643): the preview hands the model an absolute
+            // `artifact_path`, but the model may repeat the short spelling
+            // instead, and the failed read can trip the repeated-failure
+            // circuit breaker and stop the turn. Only that spelling falls
+            // back, and only to the store that is already a read-only
+            // trusted root, so no new access is granted.
+            if let Some(resolved) = self.resolve_tool_result_artifact(&expanded).await {
+                return self
+                    .validate_native_path(&resolved.to_string_lossy(), false)
+                    .await;
+            }
         }
         self.validate_native_path(path, false).await
+    }
+
+    /// Resolve a relative `artifacts/tool-results/...` spelling against the
+    /// tool-result artifact store (#8643).
+    ///
+    /// The spelling must stay inside the store: parent traversals are refused
+    /// earlier by [`Self::is_path_string_allowed`], and a symlink escaping
+    /// the store fails the containment check below. Every other relative
+    /// spelling keeps resolving against `action_dir` only, so the
+    /// workspace/action-directory separation (#3051) stands.
+    async fn resolve_tool_result_artifact(&self, expanded: &str) -> Option<PathBuf> {
+        let mut components = Path::new(expanded).components();
+        let first = components.next()?;
+        let second = components.next()?;
+        if first.as_os_str().to_string_lossy() != ARTIFACTS_DIR
+            || second.as_os_str().to_string_lossy() != ARTIFACT_TOOL_RESULTS_DIR
+        {
+            return None;
+        }
+        let store = super::tool_result_artifacts_dir(&self.workspace_dir);
+        let store_root = tokio::fs::canonicalize(&store).await.ok()?;
+        let rest: PathBuf = components.collect();
+        let resolved = tokio::fs::canonicalize(store.join(rest)).await.ok()?;
+        resolved.starts_with(&store_root).then_some(resolved)
     }
 
     /// Resolve a prospective destination parent through TinySecurity's
