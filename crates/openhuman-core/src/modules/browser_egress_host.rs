@@ -403,7 +403,11 @@ pub(crate) async fn prepare_consequence_callback(
                 interface: consequence_host::INTERFACE.parse()?,
                 members: vec![consequence_host::methods::REVIEW.parse()?],
             }])
-            .await?,
+            .await?
+            // Only the consequence-host destination is callback-bearing;
+            // the rest of TinyComputer's configuration may change on
+            // reinitialization.
+            .with_frozen_config_keys(&["consequence_host"]),
     );
     binding
         .serve_at(
