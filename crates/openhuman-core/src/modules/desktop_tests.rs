@@ -214,3 +214,41 @@ async fn the_callback_bound_load_config_is_what_every_refresh_pushes() {
     assert_eq!(fingerprint(&loaded), fingerprint(&refreshed));
     assert!(loaded["browser"]["egress"].is_object());
 }
+
+#[cfg(feature = "security-module")]
+#[tokio::test]
+async fn a_post_load_config_change_still_pushes_the_load_config() {
+    // #8725: TinyBus freezes a callback-bound module's whole config blob at
+    // load, so a refresh rebuilt from changed settings is refused and faults
+    // the module. The refresh must push the exact load-time bytes.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = config_in(dir.path());
+    let loaded = crate::modules::ops::computer_callback_config(&config, MODULE_ID, ":1.42").await;
+
+    // Change every field the issue names after the load: the browser
+    // executable and persistent profile, plus tracing.
+    let mut changed = config.clone();
+    changed.browser.chrome_path = Some("/usr/bin/google-chrome".into());
+    changed.browser.profile_mode = "persistent".into();
+    changed.browser.profile_path = Some("/srv/teeny/state/browser/profile".into());
+    changed.computer.trace = true;
+
+    let mut refreshed = module_config(&changed).await;
+    inject_security_browser_config(
+        &mut refreshed,
+        crate::modules::browser_egress_host::browser_dial_alias(),
+        ":1.42",
+    );
+
+    // The change is real: a freshly built refresh differs from the load.
+    assert_ne!(refreshed, loaded);
+    assert_ne!(fingerprint(&refreshed), fingerprint(&loaded));
+
+    // The refresh the proxy pushes is the load config, byte for byte.
+    let pushed = crate::modules::ops::computer_load_config(MODULE_ID)
+        .await
+        .expect("load config recorded");
+    assert_eq!(pushed, loaded);
+    assert_eq!(fingerprint(&pushed), fingerprint(&loaded));
+    assert!(pushed["browser"]["egress"].is_object());
+}

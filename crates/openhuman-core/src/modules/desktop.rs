@@ -34,6 +34,11 @@ fn fingerprint(value: &serde_json::Value) -> u64 {
 
 /// Load the module, refresh its private configuration when it changed, and
 /// return a proxy for its one interface (desktop, browser and task members).
+///
+/// In a `security-module` build the refresh pushes the exact bytes the
+/// module loaded with: TinyBus refuses any other bytes for a callback-bound
+/// module (#8725), so a post-load settings change takes effect at the next
+/// core restart instead of faulting the module.
 pub(crate) async fn proxy(config: &Config) -> Result<Proxy, String> {
     crate::modules::ops::ensure_loaded_within(
         config,
@@ -67,6 +72,18 @@ pub(crate) async fn proxy(config: &Config) -> Result<Proxy, String> {
         };
         inject_security_browser_config(&mut configuration, egress, &callback_destination);
     }
+    // TinyBus freezes a callback-bound module's config at load — the whole
+    // blob is fingerprinted — and refuses a refresh with different bytes,
+    // faulting the module (#8725). The config above is rebuilt from the live
+    // settings, so any post-load change (a new chrome path or profile, a
+    // rotated key, a re-registered egress policy) would fault every later
+    // call until the core restarts. Push the exact bytes the module loaded
+    // with instead; the change takes effect at the next core restart. When
+    // no load config was recorded, fall back to the freshly built config.
+    #[cfg(feature = "security-module")]
+    if let Some(loaded) = crate::modules::ops::computer_load_config(MODULE_ID).await {
+        configuration = loaded;
+    }
     let current = fingerprint(&configuration);
     let mut previous = last_config().lock().await;
     if *previous != Some(current) {
@@ -93,8 +110,10 @@ pub(crate) async fn proxy(config: &Config) -> Result<Proxy, String> {
 }
 
 /// Add the security callbacks to TinyComputer's config. The callback-bound
-/// load and every refresh in [`proxy`] go through here, so both produce the
-/// same bytes and TinyBus accepts the refresh.
+/// load goes through here; a refresh pushes the exact bytes that load
+/// produced (recorded by `computer_callback_config`), since TinyBus refuses
+/// a callback-bound module any config that differs from its load config
+/// (#8725). When no load config was recorded, the refresh is built here too.
 pub(super) fn inject_security_browser_config(
     configuration: &mut serde_json::Value,
     egress: serde_json::Value,

@@ -288,6 +288,18 @@ type ComputerCallbackLoads = tokio::sync::Mutex<
 static COMPUTER_CALLBACK_LOADS: std::sync::LazyLock<ComputerCallbackLoads> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// The exact configuration a callback-bound TinyComputer load used, by
+/// module id. TinyBus freezes a callback-bound module's config at load and
+/// refuses a refresh with different bytes, so `desktop::proxy` pushes these
+/// bytes on every refresh instead of a freshly built config (#8725).
+#[cfg(feature = "security-module")]
+type ComputerCallbackLoadConfigs =
+    tokio::sync::Mutex<std::collections::HashMap<String, serde_json::Value>>;
+
+#[cfg(feature = "security-module")]
+static COMPUTER_CALLBACK_LOAD_CONFIGS: std::sync::LazyLock<ComputerCallbackLoadConfigs> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
 #[cfg(feature = "security-module")]
 pub(super) async fn security_callback_binding(
 ) -> Option<std::sync::Arc<tinybus::module::HostCallbackBinding>> {
@@ -382,6 +394,8 @@ async fn module_config_with_consequence_callback(
 /// TinyComputer's config at its callback-bound load: exactly what
 /// `desktop::proxy` pushes before each call, since TinyBus refuses a
 /// callback-bound module any config that differs from the one it loaded with.
+/// The built config is recorded so a later refresh can push these exact bytes
+/// even after the live settings changed (#8725).
 #[cfg(feature = "security-module")]
 pub(super) async fn computer_callback_config(
     config: &Config,
@@ -394,6 +408,10 @@ pub(super) async fn computer_callback_config(
         super::browser_egress_host::browser_dial_alias(),
         callback_destination,
     );
+    COMPUTER_CALLBACK_LOAD_CONFIGS
+        .lock()
+        .await
+        .insert(id.to_string(), module_config.clone());
     module_config
 }
 
@@ -404,6 +422,14 @@ pub(super) async fn consequence_callback_destination(id: &str) -> Option<String>
         .await
         .get(id)
         .map(|binding| binding.unique_name().to_string())
+}
+
+/// The exact config a callback-bound TinyComputer load used, if one was
+/// recorded. `desktop::proxy` pushes this on every refresh instead of a
+/// freshly built config, since TinyBus refuses any other bytes (#8725).
+#[cfg(feature = "security-module")]
+pub(super) async fn computer_load_config(id: &str) -> Option<serde_json::Value> {
+    COMPUTER_CALLBACK_LOAD_CONFIGS.lock().await.get(id).cloned()
 }
 
 /// Module access that grants storage callbacks only while loading the two
