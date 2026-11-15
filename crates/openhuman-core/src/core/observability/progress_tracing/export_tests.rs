@@ -18,6 +18,34 @@ fn partial_success_positive_rejected_count_is_rejected() {
     assert!(reject_partial_success(&response).is_err());
 }
 
+/// A positive count with no message is a rejection on its own: OTLP allows
+/// it, and treating it as success loses the spans silently (#8728).
+#[test]
+fn partial_success_positive_rejected_count_without_message_is_rejected() {
+    let response = serde_json::json!({
+        "partialSuccess": { "rejectedSpans": "2" }
+    });
+    assert!(reject_partial_success(&response).is_err());
+}
+
+/// Same rejection when the proxy emits the count as a bare JSON number
+/// instead of the protobuf-JSON string form.
+#[test]
+fn partial_success_positive_rejected_count_as_number_is_rejected() {
+    let response = serde_json::json!({
+        "partialSuccess": { "rejectedSpans": 2 }
+    });
+    assert!(reject_partial_success(&response).is_err());
+}
+
+#[test]
+fn partial_success_zero_rejected_count_without_message_is_accepted() {
+    let response = serde_json::json!({
+        "partialSuccess": { "rejectedSpans": "0" }
+    });
+    assert!(reject_partial_success(&response).is_ok());
+}
+
 #[test]
 fn empty_partial_success_response_is_accepted() {
     assert!(reject_partial_success(&serde_json::json!({ "partialSuccess": {} })).is_ok());

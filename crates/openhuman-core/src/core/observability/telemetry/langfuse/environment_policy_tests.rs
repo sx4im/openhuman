@@ -80,6 +80,30 @@ fn environment_derivation_follows_the_resolved_bucket() {
     }
 }
 
+/// An API-key host must pass the journal readiness gate: `resolve_backend_
+/// credential` returns `ApiKey` for library or API-key hosts, and the push
+/// must not be skipped for them (#8728).
+#[tokio::test]
+async fn journal_push_is_ready_for_an_api_key_credential() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = crate::credentials::test_support::plaintext_fixture_config(dir.path());
+    config.resolved_endpoints.control_plane_url = Some("https://control.example".into());
+    config.resolved_endpoints.tracing_otlp_url =
+        Some("https://api.example.test/traces/otel/v1/traces".to_string());
+    config.resolved_endpoints.deployment_environment = Some("production".to_string());
+    assert!(
+        !journal_push_ready(&config).await,
+        "no credential stored yet — the gate must stay closed"
+    );
+    crate::credentials::api_key::store_api_key(&config, "th_test_key")
+        .await
+        .expect("store API key");
+    assert!(
+        journal_push_ready(&config).await,
+        "an API-key host must be push-ready"
+    );
+}
+
 /// With no host registered nothing resolves a hosted bucket, so every
 /// non-local origin is external and does not push.
 #[test]
