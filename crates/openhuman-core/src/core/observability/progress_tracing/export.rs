@@ -35,7 +35,7 @@ fn reject_partial_success(response: &serde_json::Value) -> Result<(), String> {
 fn partial_success_rejects_spans(partial: &serde_json::Value) -> bool {
     match &partial["rejectedSpans"] {
         serde_json::Value::Null => false,
-        serde_json::Value::String(count) => count.parse::<u64>().is_none_or(|count| count > 0),
+        serde_json::Value::String(count) => count.parse::<u64>().map_or(true, |count| count > 0),
         serde_json::Value::Number(count) => count.as_u64().is_none_or(|count| count > 0),
         _ => true,
     }
