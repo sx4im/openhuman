@@ -60,6 +60,29 @@ fn otlp_url_is_the_host_resolved_tracing_endpoint() {
     );
 }
 
+#[tokio::test]
+async fn journal_push_ready_accepts_an_api_key_credential() {
+    use crate::credentials::api_key::store_api_key;
+    use crate::credentials::test_support::plaintext_fixture_config;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = plaintext_fixture_config(dir.path());
+    config.resolved_endpoints.control_plane_url = Some("http://127.0.0.1:7788".into());
+    config.resolved_endpoints.tracing_otlp_url =
+        Some("http://127.0.0.1:7788/traces/otel/v1/traces".into());
+    assert!(
+        !journal_push_ready(&config).await,
+        "no credential stored yet, so no push is possible"
+    );
+    store_api_key(&config, "th_test_key")
+        .await
+        .expect("store key");
+    assert!(
+        journal_push_ready(&config).await,
+        "an API-key host is push-ready exactly like a session host"
+    );
+}
+
 #[test]
 fn environment_derivation_follows_the_resolved_bucket() {
     let staging = config_resolved_as("staging");

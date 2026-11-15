@@ -19,6 +19,36 @@ fn partial_success_positive_rejected_count_is_rejected() {
 }
 
 #[test]
+fn partial_success_positive_rejected_count_without_message_is_rejected() {
+    // The OTLP case the old code missed: a positive count and no message
+    // was treated as success and the spans were lost silently.
+    let response = serde_json::json!({
+        "partialSuccess": { "rejectedSpans": "2" }
+    });
+    assert!(reject_partial_success(&response).is_err());
+}
+
+#[test]
+fn partial_success_zero_rejected_count_without_message_is_accepted() {
+    let response = serde_json::json!({
+        "partialSuccess": { "rejectedSpans": "0" }
+    });
+    assert!(reject_partial_success(&response).is_ok());
+}
+
+#[test]
+fn partial_success_rejected_count_accepts_a_bare_number_and_fails_closed_on_garbage() {
+    let rejected = serde_json::json!({ "partialSuccess": { "rejectedSpans": 2 } });
+    assert!(reject_partial_success(&rejected).is_err());
+    let accepted = serde_json::json!({ "partialSuccess": { "rejectedSpans": 0 } });
+    assert!(reject_partial_success(&accepted).is_ok());
+    // An unreadable count is not a success signal: the proxy refused spans
+    // it will not describe, so the push must report the failure.
+    let unreadable = serde_json::json!({ "partialSuccess": { "rejectedSpans": "two" } });
+    assert!(reject_partial_success(&unreadable).is_err());
+}
+
+#[test]
 fn empty_partial_success_response_is_accepted() {
     assert!(reject_partial_success(&serde_json::json!({ "partialSuccess": {} })).is_ok());
     assert!(reject_partial_success(&serde_json::json!({})).is_ok());
@@ -111,6 +141,37 @@ async fn external_backend_is_skipped_before_session_lookup() {
         output: None,
     }];
     assert!(push_spans(&config, &spans).await.is_ok());
+}
+
+#[tokio::test]
+async fn api_key_credential_reaches_the_langfuse_push() {
+    // An API-key host must get past the credential gate exactly like a
+    // session host. The OTLP endpoint here is a closed loopback port, so the
+    // push itself fails with a connection error — that failure is the proof
+    // the gate let it through: before the fix this returned Ok(()) without
+    // ever attempting a request.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = crate::credentials::test_support::plaintext_fixture_config(dir.path());
+    crate::credentials::api_key::store_api_key(&config, "th_test_key")
+        .await
+        .expect("store key");
+    config.resolved_endpoints.control_plane_url = Some("http://127.0.0.1:7788".into());
+    config.resolved_endpoints.tracing_otlp_url =
+        Some("http://127.0.0.1:1/traces/otel/v1/traces".into());
+    let spans = [TraceSpan {
+        trace_id: "thread-one:turn-one".into(),
+        span_id: "root".into(),
+        parent_span_id: None,
+        name: "agent.turn".into(),
+        kind: SpanKind::Turn,
+        start_unix_ms: 1_000,
+        end_unix_ms: Some(2_000),
+        status: SpanStatus::Ok,
+        attributes: BTreeMap::new(),
+        input: None,
+        output: None,
+    }];
+    assert!(push_spans(&config, &spans).await.is_err());
 }
 
 #[tokio::test]

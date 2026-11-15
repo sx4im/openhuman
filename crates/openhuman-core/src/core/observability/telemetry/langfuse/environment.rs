@@ -116,8 +116,8 @@ pub(crate) fn skip_push(environment: &str) -> bool {
 }
 
 /// Whether a journal push would actually send for `config`: the URL gate, the
-/// environment gate and a live session credential. Callers must read a journal
-/// and build observations first, so without a live session (unit tests, a
+/// environment gate and a live session or API-key credential. Callers must read a journal
+/// and build observations first, so without a live credential (unit tests, a
 /// signed-out or embedder host) or on a skipped environment that work is
 /// discarded anyway, and reading a whole child journal is not free.
 pub(crate) async fn journal_push_ready(config: &Config) -> bool {
@@ -126,7 +126,12 @@ pub(crate) async fn journal_push_ready(config: &Config) -> bool {
         && url.starts_with("http")
         && matches!(
             direct_backend_credential(config, "langfuse journal push").await,
+            // An API-key host is a live credential exactly like a session:
+            // its pushes ride the same bearer. Resolved through
+            // `direct_backend_credential`, not `backend_bearer_secret`, so an
+            // expired session is still classified instead of sent.
             Some(crate::credentials::backend_credential::BackendCredential::Session(_))
+                | Some(crate::credentials::backend_credential::BackendCredential::ApiKey(_))
         )
 }
 

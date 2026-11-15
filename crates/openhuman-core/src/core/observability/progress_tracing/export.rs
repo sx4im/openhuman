@@ -15,13 +15,29 @@ use tinyagents_harness::observability::LangfuseClient;
 const PUSH_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn reject_partial_success(response: &serde_json::Value) -> Result<(), String> {
-    if response["partialSuccess"]["errorMessage"]
+    let partial = &response["partialSuccess"];
+    if partial["errorMessage"]
         .as_str()
         .is_some_and(|message| !message.is_empty())
+        || partial_success_rejects_spans(partial)
     {
         Err("Langfuse OTLP proxy reported partial success".to_string())
     } else {
         Ok(())
+    }
+}
+
+/// Whether `partialSuccess` reports rejected spans: a positive
+/// `rejectedSpans` count, or a count that cannot be read at all. OTLP
+/// encodes the int64 count as a JSON string; a bare number is accepted too.
+/// An unreadable count fails closed — the alternative is silently dropping
+/// spans the proxy refused.
+fn partial_success_rejects_spans(partial: &serde_json::Value) -> bool {
+    match &partial["rejectedSpans"] {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(count) => count.parse::<u64>().is_none_or(|count| count > 0),
+        serde_json::Value::Number(count) => count.as_u64().is_none_or(|count| count > 0),
+        _ => true,
     }
 }
 
@@ -44,7 +60,13 @@ async fn push_spans(config: &Config, spans: &[TraceSpan]) -> Result<(), String> 
     )
     .await
     {
-        Some(crate::credentials::backend_credential::BackendCredential::Session(token)) => token,
+        // The backend proxy accepts an API key as a bearer <redacted> its `tiny_`
+        // prefix, exactly like a session JWT — an API-key host pushes with the
+        // same client. Keep resolving through `direct_backend_credential`, not
+        // `backend_bearer_secret`: only the former classifies an expired
+        // session instead of sending it.
+        Some(crate::credentials::backend_credential::BackendCredential::Session(token))
+        | Some(crate::credentials::backend_credential::BackendCredential::ApiKey(token)) => token,
         _ => return Ok(()),
     };
     let client = LangfuseClient::proxy_with_transport(
@@ -131,8 +153,8 @@ pub(crate) fn export_spans(config: &AgentTracingConfig, spans: &[TraceSpan]) {
 ///
 /// 1. **Usage-data sharing** (`observability.share_usage_data`, on by default):
 ///    push the run's spans to the backend Langfuse proxy — endpoint derived from
-///    the current backend host, authed with the session bearer (see
-///    [`push_spans`]). A failure (no live session, network, rejected
+///    the current backend host, authed with the session bearer or the API key
+///    (see [`push_spans`]). A failure (no live session, network, rejected
 ///    payload) just logs; there is no local fallback, since sharing and local
 ///    export are distinct opt-ins.
 /// 2. **Local exporter** (`observability.agent_tracing.enabled`, opt-in): append
