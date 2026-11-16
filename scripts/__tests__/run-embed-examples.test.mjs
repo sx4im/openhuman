@@ -63,6 +63,35 @@ test("fleet measurements retain their declared release and minimal-feature invoc
   assert.ok(featureArgument(calls.get("mcp")).split(",").includes("mcp"));
 });
 
+test("on win32 the wrapper runs through bash instead of being spawned directly", () => {
+  const calls = [];
+  runExamples({examples:[{name:"telegram",features:["channels"]}],environment:{}, platform:"win32", run(command,args,options) {
+    calls.push({command,args,options});
+    return {status:0,stdout:"EXAMPLE_OK telegram\n",stderr:""};
+  }});
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "bash");
+  assert.ok(calls[0].args[0].endsWith("ci-cancel-aware.sh"));
+  assert.ok(!calls[0].args[0].includes("\\"));
+  assert.equal(calls[0].args[1], "cargo");
+  assert.ok(calls[0].args.includes("--example"));
+  assert.ok(calls[0].args.includes("telegram"));
+});
+test("on win32 without bash the runner falls back to cargo directly", () => {
+  const calls = [];
+  runExamples({examples:[{name:"telegram",features:[]}],environment:{}, platform:"win32", run(command,args,options) {
+    calls.push({command,args,options});
+    if (command === "bash") return {error:Object.assign(new Error("spawnSync bash ENOENT"), {code:"ENOENT"}), status:null, stdout:"", stderr:""};
+    return {status:0,stdout:"EXAMPLE_OK telegram\n",stderr:""};
+  }});
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, "bash");
+  assert.equal(calls[1].command, "cargo");
+  assert.equal(calls[1].args[0], "run");
+  assert.ok(calls[1].args.includes("--example"));
+  assert.ok(!calls.some((call) => call.command.endsWith("ci-cancel-aware.sh")));
+});
+
 test("a forced dev profile builds release-declared measurements in the dev profile and keeps their feature graph", () => {
   const examples = discoverExamples().filter(({name}) => name === "linux_fleet" || name === "mcp");
   const calls = new Map();

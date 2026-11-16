@@ -30,7 +30,19 @@ export function assertExampleOutput(name, result) {
     throw new Error(`${name}: successful exit without behavioral assertion marker\n${result.stdout}`);
   }
 }
-export function runExamples({ run = spawnSync, examples = discoverExamples(), environment = process.env, profile = null } = {}) {
+export function runExample(args, options, { run = spawnSync, platform = process.platform } = {}) {
+  const wrapper = resolve(root, "scripts/ci-cancel-aware.sh");
+  if (platform !== "win32") return run(wrapper, ["cargo", ...args], options);
+  // spawnSync cannot execute a .sh file directly on Windows (ENOENT/EINVAL),
+  // so run the wrapper through bash when Git Bash/MSYS is on PATH. Bash takes
+  // forward slashes, so normalize the Windows-style path before handing it over.
+  const bashResult = run("bash", [wrapper.split("\\").join("/"), "cargo", ...args], options);
+  if (!bashResult.error) return bashResult;
+  // No bash on PATH (native cmd/PowerShell): run cargo directly instead of
+  // failing the whole script on the executable lookup.
+  return run("cargo", args, options);
+}
+export function runExamples({ run = spawnSync, examples = discoverExamples(), environment = process.env, profile = null, platform = process.platform } = {}) {
   // `profile` forces every example into one Cargo profile (PR CI passes "dev"
   // so a release-declared measurement shares the plain dev build instead of
   // paying a thin-LTO build nothing else can reuse). Without it each example
@@ -55,9 +67,10 @@ export function runExamples({ run = spawnSync, examples = discoverExamples(), en
     if (example.defaultFeatures === false) args.push("--no-default-features");
     const features = [...featureGroups.get(configuration(example))].sort();
     if (features.length) args.push("--features", features.join(","));
-    const result = run(resolve(root, "scripts/ci-cancel-aware.sh"), ["cargo", ...args], {
+    const options = {
       cwd: root, encoding: "utf8", env: offlineEnvironment(environment), timeout: 1800000, maxBuffer: 16 * 1024 * 1024,
-    });
+    };
+    const result = runExample(args, options, { run, platform });
     assertExampleOutput(example.name, result);
     console.log(`PASS ${example.name}`);
   }
