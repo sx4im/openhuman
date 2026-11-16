@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertExampleOutput, discoverExamples, offlineEnvironment, runExamples } from "../run-embed-examples.mjs";
+import { assertExampleOutput, discoverExamples, offlineEnvironment, resolveCancelAwareRunner, runExamples } from "../run-embed-examples.mjs";
 
 test("the runner strips inherited live credentials and operator workspace settings", () => {
   assert.deepEqual(offlineEnvironment({ PATH: "bin", OPENHUMAN_EXAMPLE_LIVE: "1", OPENHUMAN_EXAMPLE_API_KEY: "secret", OPENHUMAN_BACKEND_API_KEY: "secret", OPENHUMAN_STORAGE_URL: "remote", OPENHUMAN_WORKSPACE: "operator", OPENHUMAN_KEYRING_MASTER_KEY: "operator-key", OPENHUMAN_KEYRING_MASTER_KEY_FILE: "operator-file", OPENHUMAN_KEYRING_BACKEND: "os" }), { PATH: "bin" });
@@ -20,6 +20,46 @@ test("runner executes feature gated examples and checks stdout", () => {
   assert.ok(calls[0].args.includes("--features"));
   assert.ok(calls[0].args.includes("channels"));
   assert.equal(calls[0].options.env.OPENHUMAN_EXAMPLE_LIVE, undefined);
+});
+test("on win32 with bash, the wrapper runs through bash instead of being spawned directly", () => {
+  const calls = [];
+  runExamples({examples:[{name:"telegram",features:[]}],environment:{},platform:"win32", run(command,args) {
+    calls.push({command,args});
+    if (args[0] === "--version") return {status:0,stdout:"GNU bash, version 5.2\n",stderr:""};
+    const name = args[args.indexOf("--example") + 1];
+    return {status:0,stdout:`EXAMPLE_OK ${name}\n`,stderr:""};
+  }});
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, "bash");
+  assert.deepEqual(calls[0].args, ["--version"]);
+  assert.equal(calls[1].command, "bash");
+  assert.ok(calls[1].args[0].endsWith("ci-cancel-aware.sh"));
+  assert.equal(calls[1].args[1], "cargo");
+  assert.ok(calls[1].args.includes("--example"));
+});
+test("on win32 without bash, cargo runs directly and the wrapper is skipped", () => {
+  const calls = [];
+  runExamples({examples:[{name:"telegram",features:[]}],environment:{},platform:"win32", run(command,args) {
+    calls.push({command,args});
+    if (args[0] === "--version") return {error:new Error("spawnSync bash ENOENT"),status:null,stdout:"",stderr:""};
+    const name = args[args.indexOf("--example") + 1];
+    return {status:0,stdout:`EXAMPLE_OK ${name}\n`,stderr:""};
+  }});
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, "bash");
+  assert.equal(calls[1].command, "cargo");
+  assert.equal(calls[1].args[0], "run");
+  assert.ok(calls[1].args.every((arg) => !arg.endsWith(".sh")));
+});
+test("on win32 a failing bash probe also falls back to direct cargo", () => {
+  const runner = resolveCancelAwareRunner({platform:"win32", run:() => ({status:1,stdout:"",stderr:""})});
+  assert.equal(runner.command, "cargo");
+  assert.deepEqual(runner.args, []);
+});
+test("off win32 the wrapper is still spawned directly without probing for bash", () => {
+  const runner = resolveCancelAwareRunner({platform:"linux", run:() => { throw new Error("must not probe"); }});
+  assert.ok(runner.command.endsWith("ci-cancel-aware.sh"));
+  assert.deepEqual(runner.args, ["cargo"]);
 });
 test("every discoverable example has an offline output contract", () => {
   const examples = discoverExamples();

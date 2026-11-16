@@ -30,7 +30,19 @@ export function assertExampleOutput(name, result) {
     throw new Error(`${name}: successful exit without behavioral assertion marker\n${result.stdout}`);
   }
 }
-export function runExamples({ run = spawnSync, examples = discoverExamples(), environment = process.env, profile = null } = {}) {
+// `spawnSync` cannot execute a `.sh` file directly on Windows (ENOENT/EINVAL),
+// so the wrapper needs a shell there. Prefer Git Bash when it is on PATH: it
+// keeps the wrapper's Windows cleanup (taskkill). Without bash (native
+// cmd/PowerShell), run cargo directly and skip the wrapper rather than failing
+// the whole run. Probed once per run, through the same injectable `run`.
+export function resolveCancelAwareRunner({ run = spawnSync, platform = process.platform } = {}) {
+  const wrapper = resolve(root, "scripts/ci-cancel-aware.sh");
+  if (platform !== "win32") return { command: wrapper, args: ["cargo"] };
+  const bash = run("bash", ["--version"], { encoding: "utf8" });
+  if (!bash.error && bash.status === 0) return { command: "bash", args: [wrapper, "cargo"] };
+  return { command: "cargo", args: [] };
+}
+export function runExamples({ run = spawnSync, examples = discoverExamples(), environment = process.env, profile = null, platform = process.platform } = {}) {
   // `profile` forces every example into one Cargo profile (PR CI passes "dev"
   // so a release-declared measurement shares the plain dev build instead of
   // paying a thin-LTO build nothing else can reuse). Without it each example
@@ -47,6 +59,7 @@ export function runExamples({ run = spawnSync, examples = discoverExamples(), en
     for (const feature of example.features) features.add(feature);
     featureGroups.set(key, features);
   }
+  const runner = resolveCancelAwareRunner({ run, platform });
   for (const example of examples) {
     const args = ["run", "--quiet", "-p", "openhuman-embed", "--example", example.name];
     const effective = profileOf(example);
@@ -55,7 +68,7 @@ export function runExamples({ run = spawnSync, examples = discoverExamples(), en
     if (example.defaultFeatures === false) args.push("--no-default-features");
     const features = [...featureGroups.get(configuration(example))].sort();
     if (features.length) args.push("--features", features.join(","));
-    const result = run(resolve(root, "scripts/ci-cancel-aware.sh"), ["cargo", ...args], {
+    const result = run(runner.command, [...runner.args, ...args], {
       cwd: root, encoding: "utf8", env: offlineEnvironment(environment), timeout: 1800000, maxBuffer: 16 * 1024 * 1024,
     });
     assertExampleOutput(example.name, result);
