@@ -48,23 +48,15 @@ RuntimeAuthority::resolve_access
 
 ## Gotchas
 
-These files have drifted from `generate_handler!` (checked against
-`src/lib.rs` when this README was written).
-
-Registered commands that no permission lists, so the webview cannot call them:
-`gateway_list`, `gateway_save`, `gateway_delete`, `gateway_activate`,
-`gateway_active`, `gateway_status`, `mcp_resolve_binary_path`,
-`mcp_open_client_config`, `claude_code_login_launch`, `mascot_window_show`,
-`mascot_window_hide`, `set_titlebar_for_sidebar`, `recover_port_conflict`,
-`force_quit_port_owner`, `check_core_update`, `apply_core_update`,
-`process_diagnostics_list_owned`.
-
-Listed commands that are no longer registered, which are harmless but stale:
-`service_install_direct`, `service_start_direct`, `service_stop_direct`,
-`service_status_direct`, `service_uninstall_direct`,
-`register_companion_hotkey`, `unregister_companion_hotkey`,
-`companion_activate`, `companion_start_session`, `companion_stop_session`,
-`companion_status`, `companion_config_get`, `companion_config_set`.
+These files have drifted from `generate_handler!` before: commands were
+registered and invoked from the frontend but never listed here, so the build
+stayed green and the call only failed at runtime with "`<command>` not
+allowed. Command not found" — see #8718, where `claude_code_login_launch`
+shipped unlisted in 0.64.15. The regression test
+`login_launch_is_permitted_for_the_main_window` in
+`src/claude_code_tests.rs` reads these tables and fails if that command
+ever drops out of them again; extend it (rather than a list here) when
+another command needs the same guarantee.
 
 Plugin permissions (`core:*`, `notification:*`, `opener:*`, `deep-link:*`,
 `updater:*`) are not defined here; they come from the plugins and are granted

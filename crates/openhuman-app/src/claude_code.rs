@@ -8,6 +8,11 @@
 
 use std::process::Command;
 
+#[cfg(any(test, target_os = "macos"))]
+use std::process::{Child, Stdio};
+#[cfg(any(test, target_os = "macos"))]
+use std::time::Duration;
+
 /// The CLI's authentication entry point, as argv.
 ///
 /// Authentication lives under the `auth` subcommand: `claude auth login`.
@@ -59,6 +64,82 @@ end tell"#,
     )
 }
 
+/// How long the macOS launcher may take to report back before the invoke
+/// returns success on the assumption that Terminal.app is still opening
+/// (for example, the user is still answering the macOS Automation prompt).
+#[cfg(any(test, target_os = "macos"))]
+const MACOS_LAUNCH_WAIT: Duration = Duration::from_secs(30);
+
+/// Outcome of waiting on a launcher child process.
+#[cfg(any(test, target_os = "macos"))]
+enum LauncherWait {
+    /// The launcher exited; carries its exit status and captured stderr.
+    Exited(std::process::ExitStatus, String),
+    /// Still running when the deadline passed. The child is left running:
+    /// killing it here would close the Automation prompt the user may
+    /// still be answering, so the launch is reported as in progress.
+    StillRunning,
+    /// The wait itself failed (the launcher could not be reaped); carries
+    /// the reason.
+    Unknown(String),
+}
+
+/// Wait for a launcher child, capturing its stderr, up to `timeout`.
+/// The wait runs on a helper thread because `wait_with_output` blocks;
+/// on timeout the helper keeps waiting in the background and the caller
+/// treats the launch as in progress.
+#[cfg(any(test, target_os = "macos"))]
+fn await_launcher_exit(child: Child, timeout: Duration) -> LauncherWait {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => LauncherWait::Exited(
+            output.status,
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        ),
+        Ok(Err(e)) => LauncherWait::Unknown(format!("failed to wait for the launcher: {e}")),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => LauncherWait::StillRunning,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            LauncherWait::Unknown("launcher wait ended without a result".into())
+        }
+    }
+}
+
+/// Spawn a terminal launcher and report its outcome.
+///
+/// A successful spawn is not a successful launch: on macOS an Automation
+/// denial makes `osascript` exit non-zero *after* a successful spawn, and
+/// returning `Ok` at spawn time hid that failure from the settings card
+/// (issue #8718). So this waits, bounded by `timeout`, for the launcher to
+/// exit: exit zero is success, a non-zero exit is an error carrying the
+/// exit status and the launcher's stderr, and a launcher still running at
+/// the deadline is treated as a launch in progress (success — see
+/// `LauncherWait::StillRunning`).
+#[cfg(any(test, target_os = "macos"))]
+fn run_launcher(
+    mut command: Command,
+    timeout: Duration,
+    terminal_name: &str,
+) -> Result<String, String> {
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    let child = command
+        .spawn()
+        .map_err(|e| format!("failed to open {terminal_name}: {e}"))?;
+    match await_launcher_exit(child, timeout) {
+        LauncherWait::Exited(status, _stderr) if status.success() => Ok(terminal_name.into()),
+        LauncherWait::Exited(status, stderr) => Err(format!(
+            "{terminal_name} launch failed (launcher exited {status}): {}",
+            stderr.trim()
+        )),
+        LauncherWait::StillRunning => Ok(terminal_name.into()),
+        LauncherWait::Unknown(reason) => Err(format!(
+            "could not confirm {terminal_name} launch: {reason}"
+        )),
+    }
+}
+
 /// Linux terminal emulators to try, in order, with the args each one needs.
 #[cfg(any(test, target_os = "linux"))]
 fn linux_launch_candidates() -> Vec<(&'static str, Vec<String>)> {
@@ -97,9 +178,15 @@ fn linux_launch_candidates() -> Vec<(&'static str, Vec<String>)> {
 ///
 /// Platform behaviour:
 ///   - Windows: `cmd /c start "" cmd /k claude auth login --claudeai`
-///   - macOS:   `osascript` → Terminal.app `do script "claude auth login --claudeai"`
-///   - Linux:   try `x-terminal-emulator`, then `gnome-terminal`,
-///              `konsole`, `xfce4-terminal`, `xterm` in that order
+///   - macOS: `osascript` → Terminal.app `do script "claude auth login --claudeai"`
+///   - Linux: try these terminal emulators in order:
+///     `x-terminal-emulator`, `gnome-terminal`, `konsole`,
+///     `xfce4-terminal`, `xterm`
+///
+/// On macOS the launcher's exit status is checked (bounded wait), so an
+/// Automation denial is reported instead of a successful spawn being
+/// reported as a successful launch (issue #8718). A launcher still running
+/// at the deadline is treated as a launch in progress, not a failure.
 #[tauri::command]
 pub fn claude_code_login_launch() -> Result<String, String> {
     #[cfg(target_os = "windows")]
@@ -113,11 +200,9 @@ pub fn claude_code_login_launch() -> Result<String, String> {
 
     #[cfg(target_os = "macos")]
     {
-        Command::new("osascript")
-            .args(["-e", &macos_launch_script()])
-            .spawn()
-            .map_err(|e| format!("failed to open Terminal.app: {e}"))?;
-        Ok("Terminal.app".into())
+        let mut cmd = Command::new("osascript");
+        cmd.args(["-e", &macos_launch_script()]);
+        run_launcher(cmd, MACOS_LAUNCH_WAIT, "Terminal.app")
     }
 
     #[cfg(target_os = "linux")]
