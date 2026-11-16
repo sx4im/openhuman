@@ -162,6 +162,45 @@ fn no_managed_catalog() -> crate::core::Outcome<serde_json::Value> {
     )
 }
 
+/// Built-in Claude model ids for the `claude-code` provider (issue #8717).
+///
+/// Claude Code runs as a local CLI and has no `/models` listing, so the
+/// picker cannot discover models over HTTP. These ids were verified against
+/// `claude -p --model <id>` on CLI 2.1.325; the `sonnet` / `opus` / `haiku`
+/// aliases are the CLI's own family shortcuts (the picker already defaults
+/// a claude-code source to `sonnet`).
+const CLAUDE_CODE_BUILTIN_MODEL_IDS: &[&str] = &[
+    "claude-opus-5-5",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-5-5",
+    "claude-sonnet-4-6",
+    "claude-haiku-5-5",
+    "claude-haiku-4-5",
+    "claude-fable-5-2",
+    "claude-fable-5-1",
+    "claude-fable-5",
+    "sonnet",
+    "opus",
+    "haiku",
+];
+
+fn claude_code_builtin_models() -> Vec<ModelInfo> {
+    CLAUDE_CODE_BUILTIN_MODEL_IDS
+        .iter()
+        .map(|id| ModelInfo {
+            id: id.to_string(),
+            owned_by: Some("anthropic".to_string()),
+            input_modalities: None,
+            context_window: None,
+            display_name: None,
+            input_per_1m: None,
+            output_per_1m: None,
+        })
+        .collect()
+}
+
 pub async fn list_configured_models_from_config(
     provider_id: &str,
     config: &crate::config::Config,
@@ -226,8 +265,29 @@ pub async fn list_configured_models_from_config(
     // endpoint `cli://claude-code`. It runs as a local CLI and has no `/models`
     // listing, and reqwest cannot build a request for a non-http(s) URL, so the
     // probe failed with "builder error" on every picker open. Such a provider
-    // has no remote catalog: answer with an empty one.
+    // has no remote catalog: answer with an empty one — except claude-code,
+    // whose picker would otherwise show no models at all (issue #8717).
+    // The built-in ids are the models the CLI itself accepts, so the picker
+    // lists them like every other provider. A claude-code entry re-pointed at
+    // a loopback server keeps the built-in list: the slug never probes, so
+    // there is no server to consult.
     if !endpoint_hosts_models_listing(&entry.slug, &entry.endpoint) {
+        if entry.slug == "claude-code" {
+            let models = claude_code_builtin_models();
+            log::info!(
+                "[providers][list_models] slug={} has no http(s) /models listing; returning {} built-in models",
+                entry.slug,
+                models.len()
+            );
+            return Ok(crate::core::Outcome::new(
+                serde_json::json!({ "models": models }),
+                vec![format!(
+                    "provider '{}' lists {} built-in models",
+                    entry.slug,
+                    models.len()
+                )],
+            ));
+        }
         log::debug!(
             "[providers][list_models] slug={} has no http(s) /models listing; returning an empty list",
             entry.slug
