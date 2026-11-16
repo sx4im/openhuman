@@ -31,7 +31,7 @@ RuntimeAuthority::resolve_access
 
 | File | Identifier | Commands |
 | --- | --- | --- |
-| [`allow-core-process.toml`](allow-core-process.toml) | `allow-core-process` | Core endpoint and lifecycle (`core_rpc_*`, `relay_http_rpc`, `relay_remote_socket`, `start_core_process`, `restart_core_process`, `reset_local_data`), app control (`restart_app`, `app_quit`), session (`get_active_user_id`, `auth_*`), native notifications, and log folder commands. |
+| [`allow-core-process.toml`](allow-core-process.toml) | `allow-core-process` | Core endpoint and lifecycle (`core_rpc_*`, `relay_http_rpc`, `relay_remote_socket`, `start_core_process`, `restart_core_process`, `reset_local_data`), app control (`restart_app`, `app_quit`), session (`get_active_user_id`, `auth_*`), native notifications, log folder commands, gateways, core update, port recovery, MCP settings, and the Claude Code login launcher (`claude_code_login_launch`). |
 | [`allow-app-update.toml`](allow-app-update.toml) | `allow-app-update` | `check_app_update`, `apply_app_update`, `download_app_update`, `install_app_update`. |
 | [`allow-workspace-files.toml`](allow-workspace-files.toml) | `allow-workspace-files` | `open_workspace_path`, `reveal_workspace_path`, `preview_workspace_text`. |
 | [`allow-artifact-download.toml`](allow-artifact-download.toml) | `allow-artifact-download` | `download_artifact_to_downloads`, `save_artifact_as`. |
@@ -48,23 +48,17 @@ RuntimeAuthority::resolve_access
 
 ## Gotchas
 
-These files have drifted from `generate_handler!` (checked against
-`src/lib.rs` when this README was written).
-
-Registered commands that no permission lists, so the webview cannot call them:
-`gateway_list`, `gateway_save`, `gateway_delete`, `gateway_activate`,
-`gateway_active`, `gateway_status`, `mcp_resolve_binary_path`,
-`mcp_open_client_config`, `claude_code_login_launch`, `mascot_window_show`,
-`mascot_window_hide`, `set_titlebar_for_sidebar`, `recover_port_conflict`,
-`force_quit_port_owner`, `check_core_update`, `apply_core_update`,
-`process_diagnostics_list_owned`.
-
-Listed commands that are no longer registered, which are harmless but stale:
-`service_install_direct`, `service_start_direct`, `service_stop_direct`,
-`service_status_direct`, `service_uninstall_direct`,
-`register_companion_hotkey`, `unregister_companion_hotkey`,
-`companion_activate`, `companion_start_session`, `companion_stop_session`,
-`companion_status`, `companion_config_get`, `companion_config_set`.
+These files and `generate_handler!` drifted apart before: commands such as
+`claude_code_login_launch` were registered but listed in no permission file,
+so the webview invoke was rejected with "Command not found" even though the
+handler existed (#8718; the entry landed in `allow-core-process.toml` in
+52654d77). The lists have since been reconciled — every command in
+`generate_handler!` is listed in one of these files, and the
+`login_launch_is_permitted_in_the_main_window` test in
+`src/claude_code_tests.rs` guards the Claude Code login command against
+regressing. Re-check the rest against `src/lib.rs` when adding a command:
+step 2 in "Adding a command" is the one that is easy to miss, and the build
+succeeds while the call only fails at runtime.
 
 Plugin permissions (`core:*`, `notification:*`, `opener:*`, `deep-link:*`,
 `updater:*`) are not defined here; they come from the plugins and are granted

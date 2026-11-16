@@ -74,3 +74,91 @@ fn xfce4_terminal_gets_one_string_and_the_others_get_argv() {
         }
     }
 }
+
+/// The macOS launcher must report a failed launch instead of treating a
+/// successful spawn as a successful launch (#8718): `osascript` exits
+/// non-zero when Automation is denied, and a spawn that succeeds says
+/// nothing about whether Terminal opened. Unix-only: the stand-in programs
+/// below do not exist on Windows.
+#[cfg(unix)]
+#[tokio::test]
+async fn macos_launcher_reports_nonzero_exit() {
+    let err = run_launcher("/usr/bin/false", &[], Duration::from_secs(5))
+        .await
+        .expect_err("a non-zero exit must be an error");
+    assert!(
+        err.contains("exited with code 1"),
+        "unexpected error: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn macos_launcher_reports_missing_executable() {
+    let err = run_launcher("/definitely/not/a/launcher", &[], Duration::from_secs(5))
+        .await
+        .expect_err("a missing launcher must be an error");
+    assert!(err.contains("failed to start"), "unexpected error: {err}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn macos_launcher_times_out_and_abandons_the_launch() {
+    let err = run_launcher("/bin/sleep", &["30"], Duration::from_millis(50))
+        .await
+        .expect_err("a launcher that never exits must time out");
+    assert!(
+        err.contains("did not exit within"),
+        "unexpected error: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn macos_launcher_accepts_zero_exit() {
+    run_launcher("/usr/bin/true", &[], Duration::from_secs(5))
+        .await
+        .expect("a zero exit is a successful launch");
+}
+
+/// The permission half of #8718: the command must be listed in the app's
+/// permission files and granted to the main window, or the webview invoke is
+/// rejected before Rust runs ("Command not found"). This guards the entry
+/// added to `allow-core-process.toml` by 52654d77 against being dropped in
+/// a future permission cleanup.
+#[test]
+fn login_launch_is_permitted_in_the_main_window() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let capability: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{manifest_dir}/capabilities/default.json"))
+            .expect("capabilities/default.json must exist"),
+    )
+    .expect("capabilities/default.json must be valid JSON");
+    let permissions = capability["permissions"]
+        .as_array()
+        .expect("capability must list permissions");
+    assert!(
+        permissions
+            .iter()
+            .any(|p| p.as_str() == Some("allow-core-process")),
+        "the default capability must grant allow-core-process to the main window"
+    );
+    let permission: toml::Value = std::fs::read_to_string(format!(
+        "{manifest_dir}/permissions/allow-core-process.toml"
+    ))
+    .expect("permissions/allow-core-process.toml must exist")
+    .parse()
+    .expect("allow-core-process.toml must be valid TOML");
+    let allow = permission
+        .get("permission")
+        .and_then(|p| p.get("commands"))
+        .and_then(|c| c.get("allow"))
+        .and_then(|a| a.as_array())
+        .expect("allow-core-process must list allowed commands");
+    assert!(
+        allow
+            .iter()
+            .any(|c| c.as_str() == Some("claude_code_login_launch")),
+        "allow-core-process must list claude_code_login_launch"
+    );
+}
